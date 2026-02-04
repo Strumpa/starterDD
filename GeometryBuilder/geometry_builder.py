@@ -1,4 +1,9 @@
-## Some helpful functiont to deal with GLOW geometry building
+## Some helpful functions to deal with GLOW geometry building
+# Author : R. Guasch
+# Date : 04/02/2026
+# ----------------------------------------------------------------------------
+
+
 from glow.geometry_layouts.cells import RectCell
 from glow.geometry_layouts.geometries import Rectangle
 from glow.support.types import GeometryType, PropertyType, SymmetryType
@@ -142,7 +147,8 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad
             tmp_cell = RectCell(
                 name=cell_id,
                 height_x_width=(pitch, pitch),
-                center=(pitch / 2, pitch / 2, 0.0),
+                #center=(pitch / 2, pitch / 2, 0.0),
+                center=(0.0, 0.0, 0.0),
                 rounded_corners=rounded_corners
             )
             mat_name = C_to_mat[cell_id]
@@ -206,12 +212,9 @@ def add_cells_to_regular_lattice(lattice, ordered_cells, cell_pitch, translation
                 print(f"Adding cell {cell.name} at position ({cell_idx}, {row_idx})")
                 print(f"cell_pitch: {cell_pitch}, translation: {translation}")
                 lattice.add_cell(
-                    cell,
-                    (
-                        (cell_idx + 0.5) * cell_pitch + translation,
-                        (row_idx + 0.5) * cell_pitch + translation,
-                        0.0
-                    )
+                    cell, ((cell_idx + 0.5) * cell_pitch + translation,
+                           (row_idx + 0.5) * cell_pitch + translation,
+                           0.0)
                 )
     return lattice
 
@@ -231,23 +234,22 @@ def export_glow_geom(output_path, output_file_name, lattice, tracking_option, ex
         Tracking option, either "TISO" or "TSPC"
 
     """
-    lattice.apply_symmetry(SymmetryType.FULL)
     if export_macro:
-        propertis_to_export = [PropertyType.MATERIAL, PropertyType.MACRO]
+        properties_to_export = [PropertyType.MATERIAL, PropertyType.MACRO]
     else:
-        propertis_to_export = [PropertyType.MATERIAL]
+        properties_to_export = [PropertyType.MATERIAL]
 
     if tracking_option == "TISO":
         lattice.type_geo = LatticeGeometryType.ISOTROPIC
         analyse_and_generate_tdt(
             [lattice], f"{output_path}/{output_file_name}", TdtSetup(GeometryType.SECTORIZED,
-                                             property_types=propertis_to_export,
+                                             property_types=properties_to_export,
                                              type_geo=LatticeGeometryType.ISOTROPIC,
                                              symmetry_type=BoundaryType.AXIAL_SYMMETRY))
     elif tracking_option == "TSPC":
-        lattice.type_geo = LatticeGeometryType.RECTANGLE_SYM
+        lattice.type_geo = LatticeGeometryType.RECTANGLE_SYM    
         analyse_and_generate_tdt(
             [lattice], f"{output_path}/{output_file_name}", TdtSetup(GeometryType.SECTORIZED,
-                                             property_types=propertis_to_export,
+                                             property_types=properties_to_export,
                                              type_geo=LatticeGeometryType.RECTANGLE_SYM,
                                              symmetry_type=BoundaryType.AXIAL_SYMMETRY))
