@@ -3,7 +3,7 @@
 ## Dragon and Donjon are part of the Version5 environment developped at Polytechnique Montréal and hosted on the OECD/NEA gitlab : https://git.oecd-nea.org/dragon/5.1 
 
 ## StarterDD is :
-a python package which helps users get a more user friendly experience with using Dragon and Donjon. 
+a python package aiming to help users get a more user friendly experience with using Dragon and Donjon. 
 ## The main modules are : 
 - GeometryBuilder : uses the GLOW application developped by newcleo, avaialble at https://github.com/newcleo-dev-team/glow for surface element geometry definition of complex lattice geometries.
 
