@@ -2,8 +2,7 @@
 # R.Guasch
 # Date : 05/02/2026
 
-from starterDD.MaterialProperties.material_mixture import MaterialMixture, Composition, XSData
-from starterDD.InterfaceToDD.dragon_module_calls import MAC
+from starterDD.MaterialProperties.material_mixture import MaterialMixture, Composition
 
 def generate_GE14_DRAGON_test():
     """

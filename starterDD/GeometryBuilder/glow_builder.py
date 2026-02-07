@@ -187,6 +187,67 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad
         lattice_components.append(row_of_cells)
     return lattice_components
 
+def generate_simple_cells(lattice_desc, pitch, C_to_mat, fuel_rad, gap_rad, clad_rad):
+    """
+    Generate RectCell objects for each individual subgeometry in the lattice
+    
+    Parameters:
+    -----------
+    lattice_desc : list of list of str
+        2D list describing the lattice layout with cell IDs
+    pitch : float
+        Pitch of each cell in the lattice
+    C_to_mat : dict
+        Mapping from cell IDs to material names
+    fuel_rad : float
+        Radius of the fuel region in fuel pins
+    gap_rad : float
+        Radius of the gap region in fuel pins
+    clad_rad : float
+        Radius of the cladding region in fuel pins
+    """
+    lattice_components = []
+    n_rows = len(lattice_desc)
+    n_cols = len(lattice_desc[0]) if lattice_desc else 0
+    
+    for row_idx in range(n_rows):
+        row = lattice_desc[row_idx]
+        row_of_cells = []
+        for cell_idx in range(len(row)):
+            cell_id = row[cell_idx]
+            
+            
+            tmp_cell = RectCell(
+                name=cell_id,
+                height_x_width=(pitch, pitch),
+                center=(0.0, 0.0, 0.0),
+            )
+            mat_name = C_to_mat[cell_id]
+            
+            if "ROD" in cell_id and "W" not in cell_id:
+                radii = [fuel_rad, gap_rad, clad_rad]
+            else:  # Water rod placeholder
+                radii = []
+                mat_name = "MODERATOR"
+            
+            for radius in radii:
+                tmp_cell.add_circle(radius)
+
+            if mat_name == "MODERATOR":
+                tmp_cell.set_properties({
+                    PropertyType.MATERIAL: ["MODERATOR"],
+                    PropertyType.MACRO: [f"MACRO{row_idx}{cell_idx}"]
+                })
+            else:
+                list_of_cell_mats = [mat_name, "GAP", "CLAD", "COOLANT"]
+                tmp_cell.set_properties({
+                    PropertyType.MATERIAL: list_of_cell_mats,
+                    PropertyType.MACRO: [f"MACRO{row_idx}{cell_idx}"] * len(list_of_cell_mats)
+                })
+            row_of_cells.append(tmp_cell)
+        lattice_components.append(row_of_cells)
+    return lattice_components
+
 
 def add_cells_to_regular_lattice(lattice, ordered_cells, cell_pitch, translation=0.0):
     """
@@ -236,8 +297,10 @@ def export_glow_geom(output_path, output_file_name, lattice, tracking_option, ex
     """
     if export_macro:
         properties_to_export = [PropertyType.MATERIAL, PropertyType.MACRO]
+        output_file_name = f"{output_file_name}_{tracking_option}_MACRO"
     else:
         properties_to_export = [PropertyType.MATERIAL]
+        output_file_name = f"{output_file_name}_{tracking_option}"
 
     if tracking_option == "TISO":
         lattice.type_geo = LatticeGeometryType.ISOTROPIC
@@ -253,3 +316,4 @@ def export_glow_geom(output_path, output_file_name, lattice, tracking_option, ex
                                              property_types=properties_to_export,
                                              type_geo=LatticeGeometryType.RECTANGLE_SYM,
                                              symmetry_type=BoundaryType.AXIAL_SYMMETRY))
+
