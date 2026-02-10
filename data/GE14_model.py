@@ -5,8 +5,8 @@
 from starterDD.MaterialProperties.material_mixture import MaterialMixture, Composition
 from starterDD.MaterialProperties.material_mixture import parse_all_compositions_from_yaml
 from starterDD.GeometryAnalysis.tdt_parser import read_material_mixture_indices_from_tdt_file
-from starterDD.DragonModel.assembly import AssemblyModel, CartesianPinModel
-from starterDD.DragonModel.helpers import associate_material_to_rod_ID
+from starterDD.DDModel.DragonModel import AssemblyModel, CartesianPinModel
+from starterDD.DDModel.helpers import associate_material_to_rod_ID
 
 # Goal : Create an assembly model and instantiate the Dragon Calculation Scheme builder
 # Model instantiation steps :

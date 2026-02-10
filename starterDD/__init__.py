@@ -15,7 +15,7 @@ The package works in two modes:
 # Import submodules
 from starterDD import MaterialProperties
 from starterDD import GeometryBuilder
-from starterDD import DragonModel
+from starterDD import DDModel
 from starterDD import GeometryAnalysis
 from starterDD import InterfaceToDD
 
@@ -26,7 +26,7 @@ __version__ = "0.1.0"
 __all__ = [
     "MaterialProperties",
     "GeometryBuilder", 
-    "DragonModel",
+    "DDModel",
     "GeometryAnalysis",
     "InterfaceToDD",
     "GLOW_AVAILABLE",
