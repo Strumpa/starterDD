@@ -23,7 +23,7 @@ def read_material_mixture_indices_from_tdt_file(tdt_file_path, tdt_file_name, tr
         tdt_data = file.read()
     
     # parse lines that would correspond to material definitions in the TDT file and extract material indices
-    # format is # <material_mixture_index>  - <material_name>
+    # format is # <material_mixture_index>  - <unique_material_name>
     extracted_material_mixture_indices = {}
     for line in tdt_data.splitlines():
         if material_names is not None:

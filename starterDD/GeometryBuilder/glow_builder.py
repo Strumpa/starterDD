@@ -11,36 +11,7 @@ from glow.geometry_layouts.lattices import Lattice
 from glow.main import TdtSetup, analyse_and_generate_tdt
 from glow.interface.geom_interface import *
 from glow.support.types import *
-
-
-def computeSantamarinaradii(fuel_radius, gap_radius, clad_radius, gadolinium=False):
-    """
-    Helper to define fuel region radii for fuel pins
-    A. Santamarina recommendations:
-    - UOX pins: 50%, 80%, 95% and 100% volume fractions
-    - Gd2O3 pins: 20%, 40%, 60%, 80%, 95% and 100% volume fractions
-    """
-    if not gadolinium:
-        pin_radii = [
-            (0.5**0.5) * fuel_radius,
-            (0.8**0.5) * fuel_radius,
-            (0.95**0.5) * fuel_radius,
-            fuel_radius,
-            gap_radius,
-            clad_radius
-        ]
-    else:
-        pin_radii = [
-            (0.2**0.5) * fuel_radius,
-            (0.4**0.5) * fuel_radius,
-            (0.6**0.5) * fuel_radius,
-            (0.8**0.5) * fuel_radius,
-            (0.95**0.5) * fuel_radius,
-            fuel_radius,
-            gap_radius,
-            clad_radius
-        ]
-    return pin_radii
+from .helpers import computeSantamarinaradii
 
 
 def make_grid_faces(parent: Rectangle, nx: int, ny: int):
@@ -116,7 +87,6 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad
     windmill : bool, optional
         Whether to apply windmill sectorization to fuel pins.
     """
-    #Gd_cells = ["ROD5G", "ROD6H", "ROD6K", "ROD7G", "ROD7H"]
     lattice_components = []
     n_rows = len(lattice_desc)
     n_cols = len(lattice_desc[0]) if lattice_desc else 0
@@ -147,11 +117,13 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad
             tmp_cell = RectCell(
                 name=cell_id,
                 height_x_width=(pitch, pitch),
-                #center=(pitch / 2, pitch / 2, 0.0),
                 center=(0.0, 0.0, 0.0),
                 rounded_corners=rounded_corners
             )
-            mat_name = C_to_mat[cell_id]
+            if C_to_mat is None:
+                mat_name = cell_id  # If no mapping provided, use cell ID as material name (assuming they match)
+            else:
+                mat_name = C_to_mat[cell_id]
             
             if cell_id in Gd_cells:
                 radii = computeSantamarinaradii(fuel_rad, gap_rad, clad_rad, gadolinium=True)
@@ -186,6 +158,7 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad
             row_of_cells.append(tmp_cell)
         lattice_components.append(row_of_cells)
     return lattice_components
+
 
 def generate_simple_cells(lattice_desc, pitch, C_to_mat, fuel_rad, gap_rad, clad_rad):
     """
