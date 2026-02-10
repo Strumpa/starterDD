@@ -3,9 +3,10 @@
 # Date : 09/02/2026 [created] 
 
 from starterDD.GeometryBuilder.helpers import computeSantamarinaradii
+from starterDD.MaterialProperties.material_mixture import MaterialMixture, Composition
 import yaml
 
-class AssemblyModel:
+class CartesianAssemblyModel:
     """
     Class representing an assembly / fuel bundle for DRAGON calculations. 
     Minimal atributes :
@@ -23,7 +24,7 @@ class AssemblyModel:
         self.parse_geometry_description(geometry_description_yaml)
         self.rod_ID_to_material_dict = None # this will be set later based on the material composition definition selected for the assembly, which can be based on rod IDs in the lattice description for example, in which case this dictionary will map rod IDs to material names for the fuel in the assembly.
         self.lattice = None # this will be a data structure representing the lattice of the assembly, which can be a 2D list of pin models corresponding to the lattice description, for example.
-
+    
     def parse_geometry_description(self, geometry_description_yaml):
         """
         The yaml file at geometry_description_yaml should contain the following information :
@@ -39,6 +40,7 @@ class AssemblyModel:
             - channel_box_thickness : thickness of the channel box surrounding the fuel pins in the assembly (if any)
             - corner_inner_radius_of_curvature : inner radius of curvature for the corners of the fuel pins in the assembly (if any)
             - Gd_rod_ids : list of material descriptors in the lattice description corresponding to Gd-bearing fuel pins, which should be treated with specific self-shielding
+            - water_rod_ids : list of material descriptors in the lattice description corresponding to water rods, which should be treated differently for self-shielding treatment in Dragon.
         As well as the PIN_GEOMETRY section describing the geometry of the different types of pins in the assembly (eg. fuel pin, guide tube, etc ...), with the following information for each type of pin :
             - fuel_radius : radius of the fuel region in the pin
             - gap_radius : radius of the gap region in the pin (if any)
@@ -56,6 +58,7 @@ class AssemblyModel:
         self.channel_box_thickness = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("channel_box_thickness", None)
         self.corner_inner_radius_of_curvature = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("corner_inner_radius_of_curvature", None)
         self.Gd_rod_ids = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("Gd_rod_ids", [])
+        self.water_rod_ids = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("water_rod_ids", [])
         self.geometry_type = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("lattice_type", "cartesian") # by default, assume cartesian geometry for the assembly
         self.reactor_type = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("reactor_type", "BWR") # by default, assume BWR type for the assembly, which can be used to define default self-shielding treatment strategies for the pins in the assembly based on the reactor type if no specific self-shielding option is provided for the pins in the geometry description.
 
@@ -71,9 +74,12 @@ class AssemblyModel:
             for descriptor in row:
                 if self.rod_ID_to_material_dict is not None:
                     material_name = self.rod_ID_to_material_dict.get(descriptor, None)
+                    rod_id = descriptor
                     print(f"Descriptor {descriptor} mapped to material name {material_name} based on rod ID to material mapping.")
                 else:                    
-                    material_name = None
+                    material_name = descriptor # if no mapping provided, use the descriptor in the lattice description as the material name for the pin geometry definition, but this would require that the descriptors in the lattice description are directly usable as material names for the pin geometry definition, which might not be the case depending on how the material compositions are defined for the assembly.
+                    rod_id = None
+                    print(f"No rod ID to material mapping provided, descriptor {descriptor} will be used as a material name for the pin geometry definition.")
                 pin_geometry_info = self.pin_geometry_dict # for now assume all pins have the same geometry information, but this can be updated later to allow for different pin geometries based on the material or rod ID for example by changing the structure of the pin_geometry_dict in the geometry description yaml file to allow for different geometry information for different types of pins.
                 if pin_geometry_info is not None:
                     fuel_radius = pin_geometry_info.get("fuel_radius", None)
@@ -82,22 +88,33 @@ class AssemblyModel:
                     height = pin_geometry_info.get("height", None)
                     self_shielding_option = pin_geometry_info.get("self_shielding_option", None)
                     options_dict = pin_geometry_info.get("options_dict", None)
+
                     if build_pins:
                         if descriptor in self.Gd_rod_ids:
                             isGd = True
                         else:     
                             isGd = False
-                        pin_model = CartesianPinModel(fuel_material_name=material_name, radii=[fuel_radius, gap_radius, clad_radius], height=height, isGd=isGd, self_shielding_option=self_shielding_option, options_dict=options_dict)
-                        # set the position of the pin in the lattice based on its indices in the lattice description
-                        x_index = self.lattice_description.index(row)
-                        y_index = row.index(descriptor)
-                        pin_model.set_position_in_lattice(x_index, y_index)
-                        # set the temperatures for the pin based on the uniform temperatures defined for the assembly
-                        pin_model.set_fuel_temperature(self.fuel_temperature)
-                        pin_model.set_clad_temperature(self.structural_temperature)
-                        pin_model.set_gap_temperature(self.gap_temperature)
-                        pin_model.set_coolant_temperature(self.coolant_temperature)
-                        lattice_row.append(pin_model)
+                        if descriptor not in self.water_rod_ids:
+                            pin_model = FuelPinModel(fuel_material_name=material_name, radii=[fuel_radius, gap_radius, clad_radius], height=height, isGd=isGd, self_shielding_option=self_shielding_option, options_dict=options_dict)
+                            pin_model.set_rod_ID(rod_id)
+                            # set the position of the pin in the lattice based on its indices in the lattice description
+                            x_index = self.lattice_description.index(row)
+                            y_index = row.index(descriptor)
+                            pin_model.set_position_in_lattice(x_index, y_index)
+                            # set the temperatures for the pin based on the uniform temperatures defined for the assembly
+                            pin_model.set_fuel_temperature(self.fuel_temperature)
+                            pin_model.set_clad_temperature(self.structural_temperature)
+                            pin_model.set_gap_temperature(self.gap_temperature)
+                            pin_model.set_coolant_temperature(self.coolant_temperature)
+                            lattice_row.append(pin_model)
+                        elif descriptor in self.water_rod_ids:
+                            pin_model = WaterRodModel(material_name=material_name)
+                            x_index = self.lattice_description.index(row)
+                            y_index = row.index(descriptor)
+                            pin_model.set_position_in_lattice(x_index, y_index)
+                            pin_model.set_moderator_temperature(self.moderator_temperature)
+                            pin_model.set_structural_temperature(self.structural_temperature)
+                            lattice_row.append(pin_model)
                     else:
                         lattice_row.append(descriptor) # if not building the pin models, just store the descriptor in the lattice data structure for now
                 else:
@@ -115,12 +132,203 @@ class AssemblyModel:
         self.lattice[x_index][y_index] = pin_model
 
 
-    def number_fuel_material_mixtures(self, numbering_strategy = "by_material", material_mixtures_dict = None):
+    def set_material_compositions(self, compositions):
         """
-        assign a material mixture index to each "physical" property of the fuel in the assembly based on a given numbering strategy, which can be "by_material" to assign the same material mixture index to all pins with the same fuel material, "by_pin" to assign a different material mixture index to each pin in the assembly, or "custom" to use a custom numbering strategy defined by the user through a provided material_mixtures_dict dictionary mapping pin descriptors in the lattice description to material mixture indices.
-        """
-        pass
+        Set the list of Composition objects for the assembly, typically parsed from a material compositions YAML file
+        using parse_all_compositions_from_yaml. This must be called before number_fuel_material_mixtures so that
+        each created MaterialMixture can be associated with the correct isotopic composition.
 
+        :param compositions (list[Composition]): List of Composition objects for the materials in the assembly.
+        """
+        self.compositions = compositions
+        # Build a lookup dict: material_name -> Composition
+        self.composition_lookup = {comp.material_name: comp for comp in compositions}
+
+    def number_fuel_material_mixtures(self, numbering_strategy="by_material"):
+        """
+        Assign a material mixture index to each fuel self-shielding zone in the assembly based on a given
+        numbering strategy. Also creates MaterialMixture objects with their associated Composition and assigns
+        them back to the pins.
+
+        Strategies:
+            - "by_material": pins sharing the same fuel_material_name are grouped together.
+              A unique material mixture index and name is created for each self-shielding zone
+              of each distinct fuel material (e.g. UOX16_zone_1, UOX16_zone_2, ...).
+            - "by_pin": (not yet implemented) each pin gets its own set of mixture indices.
+            - "custom": (not yet implemented) user supplies a mapping.
+
+        Prerequisites:
+            - The lattice must have been built (analyze_lattice_description called with build_pins=True).
+            - set_material_compositions must have been called so that Composition objects are available.
+        """
+
+        if not hasattr(self, 'composition_lookup') or self.composition_lookup is None:
+            raise RuntimeError(
+                "Material compositions have not been set. "
+                "Call set_material_compositions(compositions) before numbering fuel material mixtures."
+            )
+
+        if numbering_strategy == "by_material":
+            # ------------------------------------------------------------------
+            # Step 1: Identify unique fuel materials (preserving lattice order)
+            #         and record the number of self-shielding zones per material.
+            # ------------------------------------------------------------------
+            materials_iterated_through = []
+            material_to_zone_count = {}
+
+            for row in self.lattice:
+                for pin in row:
+                    if isinstance(pin, FuelPinModel) and pin.fuel_material_name not in materials_iterated_through:
+                        materials_iterated_through.append(pin.fuel_material_name)
+                        pin.count_number_of_fuel_radial_self_shielding_zones()
+                        material_to_zone_count[pin.fuel_material_name] = pin.number_of_self_shielding_fuel_zones
+
+            # ------------------------------------------------------------------
+            # Step 2: Build ordered unique material mixture names and assign
+            #         sequential indices starting from 1 (DRAGON convention).
+            # ------------------------------------------------------------------
+            unique_material_mixture_names = []
+            for material_name in materials_iterated_through:
+                n_zones = material_to_zone_count[material_name]
+                for zone_number in range(1, n_zones + 1):
+                    unique_material_mixture_names.append(f"{material_name}_zone_{zone_number}")
+
+            material_mixtures_dict = {}
+            for index, name in enumerate(unique_material_mixture_names):
+                material_mixtures_dict[name] = index + 1  # mixture indices start from 1 in DRAGON
+
+            self.material_mixtures_dict = material_mixtures_dict
+            self.fuel_material_mixture_names = list(unique_material_mixture_names)
+            self.fuel_material_mixture_indices = list(material_mixtures_dict.values())
+
+            # ------------------------------------------------------------------
+            # Step 3: Create MaterialMixture objects for each unique name,
+            #         associating the Composition from the loaded YAML data.
+            # ------------------------------------------------------------------
+            self.fuel_material_mixtures = []
+            for unique_name in unique_material_mixture_names:
+                # Extract the base material name (handles names with underscores)
+                base_material_name = unique_name.rsplit("_zone_", 1)[0]
+                mix_index = material_mixtures_dict[unique_name]
+
+                # Look up the Composition for this base material
+                composition = self.composition_lookup.get(base_material_name, None)
+                if composition is None:
+                    raise ValueError(
+                        f"No Composition found for fuel material '{base_material_name}'. "
+                        f"Ensure the material compositions YAML contains an entry with name='{base_material_name}'."
+                    )
+
+                # Get fuel temperature from any pin with this material
+                temperature = self._get_fuel_temperature_for_material(base_material_name)
+
+                depletable = getattr(composition, 'depletable', False)
+
+                mix = MaterialMixture(
+                    material_name=base_material_name,
+                    material_mixture_index=mix_index,
+                    composition=composition,
+                    temperature=temperature,
+                    isdepletable=depletable,
+                )
+                mix.set_unique_material_mixture_name(unique_name)
+                self.fuel_material_mixtures.append(mix)
+
+            # ------------------------------------------------------------------
+            # Step 4: Assign the created MaterialMixture objects back to each
+            #         FuelPinModel in the lattice so pins know their zone
+            #         indices and names.
+            # ------------------------------------------------------------------
+            for row in self.lattice:
+                for pin in row:
+                    if isinstance(pin, FuelPinModel):
+                        pin.count_number_of_fuel_radial_self_shielding_zones()
+                        n_zones = pin.number_of_self_shielding_fuel_zones
+                        pin_mixtures = []
+                        pin_mixture_indices = []
+                        pin_mixture_names = []
+                        for zone_number in range(1, n_zones + 1):
+                            zone_name = f"{pin.fuel_material_name}_zone_{zone_number}"
+                            mix_index = material_mixtures_dict[zone_name]
+                            # Locate the corresponding MaterialMixture object
+                            mix = next(
+                                m for m in self.fuel_material_mixtures
+                                if m.unique_material_mixture_name == zone_name
+                            )
+                            pin_mixtures.append(mix)
+                            pin_mixture_indices.append(mix_index)
+                            pin_mixture_names.append(zone_name)
+                        pin.fuel_material_mixtures = pin_mixtures
+                        pin.fuel_material_mixture_indices = pin_mixture_indices
+                        pin.fuel_material_mixture_names = pin_mixture_names
+
+            print(f"[by_material] Created {len(self.fuel_material_mixtures)} fuel material mixtures "
+                  f"for {len(materials_iterated_through)} unique fuel materials.")
+        else:
+            raise NotImplementedError(
+                f"Numbering strategy '{numbering_strategy}' is not yet implemented. "
+                f"Currently supported: 'by_material'."
+            )
+
+    def _get_fuel_temperature_for_material(self, material_name):
+        """
+        Return the fuel temperature from the first FuelPinModel in the lattice that matches the given material name.
+        """
+        for row in self.lattice:
+            for pin in row:
+                if isinstance(pin, FuelPinModel) and pin.fuel_material_name == material_name:
+                    return getattr(pin, 'fuel_temperature', 300.0)
+        return 300.0
+
+    def get_fuel_material_mixture_names(self):
+        """
+        Return the list of unique fuel material mixture names created by number_fuel_material_mixtures.
+        These names can be used for zone assignment in the geometry (e.g. GLOW PropertyType.MATERIAL).
+        """
+        if not hasattr(self, 'fuel_material_mixture_names'):
+            raise RuntimeError("Fuel material mixtures have not been numbered yet. Call number_fuel_material_mixtures first.")
+        return self.fuel_material_mixture_names
+
+    def get_fuel_material_mixture_indices(self):
+        """
+        Return the list of unique fuel material mixture indices created by number_fuel_material_mixtures.
+        These indices correspond 1-to-1 to the names returned by get_fuel_material_mixture_names.
+        """
+        if not hasattr(self, 'fuel_material_mixture_indices'):
+            raise RuntimeError("Fuel material mixtures have not been numbered yet. Call number_fuel_material_mixtures first.")
+        return self.fuel_material_mixture_indices
+
+    def get_fuel_material_mixtures(self):
+        """
+        Return the list of MaterialMixture objects created by number_fuel_material_mixtures.
+        Each object carries the unique name, index, Composition, temperature, and depletable flag.
+        """
+        if not hasattr(self, 'fuel_material_mixtures'):
+            raise RuntimeError("Fuel material mixtures have not been numbered yet. Call number_fuel_material_mixtures first.")
+        return self.fuel_material_mixtures
+
+
+    def count_number_of_pins(self):
+        """
+        count the number of pins in the assembly based on the lattice description, which can be used for example to define the number of material mixtures needed for a pin-wise numbering strategy.
+        """
+        num_pins = 0
+        for row in self.lattice_description:
+            for descriptor in row:
+                if descriptor not in self.water_rod_ids: # for now, we consider that water rods do not need a material mixture assigned to them for self-shielding treatment in Dragon, but this can be updated later to allow for specific material mixtures for water rods if needed based on the descriptors in the lattice description of the assembly model.
+                    num_pins += 1
+        return num_pins
+    
+    def count_number_of_unique_fuel_materials(self):
+        """
+        count the number of unique fuel materials in the assembly based on the lattice description, which can be used for example to define the number of material mixtures needed for a material-wise numbering strategy.
+        """
+        fuel_materials = set()
+        for row in self.lattice_description:
+            for descriptor in row:
+                if descriptor not in self.water_rod_ids: # for now, we consider that water rods do not have a fuel material assigned to them for self-shielding treatment in Dragon, but this can be updated later to allow for specific fuel materials for water rods if needed based on the descriptors in the lattice description of the assembly model.
+                    fuel_materials.add(descriptor)
+        return len(fuel_materials)
 
                 
     def set_rod_ID_to_material_mapping(self, rod_ID_to_material_dict):
@@ -142,7 +350,7 @@ class AssemblyModel:
         self.structural_temperature = structural_temperature
         return
 
-class CartesianPinModel:
+class FuelPinModel:
     """
     Class representing a pin in a cartesian assembly for DRAGON calculations. 
     Minimal atributes :
@@ -157,7 +365,7 @@ class CartesianPinModel:
     """
     def __init__(self, fuel_material_name, radii, height, isGd, self_shielding_option = "Santamarina", options_dict = None):
         self.fuel_material_name = fuel_material_name
-        self.radii = radii
+        self.technological_radii = radii # ordered fuel radius, gap radius, clad radius : test if gap radius is smaller or larger than fuel radius to define the order of the regions in the pin and the corresponding radii in the list, which can be used to automatically define the pin geometry based on the input radii and the self-shielding option selected for the pin.
         self.height = height
         self.isGd = isGd
         self.self_shielding_option = self_shielding_option
@@ -177,17 +385,53 @@ class CartesianPinModel:
 
         print(f"Created : Pin with fuel material {self.fuel_material_name} subdivided into radial zones with radii {self.radii} based on self-shielding option {self.self_shielding_option}.")
 
+
     def subdivide_into_Santamarina_radii(self):
-        # code to subdivide the pin into radial zones for self-shielding treatment in Dragon based on the Santamarina radii definition
-        self.radii = computeSantamarinaradii(self.radii[0], self.radii[1], self.radii[2], gadolinium=self.isGd)
-    
+        fuel_radius = self.technological_radii[0]
+        gap_radius = self.technological_radii[1]
+        clad_radius = self.technological_radii[2]
+        # subdivide the pin into radial zones for self-shielding treatment in Dragon based on the Santamarina radii definition
+        self.radii = computeSantamarinaradii(fuel_radius, gap_radius, clad_radius, gadolinium=self.isGd)
+
+
     def subdivide_into_radial_zones(self, num_radial_zones = None):
-        # code to subdivide the pin into a given number of radial zones for self-shielding treatment in Dragon based on an automatic subdivision of the fuel region
-        pass
+        # subdivide the pin into a given number of radial zones for self-shielding treatment in Dragon based on an automatic subdivision of the fuel region
+        # test if gap radius is smaller or larger than fuel radius to define the order of the regions in the pin and the corresponding radii in the list, which can be used to automatically define the pin geometry based on the input radii and the self-shielding option selected for the pin.
+        fuel_radius = self.technological_radii[0]
+        gap_radius = self.technological_radii[1]
+        clad_radius = self.technological_radii[2]
+        if gap_radius is not None and gap_radius < fuel_radius:
+            # in case expansion gap is inner most region, add it as the first radius and then compute the fuel radii based on the remaining fuel volume after subtracting the gap volume
+            # need to subdivide radial region fron gap radius to fuel radius into num_radial_zones zones with equal radial width for example, but other subdivision strategies could be implemented as well.
+            fuel_region_width = fuel_radius - gap_radius
+            zone_width = fuel_region_width / num_radial_zones
+            self.radii = [gap_radius + (i+1)*zone_width for i in range(num_radial_zones)]
+            if clad_radius is not None:
+                self.radii.append(clad_radius)
+        else:
+            # if gap radius is larger than fuel radius, we can just subdivide the fuel region into num_radial_zones zones with equal radial width for example, but other subdivision strategies could be implemented as well, and then add the gap radius and clad radius as the last radii in the list if they are defined.
+            zone_width = fuel_radius / num_radial_zones
+            self.radii = [(i+1)*zone_width for i in range(num_radial_zones)]
+            if gap_radius is not None:
+                self.radii.append(gap_radius)
+            if clad_radius is not None:
+                self.radii.append(clad_radius)
     
     def subdivide_into_user_defined_radii(self, user_defined_radii):
-        # code to subdivide the pin into radial zones for self-shielding treatment in Dragon based on user-defined radii
-        pass
+        # subdivide the pin into radial zones for self-shielding treatment in Dragon based on user-defined radii
+        self.radii = user_defined_radii
+
+
+    def count_number_of_fuel_radial_self_shielding_zones(self):
+        # identify if gap and clad radius are None
+        gap_radius = self.technological_radii[1]
+        clad_radius = self.technological_radii[2]
+        number_of_fuel_radial_zones = len(self.radii)
+        if gap_radius is not None:
+            number_of_fuel_radial_zones -= 1
+        if clad_radius is not None:
+            number_of_fuel_radial_zones -= 1
+        self.number_of_self_shielding_fuel_zones = number_of_fuel_radial_zones
 
     def set_position_in_lattice(self, x_index, y_index):
         """
@@ -219,3 +463,48 @@ class CartesianPinModel:
         set coolant temperature for the pin.
         """
         self.coolant_temperature = coolant_temperature
+
+    def set_rod_ID(self, rod_ID):
+        """
+        set the rod ID for the pin based on the descriptor in the lattice description of the assembly model, which can be used to assign material properties to the pin based on its rod ID in the lattice description.
+        """
+        self.rod_ID = rod_ID
+
+
+class WaterRodModel:
+    """
+    Class representing a water rod in a cartesian assembly for DRAGON calculations. 
+    Minimal atributes :
+        - material_name : name of the material assigned to the water rod (eg. WATER)
+        - pitch : regular pitch of the water rod in the lattice
+        - radius : radius of the water rod
+        - height : height of the water rod
+    Methods :
+        - set_structural_temperature : method to set the structural temperature for the water rod, which can be used for temperature-dependent self-shielding treatment in Dragon.
+    """
+    def __init__(self, material_name):
+        self.material_name = material_name
+        # in order to treat water rod regions, do not specify geometry : 
+        # for now but use WaterRodModel class to identify the water rod regions to skip them when numbering the fuel material mixtures for self-shielding.
+        #self.radius = radius
+        #self.height = height
+        self.rod_ID = "WROD" # for now, assign a default rod ID for water rods, but this can be updated later to allow for different types of water rods with different rod IDs based on the descriptors in the lattice description of the assembly model.
+
+    def set_moderator_temperature(self, moderator_temperature):
+        """
+        set moderator temperature for the water rod, which can be used for temperature-dependent self-shielding treatment in Dragon.
+        """
+        self.moderator_temperature = moderator_temperature
+
+    def set_structural_temperature(self, structural_temperature):
+        """
+        set structural temperature for the water rod, which can be used for temperature-dependent self-shielding treatment in Dragon.
+        """
+        self.structural_temperature = structural_temperature
+
+    def set_position_in_lattice(self, x_index, y_index):
+        """
+        set water rod position in the lattice based on x and y indices in the lattice description of the assembly model. 
+        """
+        self.x_index = x_index
+        self.y_index = y_index

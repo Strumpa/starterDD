@@ -14,14 +14,14 @@ def computeSantamarinaradii(fuel_radius, gap_radius, clad_radius, gadolinium=Fal
         # in case expansion gap is inner most region, add it as the first radius and then compute the fuel radii based on the remaining fuel volume after subtracting the gap volume
         pin_radii.append(gap_radius)
     if not gadolinium:
-        pin_radii.append([
+        pin_radii.extend([
             (0.5**0.5) * fuel_radius,
             (0.8**0.5) * fuel_radius,
             (0.95**0.5) * fuel_radius,
             fuel_radius
         ])
     else:
-        pin_radii.append([
+        pin_radii.extend([
             (0.2**0.5) * fuel_radius,
             (0.4**0.5) * fuel_radius,
             (0.6**0.5) * fuel_radius,

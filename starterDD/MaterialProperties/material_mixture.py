@@ -83,6 +83,14 @@ class MaterialMixture:
         """
         self.xs_data = xs_data
 
+    def set_unique_material_mixture_name(self, unique_material_mixture_name: str):
+        """
+        Set a unique name for the material mixture.
+        
+        :param unique_material_mixture_name (str): Unique name for the material mixture
+        """
+        self.unique_material_mixture_name = unique_material_mixture_name
+
 class XSData:
     def __init__(self, mixture_index: int, cross_section_type: str, data: dict):
         """
