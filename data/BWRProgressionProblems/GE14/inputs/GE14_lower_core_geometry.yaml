@@ -1,0 +1,34 @@
+# Geometry description for the GE14 BWR progression problem.
+# This file describes the geometry of the pincell, including the fuel radius, gap radius, clad radius, and the number of fuel zones. 
+# This information is used to build the pincell geometry.
+
+PIN_GEOMETRY:
+  fuel_radius: 0.438
+  gap_radius: 0.447
+  clad_radius: 0.515
+  pin_pitch: 1.3
+  self_shielding_option: "automatic" #"Santamarina"
+  options_dict: {"num_radial_zones": 1} # only used if self_shielding_option is set to "automatic"
+
+ASSEMBLY_GEOMETRY:
+  lattice_type: "Cartesian"
+  reactor_type: "BWR"
+  lattice_description:
+    - ["ROD2", "ROD5", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD3"]
+    - ["ROD5", "ROD5", "ROD6H", "ROD7", "ROD7", "ROD7G", "ROD7", "ROD7G", "ROD7", "ROD7"]
+    - ["ROD5", "ROD6H", "ROD6", "ROD7", "ROD7", "ROD7", "ROD7G", "ROD7", "ROD7G", "ROD7"]
+    - ["ROD5", "ROD5", "ROD6H", "WROD", "WROD", "ROD7", "ROD7", "ROD7G", "ROD7", "ROD7"]
+    - ["ROD5", "ROD5G", "ROD6", "WROD", "WROD", "ROD7", "ROD7", "ROD7", "ROD7G", "ROD7"]
+    - ["ROD5", "ROD4", "ROD7H", "ROD5", "ROD7", "WROD", "WROD", "ROD7", "ROD7", "ROD7"]
+    - ["ROD5", "ROD5", "ROD6", "ROD7G", "ROD5", "WROD", "WROD", "ROD7", "ROD7", "ROD7"]
+    - ["ROD3", "ROD3", "ROD6K", "ROD6", "ROD7H", "ROD6", "ROD6H", "ROD6", "ROD6H", "ROD7"]
+    - ["ROD2", "ROD2", "ROD3", "ROD5", "ROD4", "ROD5G", "ROD5", "ROD6H", "ROD5", "ROD5"]
+    - ["ROD1", "ROD2", "ROD3", "ROD5", "ROD5", "ROD5", "ROD5", "ROD5", "ROD5", "ROD2"]
+
+  assembly_pitch: 15.24
+  gap_wide: 0.7549
+  channel_box_thickness: 0.1651
+  corner_inner_radius_of_curvature: 0.965
+
+  Gd_rod_ids: ["ROD5G", "ROD6H", "ROD6K", "ROD7G", "ROD7H"]
+  water_rod_ids: ["WROD"]

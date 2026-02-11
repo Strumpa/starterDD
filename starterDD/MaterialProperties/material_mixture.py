@@ -41,7 +41,7 @@ class Composition:
         """
         self.isotope_name_composition = {}
         for zaid in self.isotopic_composition.keys():
-            print(f"Converting ZAID {zaid} to isotope name...")
+            #print(f"Converting ZAID {zaid} to isotope name...")
             # Extract Z and A from the ZAID
             Z = int(float(zaid)//1000)  # Z is the part before the last three digits
             A = int(float(zaid) - Z*1000)   # A is the last three digits
@@ -49,6 +49,15 @@ class Composition:
             isotope_name = f"{element_symbol}{A}"
             # update the isotopic composition dict with the isotope name as key instead of ZAID
             self.isotope_name_composition[isotope_name] = self.isotopic_composition[zaid]  # copy the density value to the new key
+
+    def get_isotope_name_composition(self):
+        """
+        Return the isotope-name-keyed composition dictionary.
+        If the original composition used ZAID keys, the converted dict is returned;
+        otherwise the original isotopic_composition is returned as-is (assumed to
+        already use isotope name keys).
+        """
+        return getattr(self, 'isotope_name_composition', self.isotopic_composition)
 
 class MaterialMixture:
     def __init__(self, material_name: str, material_mixture_index: int, composition: Composition, temperature:float, isdepletable: bool = False):
@@ -74,6 +83,8 @@ class MaterialMixture:
         self.composition = composition
         self.temperature = temperature
         self.isdepletable = isdepletable
+        self.is_generating = False  # True if this is a "generating" mix (first mix with a given composition)
+        self.generating_mix = None  # reference to the generating MaterialMixture if this is a "daughter" mix
 
     def set_cross_sectional_data(self, xs_data):
         """

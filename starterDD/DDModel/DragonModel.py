@@ -144,7 +144,7 @@ class CartesianAssemblyModel:
         # Build a lookup dict: material_name -> Composition
         self.composition_lookup = {comp.material_name: comp for comp in compositions}
 
-    def number_fuel_material_mixtures(self, numbering_strategy="by_material"):
+    def number_fuel_material_mixtures_by_material(self):
         """
         Assign a material mixture index to each fuel self-shielding zone in the assembly based on a given
         numbering strategy. Also creates MaterialMixture objects with their associated Composition and assigns
@@ -168,107 +168,321 @@ class CartesianAssemblyModel:
                 "Call set_material_compositions(compositions) before numbering fuel material mixtures."
             )
 
-        if numbering_strategy == "by_material":
-            # ------------------------------------------------------------------
-            # Step 1: Identify unique fuel materials (preserving lattice order)
-            #         and record the number of self-shielding zones per material.
-            # ------------------------------------------------------------------
-            materials_iterated_through = []
-            material_to_zone_count = {}
+        
+        # ------------------------------------------------------------------
+        # Step 1: Identify unique fuel materials (preserving lattice order)
+        #         and record the number of self-shielding zones per material.
+        # ------------------------------------------------------------------
+        materials_iterated_through = []
+        material_to_zone_count = {}
 
-            for row in self.lattice:
-                for pin in row:
-                    if isinstance(pin, FuelPinModel) and pin.fuel_material_name not in materials_iterated_through:
-                        materials_iterated_through.append(pin.fuel_material_name)
-                        pin.count_number_of_fuel_radial_self_shielding_zones()
-                        material_to_zone_count[pin.fuel_material_name] = pin.number_of_self_shielding_fuel_zones
+        for row in self.lattice:
+            for pin in row:
+                if isinstance(pin, FuelPinModel) and pin.fuel_material_name not in materials_iterated_through:
+                    materials_iterated_through.append(pin.fuel_material_name)
+                    pin.count_number_of_fuel_radial_self_shielding_zones()
+                    material_to_zone_count[pin.fuel_material_name] = pin.number_of_self_shielding_fuel_zones
 
-            # ------------------------------------------------------------------
-            # Step 2: Build ordered unique material mixture names and assign
-            #         sequential indices starting from 1 (DRAGON convention).
-            # ------------------------------------------------------------------
-            unique_material_mixture_names = []
-            for material_name in materials_iterated_through:
-                n_zones = material_to_zone_count[material_name]
-                for zone_number in range(1, n_zones + 1):
-                    unique_material_mixture_names.append(f"{material_name}_zone_{zone_number}")
+        # ------------------------------------------------------------------
+        # Step 2: Build ordered unique material mixture names and assign
+        #         sequential indices starting from 1 (DRAGON convention).
+        # ------------------------------------------------------------------
+        unique_material_mixture_names = []
+        for material_name in materials_iterated_through:
+            n_zones = material_to_zone_count[material_name]
+            for zone_number in range(1, n_zones + 1):
+                unique_material_mixture_names.append(f"{material_name}_zone_{zone_number}")
 
-            material_mixtures_dict = {}
-            for index, name in enumerate(unique_material_mixture_names):
-                material_mixtures_dict[name] = index + 1  # mixture indices start from 1 in DRAGON
+        material_mixtures_dict = {}
+        for index, name in enumerate(unique_material_mixture_names):
+            material_mixtures_dict[name] = index + 1  # mixture indices start from 1 in DRAGON
 
-            self.material_mixtures_dict = material_mixtures_dict
-            self.fuel_material_mixture_names = list(unique_material_mixture_names)
-            self.fuel_material_mixture_indices = list(material_mixtures_dict.values())
+        self.material_mixtures_dict = material_mixtures_dict
+        self.fuel_material_mixture_names = list(unique_material_mixture_names)
+        self.fuel_material_mixture_indices = list(material_mixtures_dict.values())
 
-            # ------------------------------------------------------------------
-            # Step 3: Create MaterialMixture objects for each unique name,
-            #         associating the Composition from the loaded YAML data.
-            # ------------------------------------------------------------------
-            self.fuel_material_mixtures = []
-            for unique_name in unique_material_mixture_names:
-                # Extract the base material name (handles names with underscores)
-                base_material_name = unique_name.rsplit("_zone_", 1)[0]
-                mix_index = material_mixtures_dict[unique_name]
+        # ------------------------------------------------------------------
+        # Step 3: Create MaterialMixture objects for each unique name,
+        #         associating the Composition from the loaded YAML data.
+        # ------------------------------------------------------------------
+        self.fuel_material_mixtures = []
+        for unique_name in unique_material_mixture_names:
+            # Extract the base material name (handles names with underscores)
+            base_material_name = unique_name.rsplit("_zone_", 1)[0]
+            mix_index = material_mixtures_dict[unique_name]
 
-                # Look up the Composition for this base material
-                composition = self.composition_lookup.get(base_material_name, None)
-                if composition is None:
-                    raise ValueError(
-                        f"No Composition found for fuel material '{base_material_name}'. "
-                        f"Ensure the material compositions YAML contains an entry with name='{base_material_name}'."
-                    )
-
-                # Get fuel temperature from any pin with this material
-                temperature = self._get_fuel_temperature_for_material(base_material_name)
-
-                depletable = getattr(composition, 'depletable', False)
-
-                mix = MaterialMixture(
-                    material_name=base_material_name,
-                    material_mixture_index=mix_index,
-                    composition=composition,
-                    temperature=temperature,
-                    isdepletable=depletable,
+            # Look up the Composition for this base material
+            composition = self.composition_lookup.get(base_material_name, None)
+            if composition is None:
+                raise ValueError(
+                    f"No Composition found for fuel material '{base_material_name}'. "
+                    f"Ensure the material compositions YAML contains an entry with name='{base_material_name}'."
                 )
-                mix.set_unique_material_mixture_name(unique_name)
-                self.fuel_material_mixtures.append(mix)
 
-            # ------------------------------------------------------------------
-            # Step 4: Assign the created MaterialMixture objects back to each
-            #         FuelPinModel in the lattice so pins know their zone
-            #         indices and names.
-            # ------------------------------------------------------------------
-            for row in self.lattice:
-                for pin in row:
-                    if isinstance(pin, FuelPinModel):
+            # Get fuel temperature from any pin with this material
+            temperature = self._get_fuel_temperature_for_material(base_material_name)
+            print(temperature)
+            depletable = getattr(composition, 'depletable', False)
+
+            mix = MaterialMixture(
+                material_name=base_material_name,
+                material_mixture_index=mix_index,
+                composition=composition,
+                temperature=temperature,
+                isdepletable=depletable,
+            )
+            mix.set_unique_material_mixture_name(unique_name)
+            self.fuel_material_mixtures.append(mix)
+
+        # ------------------------------------------------------------------
+        # Step 4: Assign the created MaterialMixture objects back to each
+        #         FuelPinModel in the lattice so pins know their zone
+        #         indices and names.
+        # ------------------------------------------------------------------
+        for row in self.lattice:
+            for pin in row:
+                if isinstance(pin, FuelPinModel):
+                    pin.count_number_of_fuel_radial_self_shielding_zones()
+                    n_zones = pin.number_of_self_shielding_fuel_zones
+                    pin_mixtures = []
+                    pin_mixture_indices = []
+                    pin_mixture_names = []
+                    for zone_number in range(1, n_zones + 1):
+                        zone_name = f"{pin.fuel_material_name}_zone_{zone_number}"
+                        mix_index = material_mixtures_dict[zone_name]
+                        # Locate the corresponding MaterialMixture object
+                        mix = next(
+                            m for m in self.fuel_material_mixtures
+                            if m.unique_material_mixture_name == zone_name
+                        )
+                        pin_mixtures.append(mix)
+                        pin_mixture_indices.append(mix_index)
+                        pin_mixture_names.append(zone_name)
+                    pin.fuel_material_mixtures = pin_mixtures
+                    pin.fuel_material_mixture_indices = pin_mixture_indices
+                    pin.fuel_material_mixture_names = pin_mixture_names
+
+        print(f"[by_material] Created {len(self.fuel_material_mixtures)} fuel material mixtures "
+                f"for {len(materials_iterated_through)} unique fuel materials.")
+
+    def check_diagonal_symmetry(self):
+        """
+        Check whether the lattice description has any diagonal symmetry.
+
+        Checks anti-diagonal symmetry first (axis from top-left to bottom-right
+        in physical space), then main-diagonal (transpose) symmetry.
+
+        Returns
+        -------
+        str or None
+            ``"anti-diagonal"`` if ``lattice[i][j] == lattice[n-1-j][n-1-i]``,
+            ``"main-diagonal"`` if ``lattice[i][j] == lattice[j][i]``,
+            ``None`` if no diagonal symmetry is found.
+            If both symmetries hold, ``"anti-diagonal"`` is returned
+            (priority for physical BWR convention).
+        """
+        if self.check_anti_diagonal_symmetry():
+            return "anti-diagonal"
+        if self.check_main_diagonal_symmetry():
+            return "main-diagonal"
+        return None
+
+    def check_anti_diagonal_symmetry(self):
+        """
+        Check whether the lattice description is symmetric about the
+        anti-diagonal, i.e. the axis joining (x_min, y_max) (top-left) to
+        (x_max, y_min) (bottom-right) in physical space.
+
+        Matrix condition: ``lattice[i][j] == lattice[n-1-j][n-1-i]``.
+
+        Returns
+        -------
+        bool
+        """
+        n = len(self.lattice_description)
+        for row in self.lattice_description:
+            if len(row) != n:
+                return False
+        for i in range(n):
+            for j in range(n):
+                if self.lattice_description[i][j] != self.lattice_description[n - 1 - j][n - 1 - i]:
+                    return False
+        return True
+
+    def check_main_diagonal_symmetry(self):
+        """
+        Check whether the lattice description is symmetric about its main
+        diagonal (transpose symmetry).
+
+        Matrix condition: ``lattice[i][j] == lattice[j][i]``.
+
+        Returns
+        -------
+        bool
+        """
+        n = len(self.lattice_description)
+        for row in self.lattice_description:
+            if len(row) != n:
+                return False
+        for i in range(n):
+            for j in range(i + 1, n):
+                if self.lattice_description[i][j] != self.lattice_description[j][i]:
+                    return False
+        return True
+
+    def number_fuel_material_mixtures_by_pin(self):
+        """
+        Assign a unique set of material mixture indices to every self-shielding
+        zone in every fuel pin, so that each pin can be depleted independently.
+
+        Naming convention::
+
+            <material_composition>_zone<zone_idx>_pin<pin_idx>
+
+        If the lattice has diagonal symmetry (anti-diagonal or main-diagonal),
+        pins at mirrored positions share the same ``pin_idx`` (and therefore
+        the same material mixture objects), reducing the number of unique
+        mixtures.
+
+        The symmetry detection is done automatically by
+        ``check_diagonal_symmetry()``, which checks anti-diagonal first
+        (the standard BWR convention), then main-diagonal.
+
+        Prerequisites
+        -------------
+        * ``analyze_lattice_description(build_pins=True)`` must have been called.
+        * ``set_material_compositions(compositions)`` must have been called.
+        """
+        if not hasattr(self, 'composition_lookup') or self.composition_lookup is None:
+            raise RuntimeError(
+                "Material compositions have not been set. "
+                "Call set_material_compositions(compositions) before numbering fuel material mixtures."
+            )
+
+        # ------------------------------------------------------------------
+        # Step 1: Detect diagonal symmetry
+        # ------------------------------------------------------------------
+        symmetry_type = self.check_diagonal_symmetry()  # "anti-diagonal", "main-diagonal", or None
+        self.lattice_has_diagonal_symmetry = symmetry_type
+
+        # ------------------------------------------------------------------
+        # Step 2: Assign a pin_idx to every fuel-pin position.
+        #         Symmetric partners share the same pin_idx.
+        # ------------------------------------------------------------------
+        pin_idx_counter = 0
+        position_to_pin_idx = {}  # (row, col) → pin_idx
+
+        n_rows = len(self.lattice)
+        for i in range(n_rows):
+            for j in range(len(self.lattice[i])):
+                pin = self.lattice[i][j]
+                if isinstance(pin, FuelPinModel) and (i, j) not in position_to_pin_idx:
+                    pin_idx_counter += 1
+                    position_to_pin_idx[(i, j)] = pin_idx_counter
+                    # If symmetric, mirror partner gets same idx
+                    if symmetry_type is not None:
+                        if symmetry_type == "anti-diagonal":
+                            mirror = (n_rows - 1 - j, n_rows - 1 - i)
+                        else:  # "main-diagonal"
+                            mirror = (j, i)
+                        if mirror != (i, j) and mirror not in position_to_pin_idx:
+                            mirror_pin = self.lattice[mirror[0]][mirror[1]]
+                            if isinstance(mirror_pin, FuelPinModel):
+                                position_to_pin_idx[mirror] = pin_idx_counter
+
+        # ------------------------------------------------------------------
+        # Step 3: Build ordered unique material mixture names.
+        #         Traverse the lattice row by row; for each *new* (material,
+        #         pin_idx) pair, emit zone entries.
+        # ------------------------------------------------------------------
+        unique_material_mixture_names = []
+        seen_combos = set()  # (material_name, pin_idx)
+
+        for i in range(n_rows):
+            for j in range(len(self.lattice[i])):
+                pin = self.lattice[i][j]
+                if isinstance(pin, FuelPinModel):
+                    pin_idx = position_to_pin_idx[(i, j)]
+                    combo = (pin.fuel_material_name, pin_idx)
+                    if combo not in seen_combos:
+                        seen_combos.add(combo)
                         pin.count_number_of_fuel_radial_self_shielding_zones()
                         n_zones = pin.number_of_self_shielding_fuel_zones
-                        pin_mixtures = []
-                        pin_mixture_indices = []
-                        pin_mixture_names = []
                         for zone_number in range(1, n_zones + 1):
-                            zone_name = f"{pin.fuel_material_name}_zone_{zone_number}"
-                            mix_index = material_mixtures_dict[zone_name]
-                            # Locate the corresponding MaterialMixture object
-                            mix = next(
-                                m for m in self.fuel_material_mixtures
-                                if m.unique_material_mixture_name == zone_name
+                            unique_material_mixture_names.append(
+                                f"{pin.fuel_material_name}_zone{zone_number}_pin{pin_idx}"
                             )
-                            pin_mixtures.append(mix)
-                            pin_mixture_indices.append(mix_index)
-                            pin_mixture_names.append(zone_name)
-                        pin.fuel_material_mixtures = pin_mixtures
-                        pin.fuel_material_mixture_indices = pin_mixture_indices
-                        pin.fuel_material_mixture_names = pin_mixture_names
 
-            print(f"[by_material] Created {len(self.fuel_material_mixtures)} fuel material mixtures "
-                  f"for {len(materials_iterated_through)} unique fuel materials.")
-        else:
-            raise NotImplementedError(
-                f"Numbering strategy '{numbering_strategy}' is not yet implemented. "
-                f"Currently supported: 'by_material'."
+        # Sequential indices starting from 1
+        material_mixtures_dict = {
+            name: idx + 1 for idx, name in enumerate(unique_material_mixture_names)
+        }
+
+        self.material_mixtures_dict = material_mixtures_dict
+        self.fuel_material_mixture_names = list(unique_material_mixture_names)
+        self.fuel_material_mixture_indices = list(material_mixtures_dict.values())
+
+        # ------------------------------------------------------------------
+        # Step 4: Create MaterialMixture objects
+        # ------------------------------------------------------------------
+        self.fuel_material_mixtures = []
+        for unique_name in unique_material_mixture_names:
+            # Extract base material name from "<material>_zone<N>_pin<M>"
+            base_material_name = unique_name.rsplit("_zone", 1)[0]
+            mix_index = material_mixtures_dict[unique_name]
+
+            composition = self.composition_lookup.get(base_material_name, None)
+            if composition is None:
+                raise ValueError(
+                    f"No Composition found for fuel material '{base_material_name}'. "
+                    f"Ensure the material compositions YAML contains an entry with name='{base_material_name}'."
+                )
+
+            temperature = self._get_fuel_temperature_for_material(base_material_name)
+            depletable = getattr(composition, 'depletable', False)
+
+            mix = MaterialMixture(
+                material_name=base_material_name,
+                material_mixture_index=mix_index,
+                composition=composition,
+                temperature=temperature,
+                isdepletable=depletable,
             )
+            mix.set_unique_material_mixture_name(unique_name)
+            self.fuel_material_mixtures.append(mix)
+
+        # ------------------------------------------------------------------
+        # Step 5: Assign to each FuelPinModel
+        # ------------------------------------------------------------------
+        for i in range(n_rows):
+            for j in range(len(self.lattice[i])):
+                pin = self.lattice[i][j]
+                if isinstance(pin, FuelPinModel):
+                    pin_idx = position_to_pin_idx[(i, j)]
+                    pin.pin_idx = pin_idx
+                    pin.count_number_of_fuel_radial_self_shielding_zones()
+                    n_zones = pin.number_of_self_shielding_fuel_zones
+                    pin_mixtures = []
+                    pin_mixture_indices = []
+                    pin_mixture_names = []
+                    for zone_number in range(1, n_zones + 1):
+                        zone_name = f"{pin.fuel_material_name}_zone{zone_number}_pin{pin_idx}"
+                        mix_index = material_mixtures_dict[zone_name]
+                        mix = next(
+                            m for m in self.fuel_material_mixtures
+                            if m.unique_material_mixture_name == zone_name
+                        )
+                        pin_mixtures.append(mix)
+                        pin_mixture_indices.append(mix_index)
+                        pin_mixture_names.append(zone_name)
+                    pin.fuel_material_mixtures = pin_mixtures
+                    pin.fuel_material_mixture_indices = pin_mixture_indices
+                    pin.fuel_material_mixture_names = pin_mixture_names
+
+        n_unique_pins = pin_idx_counter
+        print(f"[by_pin] Diagonal symmetry detected: {symmetry_type}")
+        print(f"[by_pin] Created {len(self.fuel_material_mixtures)} fuel material mixtures "
+              f"for {n_unique_pins} unique fuel pin positions.")
 
     def _get_fuel_temperature_for_material(self, material_name):
         """
@@ -279,6 +493,62 @@ class CartesianAssemblyModel:
                 if isinstance(pin, FuelPinModel) and pin.fuel_material_name == material_name:
                     return getattr(pin, 'fuel_temperature', 300.0)
         return 300.0
+
+    def identify_generating_and_daughter_mixes(self):
+        """
+        Group fuel material mixtures by their base composition (material_name).
+
+        The **first** ``MaterialMixture`` encountered for each unique
+        ``material_name`` is the **generating mix** – it receives a full
+        isotopic composition definition in the DRAGON5 ``LIB:`` module call.
+        All subsequent mixtures with the same ``material_name`` are **daughter
+        mixes** – they share the same initial composition and are defined via
+        ``COMB`` duplication from their generating mix.
+
+        This distinction is important for DRAGON5:
+        * Generating mixes define the reference isotopic vector.
+        * Daughter mixes are lightweight copies (``MIX <<name>> COMB
+          <<generating>> 1.0``) that support zone-wise self-shielding
+          and independent depletion tracking while keeping the library
+          creation compact.
+
+        The method sets on each ``MaterialMixture``:
+        * ``is_generating`` (bool)
+        * ``generating_mix`` (``MaterialMixture`` or ``None``)
+
+        And stores on the assembly model:
+        * ``self.generating_mixes`` – ordered list of generating mixes
+        * ``self.daughter_mixes`` – ordered list of daughter mixes
+
+        Prerequisites
+        -------------
+        * One of ``number_fuel_material_mixtures_by_material()`` or
+          ``number_fuel_material_mixtures_by_pin()`` must have been called.
+        """
+        if not hasattr(self, 'fuel_material_mixtures') or self.fuel_material_mixtures is None:
+            raise RuntimeError(
+                "Fuel material mixtures have not been numbered yet. "
+                "Call number_fuel_material_mixtures_by_material() or "
+                "number_fuel_material_mixtures_by_pin() first."
+            )
+
+        seen_compositions = {}  # material_name → first MaterialMixture
+        self.generating_mixes = []
+        self.daughter_mixes = []
+
+        for mix in self.fuel_material_mixtures:
+            if mix.material_name not in seen_compositions:
+                mix.is_generating = True
+                mix.generating_mix = None
+                seen_compositions[mix.material_name] = mix
+                self.generating_mixes.append(mix)
+            else:
+                mix.is_generating = False
+                mix.generating_mix = seen_compositions[mix.material_name]
+                self.daughter_mixes.append(mix)
+
+        print(f"[identify_mixes] Found {len(self.generating_mixes)} generating mixes "
+              f"and {len(self.daughter_mixes)} daughter mixes.")
 
     def get_fuel_material_mixture_names(self):
         """
@@ -306,6 +576,90 @@ class CartesianAssemblyModel:
         if not hasattr(self, 'fuel_material_mixtures'):
             raise RuntimeError("Fuel material mixtures have not been numbered yet. Call number_fuel_material_mixtures first.")
         return self.fuel_material_mixtures
+
+    def enforce_material_mixture_indices_from_tdt(self, tdt_indices_dict):
+        """
+        Update material mixture indices in the assembly model so they match the
+        indices assigned by glow/SALOME in the TDT file.
+
+        In the glow workflow, SALOME internally re-numbers material mixtures with
+        no predictable logic.  The TDT .dat file records the actual
+        ``unique_material_mixture_name → index`` mapping.  This method takes that
+        mapping (typically obtained from ``read_material_mixture_indices_from_tdt_file``)
+        and propagates it to:
+
+        1. ``self.material_mixtures_dict``
+        2. ``self.fuel_material_mixture_indices``
+        3. Every ``MaterialMixture`` object in ``self.fuel_material_mixtures``
+        4. Every ``FuelPinModel`` in the lattice (``pin.fuel_material_mixture_indices``)
+
+        Parameters
+        ----------
+        tdt_indices_dict : dict[str, int]
+            Mapping of unique material mixture name → index as read from the TDT
+            file.  Only entries whose names match existing fuel material mixture
+            names in the assembly model are applied; extra entries (e.g. COOLANT,
+            CLAD, MODERATOR, GAP, CHANNEL_BOX) are stored separately in
+            ``self.non_fuel_material_mixture_indices`` for later use.
+
+        Raises
+        ------
+        RuntimeError
+            If ``number_fuel_material_mixtures_by_material`` has not been called.
+        ValueError
+            If a fuel material mixture name created by
+            ``number_fuel_material_mixtures_by_material`` is not found in the TDT
+            mapping.
+        """
+        if not hasattr(self, 'fuel_material_mixture_names') or self.fuel_material_mixture_names is None:
+            raise RuntimeError(
+                "Fuel material mixtures have not been numbered yet. "
+                "Call number_fuel_material_mixtures_by_material() before enforcing TDT indices."
+            )
+
+        # Separate fuel vs non-fuel entries from the TDT mapping
+        fuel_names_set = set(self.fuel_material_mixture_names)
+        non_fuel = {}
+
+        for tdt_name, tdt_index in tdt_indices_dict.items():
+            if tdt_name not in fuel_names_set:
+                non_fuel[tdt_name] = tdt_index
+
+        self.non_fuel_material_mixture_indices = non_fuel
+
+        # Validate that every fuel mixture name has a TDT counterpart
+        missing = [name for name in self.fuel_material_mixture_names if name not in tdt_indices_dict]
+        if missing:
+            raise ValueError(
+                f"The following fuel material mixture names were not found in the TDT mapping: {missing}. "
+                f"Available TDT names: {list(tdt_indices_dict.keys())}"
+            )
+
+        # --- Update assembly-level structures ---
+        for name in self.fuel_material_mixture_names:
+            self.material_mixtures_dict[name] = tdt_indices_dict[name]
+
+        self.fuel_material_mixture_indices = [
+            self.material_mixtures_dict[name] for name in self.fuel_material_mixture_names
+        ]
+
+        # --- Update each MaterialMixture object ---
+        for mix in self.fuel_material_mixtures:
+            new_index = self.material_mixtures_dict[mix.unique_material_mixture_name]
+            mix.material_mixture_index = new_index
+
+        # --- Update every FuelPinModel in the lattice ---
+        for row in self.lattice:
+            for pin in row:
+                if isinstance(pin, FuelPinModel) and hasattr(pin, 'fuel_material_mixture_names'):
+                    pin.fuel_material_mixture_indices = [
+                        self.material_mixtures_dict[zone_name]
+                        for zone_name in pin.fuel_material_mixture_names
+                    ]
+
+        print(f"[enforce_tdt] Updated {len(self.fuel_material_mixture_names)} fuel mixture indices from TDT file.")
+        if non_fuel:
+            print(f"[enforce_tdt] Also stored {len(non_fuel)} non-fuel mixture indices: {non_fuel}")
 
 
     def count_number_of_pins(self):

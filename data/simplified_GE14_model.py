@@ -53,12 +53,15 @@ print(GE14_simple_assembly.lattice)
 GE14_simple_assembly.set_material_compositions(compositions)
 
 # Step 4 : Create material mixtures for the different materials in the assembly based on the selected property assignment strategy.
-GE14_simple_assembly.number_fuel_material_mixtures(numbering_strategy="by_material")
+GE14_simple_assembly.number_fuel_material_mixtures_by_material()
 
 print(GE14_simple_assembly.get_fuel_material_mixture_names())
 print(GE14_simple_assembly.get_fuel_material_mixture_indices())
 print(GE14_simple_assembly.get_fuel_material_mixtures())
 
-# Step 5 : Instantiate the Dragon Calculation Scheme builder with the assembly model and build the calculation scheme.   
+# Step 5 : enforce material mixture indices read from the tdt file to be assigned to those from the Assembly model. This ensures that the material mixture indices in the assembly model match those in the tdt file, which is crucial for correctly associating cross-sectional data later on.
+GE14_simple_assembly.enforce_material_mixture_indices_from_tdt(material_mixtures_indices_dict)
+
+# Step 6 : Instantiate the Dragon Calculation Scheme builder with the assembly model and build the calculation scheme.   
 
 

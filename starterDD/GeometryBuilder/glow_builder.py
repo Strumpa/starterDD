@@ -222,6 +222,7 @@ def generate_simple_cells(lattice_desc, pitch, C_to_mat, fuel_rad, gap_rad, clad
         lattice_components.append(row_of_cells)
     return lattice_components
 
+
 def generate_fuel_cells(assemblyModel):
     """
     Generate RectCell objects for each individual subgeometry in the lattice
@@ -264,7 +265,8 @@ def generate_fuel_cells(assemblyModel):
                 )
                 for radius in radii:
                     tmp_cell.add_circle(radius)
-                list_of_cell_mats = fuel_material_mixtures + ["GAP", "CLAD", "COOLANT"]
+                list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["GAP", "CLAD", "COOLANT"]
+                print(list_of_cell_mats)
                 tmp_cell.set_properties({
                     PropertyType.MATERIAL: list_of_cell_mats,
                     PropertyType.MACRO: [f"MACRO{row_idx}{cell_idx}"] * len(list_of_cell_mats)
