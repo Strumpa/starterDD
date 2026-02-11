@@ -217,6 +217,9 @@ MIXS LIB: DRAGON FIL: <<Library>>
     H1 = H1_H2O 4.94044E-03
     O16 = O16 2.47022E-03
 
+    MIX 4 <<TFUEL>> NOEV
+    He4 = He4 2.68714E-05
+
     MIX 56 <<TBOX>> NOEV
     Cr50 = Cr50 3.30121E-06
     Cr52 = Cr52 6.36606E-05

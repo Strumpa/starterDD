@@ -7,8 +7,7 @@ PIN_GEOMETRY:
   gap_radius: 0.447
   clad_radius: 0.515
   pin_pitch: 1.3
-  self_shielding_option: "automatic" #"Santamarina"
-  options_dict: {"num_radial_zones": 1} # only used if self_shielding_option is set to "automatic"
+  self_shielding_option: "Santamarina"
 
 ASSEMBLY_GEOMETRY:
   lattice_type: "Cartesian"
