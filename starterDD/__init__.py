@@ -12,15 +12,15 @@ The package works in two modes:
 2. With glow: Full integration with glow for SALOME geometry generation and TDT export
 """
 
-# Import submodules
-from starterDD import MaterialProperties
-from starterDD import GeometryBuilder
-from starterDD import DDModel
-from starterDD import GeometryAnalysis
-from starterDD import InterfaceToDD
+# Import submodules using relative imports
+from . import MaterialProperties
+from . import GeometryBuilder
+from . import DDModel
+from . import GeometryAnalysis
+from . import InterfaceToDD
 
 # Re-export the glow availability flag
-from starterDD.GeometryBuilder import GLOW_AVAILABLE
+from .GeometryBuilder import GLOW_AVAILABLE
 
 __version__ = "0.1.0"
 __all__ = [

@@ -12,6 +12,7 @@ from glow.main import TdtSetup, analyse_and_generate_tdt
 from glow.interface.geom_interface import *
 from glow.support.types import *
 from .helpers import computeSantamarinaradii
+# Note: CartesianAssemblyModel and FuelPinModel are imported inside functions to avoid circular imports
 
 
 def make_grid_faces(parent: Rectangle, nx: int, ny: int):
@@ -217,6 +218,68 @@ def generate_simple_cells(lattice_desc, pitch, C_to_mat, fuel_rad, gap_rad, clad
                     PropertyType.MATERIAL: list_of_cell_mats,
                     PropertyType.MACRO: [f"MACRO{row_idx}{cell_idx}"] * len(list_of_cell_mats)
                 })
+            row_of_cells.append(tmp_cell)
+        lattice_components.append(row_of_cells)
+    return lattice_components
+
+def generate_fuel_cells(assemblyModel):
+    """
+    Generate RectCell objects for each individual subgeometry in the lattice
+    
+    Parameters:
+    -----------
+    assemblyModel : CartesianAssemblyModel
+        The assembly model containing the lattice description and rod ID to material mapping
+        additionally contains the pin geometry parameters needed to define the fuel cells and the material mixture unique names to assign to the cell materials.
+    
+    Returns:
+    -----------
+    lattice_components : list of list of RectCell
+        2D list of RectCell objects representing the lattice layout, with properties set according to assemblyModel information.
+        To be used to build lattice geometry with glow and export to TDT file.
+    """
+    # Import here to avoid circular import issues
+    from ..DDModel.DragonModel import FuelPinModel
+    
+    lattice_components = []
+    lattice_desc = assemblyModel.lattice_description
+    pitch = assemblyModel.pin_geometry_dict["pin_pitch"]
+    
+    fuel_material_mixtures = assemblyModel.fuel_material_mixtures
+    row_idx = -1
+    for row in assemblyModel.lattice:
+        row_idx += 1 
+        row_of_cells = []
+        cell_idx = -1
+        for pin in row:
+            cell_idx += 1
+            if isinstance(pin, FuelPinModel):
+                fuel_material_name = pin.fuel_material_name
+                fuel_material_mixtures = pin.fuel_material_mixtures
+                radii = pin.radii
+                tmp_cell = RectCell(
+                    name=pin.fuel_material_name,
+                    height_x_width=(pitch, pitch),
+                    center=(0.0, 0.0, 0.0),
+                )
+                for radius in radii:
+                    tmp_cell.add_circle(radius)
+                list_of_cell_mats = fuel_material_mixtures + ["GAP", "CLAD", "COOLANT"]
+                tmp_cell.set_properties({
+                    PropertyType.MATERIAL: list_of_cell_mats,
+                    PropertyType.MACRO: [f"MACRO{row_idx}{cell_idx}"] * len(list_of_cell_mats)
+                })
+            else:  # Water rod placeholder or other non-fuel cell
+                tmp_cell = RectCell(
+                    name=pin.rod_ID,
+                    height_x_width=(pitch, pitch),
+                    center=(0.0, 0.0, 0.0),
+                )
+                tmp_cell.set_properties({
+                    PropertyType.MATERIAL: ["MODERATOR"],
+                    PropertyType.MACRO: [f"MACRO_{row_idx}{cell_idx}"]
+                })
+            print(f"Generated cell {tmp_cell.name} at position ({cell_idx}, {row_idx})")
             row_of_cells.append(tmp_cell)
         lattice_components.append(row_of_cells)
     return lattice_components

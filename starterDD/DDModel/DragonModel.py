@@ -2,9 +2,9 @@
 # R.Guasch
 # Date : 09/02/2026 [created] 
 
-from starterDD.GeometryBuilder.helpers import computeSantamarinaradii
-from starterDD.MaterialProperties.material_mixture import MaterialMixture, Composition
+from ..MaterialProperties.material_mixture import MaterialMixture, Composition
 import yaml
+# Note: computeSantamarinaradii imported in methods to avoid circular imports
 
 class CartesianAssemblyModel:
     """
@@ -387,6 +387,9 @@ class FuelPinModel:
 
 
     def subdivide_into_Santamarina_radii(self):
+        # Import here to avoid circular import issues
+        from ..GeometryBuilder.helpers import computeSantamarinaradii
+        
         fuel_radius = self.technological_radii[0]
         gap_radius = self.technological_radii[1]
         clad_radius = self.technological_radii[2]
