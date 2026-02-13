@@ -346,12 +346,12 @@ def export_glow_geom(output_path, output_file_name, lattice, tracking_option, ex
             [lattice], f"{output_path}/{output_file_name}", TdtSetup(GeometryType.SECTORIZED,
                                              property_types=properties_to_export,
                                              type_geo=LatticeGeometryType.ISOTROPIC,
-                                             symmetry_type=BoundaryType.AXIAL_SYMMETRY))
+                                             symmetry_type=SymmetryType.FULL))
     elif tracking_option == "TSPC":
         lattice.type_geo = LatticeGeometryType.RECTANGLE_SYM    
         analyse_and_generate_tdt(
             [lattice], f"{output_path}/{output_file_name}", TdtSetup(GeometryType.SECTORIZED,
                                              property_types=properties_to_export,
                                              type_geo=LatticeGeometryType.RECTANGLE_SYM,
-                                             symmetry_type=BoundaryType.AXIAL_SYMMETRY))
+                                             symmetry_type=SymmetryType.FULL))
 
