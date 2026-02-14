@@ -68,6 +68,8 @@ class CartesianAssemblyModel:
 
     def analyze_lattice_description(self, build_pins = True):
         # create a n by m grid of pin models based on the lattice description and pin geometry information provided in the geometry description yaml file, and store it in the lattice attribute of the assembly model.
+        print("Analyzing lattice description and building lattice data structure with pin models based on the geometry description ...")
+        print(f"Lattice description: {self.lattice_description}")
         self.lattice = []
         for row in self.lattice_description:
             lattice_row = []
@@ -661,7 +663,6 @@ class CartesianAssemblyModel:
         if non_fuel:
             print(f"[enforce_tdt] Also stored {len(non_fuel)} non-fuel mixture indices: {non_fuel}")
 
-
     def count_number_of_pins(self):
         """
         count the number of pins in the assembly based on the lattice description, which can be used for example to define the number of material mixtures needed for a pin-wise numbering strategy.
@@ -683,15 +684,13 @@ class CartesianAssemblyModel:
                 if descriptor not in self.water_rod_ids: # for now, we consider that water rods do not have a fuel material assigned to them for self-shielding treatment in Dragon, but this can be updated later to allow for specific fuel materials for water rods if needed based on the descriptors in the lattice description of the assembly model.
                     fuel_materials.add(descriptor)
         return len(fuel_materials)
-
-                
+           
     def set_rod_ID_to_material_mapping(self, rod_ID_to_material_dict):
         """
         Set the mapping between rod IDs in the lattice description and material names for the fuel in the assembly, which can be used to assign material properties to the different pins in the assembly based on their rod ID in the lattice description.
         """
         self.rod_ID_to_material_dict = rod_ID_to_material_dict
         return
-
 
     def set_uniform_temperatures(self, fuel_temperature, gap_temperature, coolant_temperature, moderator_temperature, structural_temperature):
         """
@@ -703,6 +702,14 @@ class CartesianAssemblyModel:
         self.moderator_temperature = moderator_temperature
         self.structural_temperature = structural_temperature
         return
+
+    def update_lattice_description(self, new_lattice_description):
+        """
+        Update the lattice description of the assembly model, which can be used to modify the geometry of the assembly and the corresponding pin models in the lattice based on a new lattice description.
+        """
+        self.lattice_description = new_lattice_description
+        self.analyze_lattice_description(build_pins=True) # re-analyze the lattice description to update the lattice data structure and the pin models based on the new lattice description
+
 
 class FuelPinModel:
     """
