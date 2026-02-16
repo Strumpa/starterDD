@@ -16,7 +16,7 @@ def test_full_assembly_model_creation():
     # import macros : true
     include_macros = True
     path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
-    path_to_yaml_geometry = "../data/BWRProgressionProblems/GE14/inputs/GE14_lower_core_geometry.yaml"
+    path_to_yaml_geometry = "../data/BWRProgressionProblems/GE14/inputs/GEOM_GE14_DOM.yaml"
     path_to_tdt = "../../glow_data/tdt_data"
     tdt_file_name = "GE14_lower_core_IC" #to be produced by glow
 
