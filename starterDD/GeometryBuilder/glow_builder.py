@@ -61,7 +61,7 @@ def make_grid_faces(parent: Rectangle, nx: int, ny: int):
     return faces
 
 
-def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad, clad_rad, corner_radius=0, windmill=False):
+def generate_IC_cells(lattice_desc, Gd_cells, pitch, cell_id_to_mat_name, fuel_rad, gap_rad, clad_rad, corner_radius=0, windmill=False):
     """
     Generate RectCell objects for each individual subgeometry in the lattice
     
@@ -73,7 +73,7 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad
         List of cell IDs that correspond to gadolinium fuel cells
     pitch : float
         Pitch of each cell in the lattice
-    C_to_mat : dict
+    cell_id_to_mat_name : dict
         Mapping from cell IDs to material names
     fuel_rad : float
         Radius of the fuel region in fuel pins
@@ -121,10 +121,10 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad
                 center=(0.0, 0.0, 0.0),
                 rounded_corners=rounded_corners
             )
-            if C_to_mat is None:
+            if cell_id_to_mat_name is None:
                 mat_name = cell_id  # If no mapping provided, use cell ID as material name (assuming they match)
             else:
-                mat_name = C_to_mat[cell_id]
+                mat_name = cell_id_to_mat_name[cell_id]
             
             if cell_id in Gd_cells:
                 radii = computeSantamarinaradii(fuel_rad, gap_rad, clad_rad, gadolinium=True)

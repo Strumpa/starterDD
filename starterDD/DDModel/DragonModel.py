@@ -871,7 +871,7 @@ class FuelPinModel:
 class CircularWaterRodModel:
     """
     Class representing a circular water rod in a cartesian assembly for DRAGON calculations. 
-    Minimal atributes :
+    Minimal attributes :
         - bounding box side length : side length of the square cell containing the water rod.
         - inner radius : inner radius of the circular water rod.
         - outer radius : outer radius of the circular water rod.
