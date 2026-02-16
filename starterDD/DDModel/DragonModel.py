@@ -4,6 +4,7 @@
 
 from ..MaterialProperties.material_mixture import MaterialMixture, Composition
 import yaml
+import numpy as np
 # Note: computeSantamarinaradii imported in methods to avoid circular imports
 
 class CartesianAssemblyModel:
@@ -64,13 +65,28 @@ class CartesianAssemblyModel:
 
         # Pincell information
         self.pin_geometry_dict = yaml_data.get("PIN_GEOMETRY", {})
-
+        
+        # Water rod / moderation box information
+        self.water_rod_type = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("type", None)
+        if self.water_rod_type is not None and self.water_rod_type not in ["circular", "square"]:
+            raise ValueError(f"Unsupported water rod geometry type: {self.water_rod_type}. Supported types are 'circular' and 'square'.")
+        if self.water_rod_type == "circular": # GE14 type lattice
+            self.water_rod_inner_radius = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("inner_radius", None)
+            self.water_rod_outer_radius = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("outer_radius", None)
+        elif self.water_rod_type == "square": # ATRIUM-10 type lattice
+            self.water_box_inner_side = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("inner_side", None)
+            self.water_box_outer_side = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("outer_side", None)
+        self.water_rod_centers = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("centers", [])
+        self.number_of_water_rods = len(self.water_rod_centers)
+        
+        
 
     def analyze_lattice_description(self, build_pins = True):
         # create a n by m grid of pin models based on the lattice description and pin geometry information provided in the geometry description yaml file, and store it in the lattice attribute of the assembly model.
         print("Analyzing lattice description and building lattice data structure with pin models based on the geometry description ...")
         print(f"Lattice description: {self.lattice_description}")
         self.lattice = []
+        number_of_water_rod_placeholders = 0
         for row in self.lattice_description:
             lattice_row = []
             for descriptor in row:
@@ -110,19 +126,37 @@ class CartesianAssemblyModel:
                             pin_model.set_coolant_temperature(self.coolant_temperature)
                             lattice_row.append(pin_model)
                         elif descriptor in self.water_rod_ids:
-                            pin_model = WaterRodModel(material_name=material_name)
+                            number_of_water_rod_placeholders += 1
+                            dummy_pin_model = DummyPinModel(descriptor)
                             x_index = self.lattice_description.index(row)
                             y_index = row.index(descriptor)
-                            pin_model.set_position_in_lattice(x_index, y_index)
-                            pin_model.set_moderator_temperature(self.moderator_temperature)
-                            pin_model.set_structural_temperature(self.structural_temperature)
-                            lattice_row.append(pin_model)
+                            dummy_pin_model.set_position_in_lattice(x_index, y_index)
+                            lattice_row.append(dummy_pin_model)
                     else:
                         lattice_row.append(descriptor) # if not building the pin models, just store the descriptor in the lattice data structure for now
                 else:
                     lattice_row.append(descriptor) # if no specific geometry information is provided for the pin, just store the descriptor in the lattice data structure for now
             self.lattice.append(lattice_row)
 
+        # Finalize the lattice structure after all rows have been added
+        # create WaterRod depending on type and number
+        # find WaterRod bounding box side length depending on number of water rods and number of placeholders
+        nb_dummies_per_rod = number_of_water_rod_placeholders / self.number_of_water_rods if self.number_of_water_rods > 0 else None
+        water_rod_bounding_box_side = np.sqrt(nb_dummies_per_rod) * self.pin_geometry_dict["pin_pitch"] if nb_dummies_per_rod is not None else None
+        self.water_rods = []
+        if water_rod_bounding_box_side is not None:
+            for rod_nb in range(self.number_of_water_rods):
+                center = self.water_rod_centers[rod_nb]
+                if self.water_rod_type == "circular":
+                    water_rod_model = CircularWaterRodModel(bounding_box_side_length=water_rod_bounding_box_side, 
+                                                            inner_radius=self.water_rod_inner_radius, outer_radius=self.water_rod_outer_radius, 
+                                                            center=center, rod_ID=f"WaterRod_{rod_nb+1}")
+                elif self.water_rod_type == "square":
+                    water_rod_model = SquareWaterRodModel(inner_side=self.water_box_inner_side, outer_side=self.water_box_outer_side, center=center, rod_ID=f"WaterRod_{rod_nb+1}")
+                else:
+                    raise ValueError(f"Unsupported water rod geometry type: {self.water_rod_type}. Supported types are 'circular' and 'square'.")
+                water_rod_model.set_materials("MODERATOR", "CLAD", "COOLANT")
+                self.water_rods.append(water_rod_model)
 
     def add_pin_to_lattice(self, pin_model):
         """
@@ -132,7 +166,6 @@ class CartesianAssemblyModel:
         y_index = pin_model.y_index
         # add the pin model to the lattice at the corresponding position
         self.lattice[x_index][y_index] = pin_model
-
 
     def set_material_compositions(self, compositions):
         """
@@ -835,24 +868,25 @@ class FuelPinModel:
         self.rod_ID = rod_ID
 
 
-class WaterRodModel:
+class CircularWaterRodModel:
     """
-    Class representing a water rod in a cartesian assembly for DRAGON calculations. 
+    Class representing a circular water rod in a cartesian assembly for DRAGON calculations. 
     Minimal atributes :
-        - material_name : name of the material assigned to the water rod (eg. WATER)
-        - pitch : regular pitch of the water rod in the lattice
-        - radius : radius of the water rod
-        - height : height of the water rod
+        - bounding box side length : side length of the square cell containing the water rod.
+        - inner radius : inner radius of the circular water rod.
+        - outer radius : outer radius of the circular water rod.
+        - center : center coordinates of the circular water rod in the lattice.
     Methods :
-        - set_structural_temperature : method to set the structural temperature for the water rod, which can be used for temperature-dependent self-shielding treatment in Dragon.
+        - set_moderator_temperature : method to set the moderator temperature for the water rod.
+        - set_structural_temperature : method to set the structural temperature for the water rod.
     """
-    def __init__(self, material_name):
-        self.material_name = material_name
-        # in order to treat water rod regions, do not specify geometry : 
-        # for now but use WaterRodModel class to identify the water rod regions to skip them when numbering the fuel material mixtures for self-shielding.
-        #self.radius = radius
-        #self.height = height
-        self.rod_ID = "WROD" # for now, assign a default rod ID for water rods, but this can be updated later to allow for different types of water rods with different rod IDs based on the descriptors in the lattice description of the assembly model.
+    def __init__(self, bounding_box_side_length, inner_radius, outer_radius, center, rod_ID = "WROD"):
+        self.bounding_box_side_length = bounding_box_side_length
+        self.inner_radius = inner_radius
+        self.outer_radius = outer_radius
+        self.center = center
+        self.rod_ID = rod_ID
+
 
     def set_moderator_temperature(self, moderator_temperature):
         """
@@ -869,6 +903,85 @@ class WaterRodModel:
     def set_position_in_lattice(self, x_index, y_index):
         """
         set water rod position in the lattice based on x and y indices in the lattice description of the assembly model. 
+        """
+        self.x_index = x_index
+        self.y_index = y_index
+
+    def set_materials(self, moderator_material_name, cladding_material_name, coolant_material_name):
+        """
+        set the material names for the moderator, cladding and coolant regions of the water rod
+        """
+        self.moderator_material_name = moderator_material_name
+        self.cladding_material_name = cladding_material_name
+        self.coolant_material_name = coolant_material_name
+
+
+class SquareWaterRodModel:
+    """
+    Class representing a square water rod in a cartesian assembly for DRAGON calculations. 
+    Minimal atributes :
+        - bounding box side length : side length of the square water rod.
+        - moderator box outer side : outer side length of the moderator box surrounding the water rod.
+        - moderator box inner side : inner side length of the moderator box surrounding the water rod.
+        - center : center coordinates of the square water rod in the lattice.
+    Methods :
+        - set_moderator_temperature : method to set the moderator temperature for the water rod.
+        - set_structural_temperature : method to set the structural temperature for the water rod.
+    """
+    def __init__(self, bounding_box_side_length, moderator_box_outer_side, moderator_box_inner_side, center, rod_ID):
+        self.bounding_box_side_length = bounding_box_side_length
+        self.moderator_box_outer_side = moderator_box_outer_side
+        self.moderator_box_inner_side = moderator_box_inner_side
+        self.center = center
+        self.rod_ID = rod_ID
+
+
+    def set_moderator_temperature(self, moderator_temperature):
+        """
+        set moderator temperature for the water rod, which can be used for temperature-dependent self-shielding treatment in Dragon.
+        """
+        self.moderator_temperature = moderator_temperature
+
+    def set_structural_temperature(self, structural_temperature):
+        """
+        set structural temperature for the water rod, which can be used for temperature-dependent self-shielding treatment in Dragon.
+        """
+        self.structural_temperature = structural_temperature
+
+    def set_position_in_lattice(self, x_index, y_index):
+        """
+        set water rod position in the lattice based on x and y indices in the lattice description of the assembly model. 
+        """
+        self.x_index = x_index
+        self.y_index = y_index
+        
+    def set_materials(self, moderator_material_name, cladding_material_name, coolant_material_name):
+        """
+        set the material names for the moderator, cladding and coolant regions of the water rod
+        """
+        self.moderator_material_name = moderator_material_name
+        self.cladding_material_name = cladding_material_name
+        self.coolant_material_name = coolant_material_name
+
+
+
+        
+class DummyPinModel:
+    """
+    Class representing a dummy pin in a cartesian assembly for DRAGON calculations. 
+    This class can be used to represent regions in the lattice that are not fuel pins, such as guide tubes, instrumentation tubes, or other structural components that do not require material mixture assignment for self-shielding treatment in Dragon.
+    Minimal atributes :
+        - descriptor : descriptor of the region in the lattice description of the assembly model (eg. GT for guide tube, IT for instrumentation tube, etc ...)
+    Methods :
+        - set_position_in_lattice : method to set the position of the dummy pin in the lattice based on x and y indices in the lattice description of the assembly model.
+    """
+    def __init__(self, descriptor):
+        self.rod_ID = descriptor
+        
+
+    def set_position_in_lattice(self, x_index, y_index):
+        """
+        set dummy pin position in the lattice based on x and y indices in the lattice description of the assembly model. 
         """
         self.x_index = x_index
         self.y_index = y_index

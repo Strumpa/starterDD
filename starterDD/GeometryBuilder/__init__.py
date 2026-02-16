@@ -18,17 +18,19 @@ try:
     from .glow_builder import (
         make_grid_faces,
         generate_IC_cells,
-        generate_simple_cells,
+        generate_fuel_cells,
         add_cells_to_regular_lattice,
         export_glow_geom,
+        create_and_add_water_rods_to_lattice,
     )
     GLOW_AVAILABLE = True
     __all__.extend([
         "make_grid_faces",
         "generate_IC_cells", 
-        "generate_simple_cells",
+        "generate_fuel_cells",
         "add_cells_to_regular_lattice",
         "export_glow_geom",
+        "create_and_add_water_rods_to_lattice",
         "GLOW_AVAILABLE",
     ])
 except ImportError:

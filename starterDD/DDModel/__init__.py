@@ -1,6 +1,6 @@
 """DragonModel module - provides Dragon model building classes."""
 
-from .DragonModel import CartesianAssemblyModel, FuelPinModel
+from .DragonModel import CartesianAssemblyModel, FuelPinModel, CircularWaterRodModel
 from .helpers import associate_material_to_rod_ID
 
-__all__ = ["CartesianAssemblyModel", "FuelPinModel", "associate_material_to_rod_ID"]
+__all__ = ["CartesianAssemblyModel", "FuelPinModel", "CircularWaterRodModel", "associate_material_to_rod_ID"]
