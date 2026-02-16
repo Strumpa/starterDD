@@ -11,36 +11,8 @@ from glow.geometry_layouts.lattices import Lattice
 from glow.main import TdtSetup, analyse_and_generate_tdt
 from glow.interface.geom_interface import *
 from glow.support.types import *
-
-
-def computeSantamarinaradii(fuel_radius, gap_radius, clad_radius, gadolinium=False):
-    """
-    Helper to define fuel region radii for fuel pins
-    A. Santamarina recommendations:
-    - UOX pins: 50%, 80%, 95% and 100% volume fractions
-    - Gd2O3 pins: 20%, 40%, 60%, 80%, 95% and 100% volume fractions
-    """
-    if not gadolinium:
-        pin_radii = [
-            (0.5**0.5) * fuel_radius,
-            (0.8**0.5) * fuel_radius,
-            (0.95**0.5) * fuel_radius,
-            fuel_radius,
-            gap_radius,
-            clad_radius
-        ]
-    else:
-        pin_radii = [
-            (0.2**0.5) * fuel_radius,
-            (0.4**0.5) * fuel_radius,
-            (0.6**0.5) * fuel_radius,
-            (0.8**0.5) * fuel_radius,
-            (0.95**0.5) * fuel_radius,
-            fuel_radius,
-            gap_radius,
-            clad_radius
-        ]
-    return pin_radii
+from .helpers import computeSantamarinaradii
+# Note: CartesianAssemblyModel and FuelPinModel are imported inside functions to avoid circular imports
 
 
 def make_grid_faces(parent: Rectangle, nx: int, ny: int):
@@ -89,7 +61,7 @@ def make_grid_faces(parent: Rectangle, nx: int, ny: int):
     return faces
 
 
-def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad, clad_rad, corner_radius=0, windmill=False):
+def generate_IC_cells(lattice_desc, Gd_cells, pitch, cell_id_to_mat_name, fuel_rad, gap_rad, clad_rad, corner_radius=0, windmill=False):
     """
     Generate RectCell objects for each individual subgeometry in the lattice
     
@@ -101,7 +73,7 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad
         List of cell IDs that correspond to gadolinium fuel cells
     pitch : float
         Pitch of each cell in the lattice
-    C_to_mat : dict
+    cell_id_to_mat_name : dict
         Mapping from cell IDs to material names
     fuel_rad : float
         Radius of the fuel region in fuel pins
@@ -116,7 +88,6 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad
     windmill : bool, optional
         Whether to apply windmill sectorization to fuel pins.
     """
-    #Gd_cells = ["ROD5G", "ROD6H", "ROD6K", "ROD7G", "ROD7H"]
     lattice_components = []
     n_rows = len(lattice_desc)
     n_cols = len(lattice_desc[0]) if lattice_desc else 0
@@ -147,11 +118,13 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad
             tmp_cell = RectCell(
                 name=cell_id,
                 height_x_width=(pitch, pitch),
-                #center=(pitch / 2, pitch / 2, 0.0),
                 center=(0.0, 0.0, 0.0),
                 rounded_corners=rounded_corners
             )
-            mat_name = C_to_mat[cell_id]
+            if cell_id_to_mat_name is None:
+                mat_name = cell_id  # If no mapping provided, use cell ID as material name (assuming they match)
+            else:
+                mat_name = cell_id_to_mat_name[cell_id]
             
             if cell_id in Gd_cells:
                 radii = computeSantamarinaradii(fuel_rad, gap_rad, clad_rad, gadolinium=True)
@@ -187,63 +160,63 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, C_to_mat, fuel_rad, gap_rad
         lattice_components.append(row_of_cells)
     return lattice_components
 
-def generate_simple_cells(lattice_desc, pitch, C_to_mat, fuel_rad, gap_rad, clad_rad):
+
+def generate_fuel_cells(assemblyModel):
     """
     Generate RectCell objects for each individual subgeometry in the lattice
     
     Parameters:
     -----------
-    lattice_desc : list of list of str
-        2D list describing the lattice layout with cell IDs
-    pitch : float
-        Pitch of each cell in the lattice
-    C_to_mat : dict
-        Mapping from cell IDs to material names
-    fuel_rad : float
-        Radius of the fuel region in fuel pins
-    gap_rad : float
-        Radius of the gap region in fuel pins
-    clad_rad : float
-        Radius of the cladding region in fuel pins
-    """
-    lattice_components = []
-    n_rows = len(lattice_desc)
-    n_cols = len(lattice_desc[0]) if lattice_desc else 0
+    assemblyModel : CartesianAssemblyModel
+        The assembly model containing the lattice description and rod ID to material mapping
+        additionally contains the pin geometry parameters needed to define the fuel cells and the material mixture unique names to assign to the cell materials.
     
-    for row_idx in range(n_rows):
-        row = lattice_desc[row_idx]
+    Returns:
+    -----------
+    lattice_components : list of list of RectCell
+        2D list of RectCell objects representing the lattice layout, with properties set according to assemblyModel information.
+        To be used to build lattice geometry with glow and export to TDT file.
+    """
+    # Import here to avoid circular import issues
+    from ..DDModel.DragonModel import FuelPinModel
+    
+    lattice_components = []
+    pitch = assemblyModel.pin_geometry_dict["pin_pitch"]
+    
+    fuel_material_mixtures = assemblyModel.fuel_material_mixtures
+    row_idx = -1
+    for row in assemblyModel.lattice:
+        row_idx += 1 
         row_of_cells = []
-        for cell_idx in range(len(row)):
-            cell_id = row[cell_idx]
-            
-            
-            tmp_cell = RectCell(
-                name=cell_id,
-                height_x_width=(pitch, pitch),
-                center=(0.0, 0.0, 0.0),
-            )
-            mat_name = C_to_mat[cell_id]
-            
-            if "ROD" in cell_id and "W" not in cell_id:
-                radii = [fuel_rad, gap_rad, clad_rad]
-            else:  # Water rod placeholder
-                radii = []
-                mat_name = "MODERATOR"
-            
-            for radius in radii:
-                tmp_cell.add_circle(radius)
-
-            if mat_name == "MODERATOR":
-                tmp_cell.set_properties({
-                    PropertyType.MATERIAL: ["MODERATOR"],
-                    PropertyType.MACRO: [f"MACRO{row_idx}{cell_idx}"]
-                })
-            else:
-                list_of_cell_mats = [mat_name, "GAP", "CLAD", "COOLANT"]
+        cell_idx = -1
+        for pin in row:
+            cell_idx += 1
+            if isinstance(pin, FuelPinModel):
+                fuel_material_mixtures = pin.fuel_material_mixtures
+                radii = pin.radii
+                tmp_cell = RectCell(
+                    name=pin.fuel_material_name,
+                    height_x_width=(pitch, pitch),
+                    center=(0.0, 0.0, 0.0),
+                )
+                for radius in radii:
+                    tmp_cell.add_circle(radius)
+                list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["GAP", "CLAD", "COOLANT"]
                 tmp_cell.set_properties({
                     PropertyType.MATERIAL: list_of_cell_mats,
                     PropertyType.MACRO: [f"MACRO{row_idx}{cell_idx}"] * len(list_of_cell_mats)
                 })
+            else:  # Water rod placeholder or other non-fuel cell
+                tmp_cell = RectCell(
+                    name=pin.rod_ID,
+                    height_x_width=(pitch, pitch),
+                    center=(0.0, 0.0, 0.0),
+                )
+                tmp_cell.set_properties({
+                    PropertyType.MATERIAL: ["MODERATOR"],
+                    PropertyType.MACRO: [f"MACRO_{row_idx}{cell_idx}"]
+                })
+            print(f"Generated cell {tmp_cell.name} at position ({cell_idx}, {row_idx})")
             row_of_cells.append(tmp_cell)
         lattice_components.append(row_of_cells)
     return lattice_components
@@ -280,6 +253,68 @@ def add_cells_to_regular_lattice(lattice, ordered_cells, cell_pitch, translation
     return lattice
 
 
+def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation=0.0, windmill=False):
+    """
+    Create water rod cells from the assembly model and add them to the lattice at their centers.
+
+    Parameters:
+    -----------
+    lattice : Lattice
+        The lattice to which water rod cells will be added
+    assembly_model : CartesianAssemblyModel
+        The assembly model containing the water rod geometry parameters
+        (water_rod_type, water_rods list with center, radii, materials, etc.)
+    translation : float
+        Translation offset to apply to water rod center positions
+    windmill : bool
+        Whether to apply windmill sectorization to the water rod coolant region
+    """
+    from ..DDModel.DragonModel import CircularWaterRodModel, SquareWaterRodModel
+
+    if assembly_model.water_rod_type not in ("circular", "square"):
+        raise ValueError(
+            f"Unsupported water rod type: {assembly_model.water_rod_type}. "
+            "Supported types are 'circular' and 'square'."
+        )
+
+    for water_rod_model in assembly_model.water_rods:
+        if assembly_model.water_rod_type == "circular":
+            tmp_cell = RectCell(
+                name=water_rod_model.rod_ID,
+                height_x_width=(
+                    water_rod_model.bounding_box_side_length,
+                    water_rod_model.bounding_box_side_length,
+                ),
+                center=(0.0, 0.0, 0.0),
+            )
+            tmp_cell.add_circle(water_rod_model.inner_radius)
+            tmp_cell.add_circle(water_rod_model.outer_radius)
+            tmp_cell.set_properties({
+                PropertyType.MATERIAL: [
+                    water_rod_model.moderator_material_name,
+                    water_rod_model.cladding_material_name,
+                    water_rod_model.coolant_material_name,
+                ],
+                PropertyType.MACRO: [f"MACRO_{water_rod_model.rod_ID}"] * 3,
+            })
+            if windmill:
+                tmp_cell.sectorize([1, 1, 8], [0, 0, 0], windmill=True)
+        elif assembly_model.water_rod_type == "square":
+            raise NotImplementedError(
+                "Square water rod geometry is not yet implemented in the glow builder."
+            )
+
+        # water_rod_model.center is set by analyze_lattice_description and
+        # expressed in lattice coordinates (pin-pitch units already resolved)
+        cx, cy = water_rod_model.center
+        lattice.add_cell(
+            tmp_cell,
+            (cx + translation, cy + translation, 0.0),
+        )
+
+    return lattice
+
+
 def export_glow_geom(output_path, output_file_name, lattice, tracking_option, export_macro=False):
     """
     Export the geometry of the lattice to a TDT file for GLOW simulation
@@ -308,12 +343,12 @@ def export_glow_geom(output_path, output_file_name, lattice, tracking_option, ex
             [lattice], f"{output_path}/{output_file_name}", TdtSetup(GeometryType.SECTORIZED,
                                              property_types=properties_to_export,
                                              type_geo=LatticeGeometryType.ISOTROPIC,
-                                             symmetry_type=BoundaryType.AXIAL_SYMMETRY))
+                                             symmetry_type=SymmetryType.FULL))
     elif tracking_option == "TSPC":
         lattice.type_geo = LatticeGeometryType.RECTANGLE_SYM    
         analyse_and_generate_tdt(
             [lattice], f"{output_path}/{output_file_name}", TdtSetup(GeometryType.SECTORIZED,
                                              property_types=properties_to_export,
                                              type_geo=LatticeGeometryType.RECTANGLE_SYM,
-                                             symmetry_type=BoundaryType.AXIAL_SYMMETRY))
+                                             symmetry_type=SymmetryType.FULL))
 

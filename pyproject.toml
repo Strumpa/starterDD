@@ -5,11 +5,20 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "starterDD"
 version = "0.1.0"
-description = "Geometry handling functions for GLOW"
+description = "Dragon model building and glow interoperability package"
 authors = [
     { name = "loutre", email = "your@email.com" }
 ]
 requires-python = ">=3.11"
+dependencies = [
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+# Install with: pip install -e ".[glow]"
+glow = [
+    "glow",  # requires glow package for geometry generation
+]
 
 [tool.setuptools.packages]
 find = {}

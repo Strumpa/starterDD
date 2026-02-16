@@ -240,6 +240,10 @@ MIX_COMPOSITIONS:
       "8016": 3.333333333333333E-1
     depletable: false
 
+  - name: "GAP"
+    isotopic_composition:
+      "2004": 2.687139445345525E-5
+
   - name: "ABS_B4C"
     isotopic_composition:
       "5010": 1.520910799590305E-2
