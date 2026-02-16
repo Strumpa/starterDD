@@ -14,14 +14,14 @@ ASSEMBLY_GEOMETRY:
   reactor_type: "BWR"
   lattice_description:
     - ["ROD2", "ROD5", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD3"]
-    - ["ROD5", "ROD5", "ROD6H", "ROD7", "ROD7", "ROD7G", "ROD7", "ROD7G", "ROD7", "ROD7"]
-    - ["ROD5", "ROD6H", "ROD6", "ROD7", "ROD7", "ROD7", "ROD7G", "ROD7", "ROD7G", "ROD7"]
-    - ["ROD5", "ROD5", "ROD6H", "WROD", "WROD", "ROD7", "ROD7", "ROD7G", "ROD7", "ROD7"]
-    - ["ROD5", "ROD5G", "ROD6", "WROD", "WROD", "ROD7", "ROD7", "ROD7", "ROD7G", "ROD7"]
-    - ["ROD5", "ROD4", "ROD7H", "ROD5", "ROD7", "WROD", "WROD", "ROD7", "ROD7", "ROD7"]
-    - ["ROD5", "ROD5", "ROD6", "ROD7G", "ROD5", "WROD", "WROD", "ROD7", "ROD7", "ROD7"]
-    - ["ROD3", "ROD3", "ROD6K", "ROD6", "ROD7H", "ROD6", "ROD6H", "ROD6", "ROD6H", "ROD7"]
-    - ["ROD2", "ROD2", "ROD3", "ROD5", "ROD4", "ROD5G", "ROD5", "ROD6H", "ROD5", "ROD5"]
+    - ["ROD5", "VROD", "ROD6H", "VROD", "ROD7", "ROD7G", "VROD", "ROD7G", "VROD", "ROD7"]
+    - ["ROD5", "ROD6H", "ROD6", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7G", "ROD7"]
+    - ["ROD5", "VROD", "ROD6H", "WROD", "WROD", "ROD7G", "ROD7", "ROD7", "VROD", "ROD7"]
+    - ["ROD5", "ROD5", "ROD6", "WROD", "WROD", "VROD", "ROD7G", "ROD7", "ROD7G", "ROD7"]
+    - ["ROD5", "ROD4", "ROD7H", "ROD5", "VROD", "WROD", "WROD", "ROD7", "ROD7", "ROD7"]
+    - ["ROD5", "VROD", "ROD6", "ROD7G", "ROD5", "WROD", "WROD", "ROD7", "VROD", "ROD7"]
+    - ["ROD3", "ROD3", "ROD6", "ROD6", "ROD7H", "ROD6", "ROD6H", "ROD6", "ROD6H", "ROD7"]
+    - ["ROD2", "VROD", "ROD3", "VROD", "ROD4", "ROD5", "VROD", "ROD6H", "VROD", "ROD5"]
     - ["ROD1", "ROD2", "ROD3", "ROD5", "ROD5", "ROD5", "ROD5", "ROD5", "ROD5", "ROD2"]
 
   assembly_pitch: 15.24
@@ -30,7 +30,7 @@ ASSEMBLY_GEOMETRY:
   corner_inner_radius_of_curvature: 0.965
 
   Gd_rod_ids: ["ROD5G", "ROD6H", "ROD6K", "ROD7G", "ROD7H"]
-  water_rod_ids: ["WROD"]
+  non_fuel_rod_ids: ["WROD", "VROD"]
 
 WATER_ROD_GEOMETRY:
   type: "circular"

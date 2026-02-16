@@ -1,0 +1,19 @@
+# Geometry description for an axially varying simplified BWR assembly used as equivalent core.
+# The power dominated region (DOM) is taken to be from 0.0 to 222.0595 cm (value from BWRProgressionProblems),
+# The vanished rods region (VAN) is taken to be from 222.0595 cm to 347.1291 cm (value from BWRProgressionProblems).
+# This file describes 2D core layout and the the axial variation using 
+
+
+CORE_GEOMETRY:
+  geometry_type: "Cartesian"
+  reactor_type: "BWR"
+  core_2D_layout:
+    - ["single_GE14_assembly"]
+  assembly_axial_layouts:
+    single_GE14_assembly:
+      - axial_region: "DOM"
+        axial_bounds: [0.0, 222.0595]
+        assembly_geometry_file: "GEOM_GE14_DOM.yaml"
+      - axial_region: "VAN"
+        axial_bounds: [222.0595, 347.1291]
+        assembly_geometry_file: "GEOM_GE14_VAN.yaml"

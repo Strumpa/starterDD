@@ -25,7 +25,8 @@ class CartesianAssemblyModel:
         self.parse_geometry_description(geometry_description_yaml)
         self.rod_ID_to_material_dict = None # this will be set later based on the material composition definition selected for the assembly, which can be based on rod IDs in the lattice description for example, in which case this dictionary will map rod IDs to material names for the fuel in the assembly.
         self.lattice = None # this will be a data structure representing the lattice of the assembly, which can be a 2D list of pin models corresponding to the lattice description, for example.
-    
+        self.set_uniform_temperatures(fuel_temperature=900.0, gap_temperature=600.0, coolant_temperature=600.0, moderator_temperature=600.0, structural_temperature=600.0) # default uniform temperatures for the assembly, which can be updated later based on the core description or other information provided for the assembly.
+
     def parse_geometry_description(self, geometry_description_yaml):
         """
         The yaml file at geometry_description_yaml should contain the following information :
@@ -41,7 +42,7 @@ class CartesianAssemblyModel:
             - channel_box_thickness : thickness of the channel box surrounding the fuel pins in the assembly (if any)
             - corner_inner_radius_of_curvature : inner radius of curvature for the corners of the fuel pins in the assembly (if any)
             - Gd_rod_ids : list of material descriptors in the lattice description corresponding to Gd-bearing fuel pins, which should be treated with specific self-shielding
-            - water_rod_ids : list of material descriptors in the lattice description corresponding to water rods, which should be treated differently for self-shielding treatment in Dragon.
+            - non_fuel_rod_ids : list of material descriptors in the lattice description corresponding to water rods, guide tubes, vanisher rod : anything that is not a fuel rod.
         As well as the PIN_GEOMETRY section describing the geometry of the different types of pins in the assembly (eg. fuel pin, guide tube, etc ...), with the following information for each type of pin :
             - fuel_radius : radius of the fuel region in the pin
             - gap_radius : radius of the gap region in the pin (if any)
@@ -59,7 +60,7 @@ class CartesianAssemblyModel:
         self.channel_box_thickness = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("channel_box_thickness", None)
         self.corner_inner_radius_of_curvature = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("corner_inner_radius_of_curvature", None)
         self.Gd_rod_ids = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("Gd_rod_ids", [])
-        self.water_rod_ids = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("water_rod_ids", [])
+        self.non_fuel_rod_ids = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("non_fuel_rod_ids", [])
         self.geometry_type = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("lattice_type", "cartesian") # by default, assume cartesian geometry for the assembly
         self.reactor_type = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("reactor_type", "BWR") # by default, assume BWR type for the assembly, which can be used to define default self-shielding treatment strategies for the pins in the assembly based on the reactor type if no specific self-shielding option is provided for the pins in the geometry description.
 
@@ -112,7 +113,7 @@ class CartesianAssemblyModel:
                             isGd = True
                         else:     
                             isGd = False
-                        if descriptor not in self.water_rod_ids:
+                        if descriptor not in self.non_fuel_rod_ids:
                             pin_model = FuelPinModel(fuel_material_name=material_name, radii=[fuel_radius, gap_radius, clad_radius], height=height, isGd=isGd, self_shielding_option=self_shielding_option, options_dict=options_dict)
                             pin_model.set_rod_ID(rod_id)
                             # set the position of the pin in the lattice based on its indices in the lattice description
@@ -125,7 +126,7 @@ class CartesianAssemblyModel:
                             pin_model.set_gap_temperature(self.gap_temperature)
                             pin_model.set_coolant_temperature(self.coolant_temperature)
                             lattice_row.append(pin_model)
-                        elif descriptor in self.water_rod_ids:
+                        elif descriptor in self.non_fuel_rod_ids:
                             number_of_water_rod_placeholders += 1
                             dummy_pin_model = DummyPinModel(descriptor)
                             x_index = self.lattice_description.index(row)
@@ -703,7 +704,7 @@ class CartesianAssemblyModel:
         num_pins = 0
         for row in self.lattice_description:
             for descriptor in row:
-                if descriptor not in self.water_rod_ids: # for now, we consider that water rods do not need a material mixture assigned to them for self-shielding treatment in Dragon, but this can be updated later to allow for specific material mixtures for water rods if needed based on the descriptors in the lattice description of the assembly model.
+                if descriptor not in self.non_fuel_rod_ids: # for now, we consider that water rods do not need a material mixture assigned to them for self-shielding treatment in Dragon, but this can be updated later to allow for specific material mixtures for water rods if needed based on the descriptors in the lattice description of the assembly model.
                     num_pins += 1
         return num_pins
     
@@ -714,7 +715,7 @@ class CartesianAssemblyModel:
         fuel_materials = set()
         for row in self.lattice_description:
             for descriptor in row:
-                if descriptor not in self.water_rod_ids: # for now, we consider that water rods do not have a fuel material assigned to them for self-shielding treatment in Dragon, but this can be updated later to allow for specific fuel materials for water rods if needed based on the descriptors in the lattice description of the assembly model.
+                if descriptor not in self.non_fuel_rod_ids: # for now, we consider that water rods do not have a fuel material assigned to them for self-shielding treatment in Dragon, but this can be updated later to allow for specific fuel materials for water rods if needed based on the descriptors in the lattice description of the assembly model.
                     fuel_materials.add(descriptor)
         return len(fuel_materials)
            
