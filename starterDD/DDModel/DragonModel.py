@@ -117,8 +117,8 @@ class CartesianAssemblyModel:
                             pin_model = FuelPinModel(fuel_material_name=material_name, radii=[fuel_radius, gap_radius, clad_radius], height=height, isGd=isGd, self_shielding_option=self_shielding_option, options_dict=options_dict)
                             pin_model.set_rod_ID(rod_id)
                             # set the position of the pin in the lattice based on its indices in the lattice description
-                            x_index = self.lattice_description.index(row)
-                            y_index = row.index(descriptor)
+                            y_index = self.lattice_description.index(row)
+                            x_index = row.index(descriptor)
                             pin_model.set_position_in_lattice(x_index, y_index)
                             # set the temperatures for the pin based on the uniform temperatures defined for the assembly
                             pin_model.set_fuel_temperature(self.fuel_temperature)

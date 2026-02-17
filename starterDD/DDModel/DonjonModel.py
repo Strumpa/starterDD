@@ -35,36 +35,42 @@ class CoreModel:
         print(f"CoreModel: Parsed assembly axial layouts for core '{self.name}' with {len(self.assembly_axial_layouts)} assemblies having axial variation.")
         # Create AxiallyExtrudedAssemblyModel instances for each assembly with axial variation in the core description
         self.assemblies = {}
-        for assembly_id, axial_layout in self.assembly_axial_layouts.items():
-            slices_2D = []
-            z_bounds = []
-            axial_regions = []
-            slice_to_geometry_dict = {}
-            for slice_num, region in enumerate(axial_layout):
-                axial_region = region.get("axial_region", "unknown")
-                lower_bound, upper_bound = region.get("axial_bounds", [0.0, 0.0])
-                assembly_geometry_file = region.get("assembly_geometry_file", "")
-                # Here we would load the 2D slice geometry from the specified file (e.g., using a function like load_2D_slice_geometry(assembly_geometry_file))
-                # For this example, we will just create a placeholder for the 2D slice geometry
-                slice_2D = f"2D_slice_geometry_for_{axial_region}_region_of_{assembly_id}"
-                slice_to_geometry_dict[slice_2D] = assembly_geometry_file
-                slices_2D.append(slice_2D)
-                axial_regions.append(axial_region)
-                if slice_num == 0:
-                    z_bounds.append(lower_bound) # add the lower bound of the first slice to the z bounds list
-                z_bounds.append(upper_bound) # add the upper bound of each slice to the z bounds list, which will define the axial extent of each slice in the assembly
-                # Make sure bounds are not repeated and in ascending order
-                z_bounds_sorted = sorted(set(z_bounds))
-                # test that z_bounds are consistent with z_bounds_sorted
-                if z_bounds != z_bounds_sorted:
-                    raise ValueError(f"Z bounds for assembly '{assembly_id}' are not in ascending order. Z bounds: {z_bounds}, sorted unique Z bounds: {z_bounds_sorted}. Please check the axial bounds in the core description YAML file. Regions should be defined in z- to z+ order and in a way that the upper bound of one region corresponds to the lower bound of the next region in the axial layout.")
+        #for assembly_id, axial_layout in self.assembly_axial_layouts.items():
+        count = 0
+        for row_idx, row in enumerate(self.core_2D_layout):
+            for col_idx, assembly_id in enumerate(row):
+                print(f"CoreModel: Processing assembly '{assembly_id}' in row {row_idx} index {col_idx} for core '{self.name}'.")
+                axial_layout = self.assembly_axial_layouts.get(assembly_id, [])
+                slices_2D = []
+                z_bounds = []
+                axial_regions = []
+                slice_to_geometry_dict = {}
+                for slice_num, region in enumerate(axial_layout):
+                    axial_region = region.get("axial_region", "unknown")
+                    lower_bound, upper_bound = region.get("axial_bounds", [0.0, 0.0])
+                    assembly_geometry_file = region.get("assembly_geometry_file", "")
+                    # Here we would load the 2D slice geometry from the specified file (e.g., using a function like load_2D_slice_geometry(assembly_geometry_file))
+                    # For this example, we will just create a placeholder for the 2D slice geometry
+                    slice_2D = f"2D_slice_geometry_for_{axial_region}_region_of_{assembly_id}"
+                    slice_to_geometry_dict[slice_2D] = assembly_geometry_file
+                    slices_2D.append(slice_2D)
+                    axial_regions.append(axial_region)
+                    if slice_num == 0:
+                        z_bounds.append(lower_bound) # add the lower bound of the first slice to the z bounds list
+                    z_bounds.append(upper_bound) # add the upper bound of each slice to the z bounds list, which will define the axial extent of each slice in the assembly
+                    # Make sure bounds are not repeated and in ascending order
+                    z_bounds_sorted = sorted(set(z_bounds))
+                    # test that z_bounds are consistent with z_bounds_sorted
+                    if z_bounds != z_bounds_sorted:
+                        raise ValueError(f"Z bounds for assembly '{assembly_id}' are not in ascending order. Z bounds: {z_bounds}, sorted unique Z bounds: {z_bounds_sorted}. Please check the axial bounds in the core description YAML file. Regions should be defined in z- to z+ order and in a way that the upper bound of one region corresponds to the lower bound of the next region in the axial layout.")
 
-                   
-            self.assemblies[assembly_id] = AxiallyExtrudedAssemblyModel(assembly_id, slices_2D, z_bounds_sorted)
-            self.assemblies[assembly_id].set_slice_to_geometry_mapping(slice_to_geometry_dict)
+                count += 1    
+                self.assemblies[(col_idx, row_idx, assembly_id)] = AxiallyExtrudedAssemblyModel(assembly_id, slices_2D, z_bounds_sorted)
+                self.assemblies[(col_idx, row_idx, assembly_id)].set_slice_to_geometry_mapping(slice_to_geometry_dict)
             print(f"CoreModel: Created AxiallyExtrudedAssemblyModel for assembly '{assembly_id}' with axial regions {axial_regions} and axial bounds {z_bounds_sorted}.")
         print(f"CoreModel: Created AxiallyExtrudedAssemblyModel instances for core '{self.name}' with {len(self.assemblies)} assemblies having axial variation.")
-        
+        print(f"Assemblies in core '{self.name}': {list(self.assemblies.keys())}, count: {count}.")
+
     def createAssemblyModels(self):
         """
         Create DRAGON assembly models for each assembly in the core based on the geometry descriptions specified in the core description YAML file.
