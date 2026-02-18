@@ -163,19 +163,21 @@ def generate_IC_cells(lattice_desc, Gd_cells, pitch, cell_id_to_mat_name, fuel_r
 
 def generate_fuel_cells(assemblyModel):
     """
-    Generate RectCell objects for each individual subgeometry in the lattice
-    
-    Parameters:
-    -----------
+    Generate RectCell objects for each individual subgeometry in the lattice.
+
+    Parameters
+    ----------
     assemblyModel : CartesianAssemblyModel
-        The assembly model containing the lattice description and rod ID to material mapping
-        additionally contains the pin geometry parameters needed to define the fuel cells and the material mixture unique names to assign to the cell materials.
-    
-    Returns:
-    -----------
+        The assembly model containing the lattice description and rod ID to material mapping.
+        Additionally contains the pin geometry parameters needed to define the fuel cells
+        and the material mixture unique names to assign to the cell materials.
+
+    Returns
+    -------
     lattice_components : list of list of RectCell
-        2D list of RectCell objects representing the lattice layout, with properties set according to assemblyModel information.
-        To be used to build lattice geometry with glow and export to TDT file.
+        2D list of RectCell objects representing the lattice layout, with properties set
+        according to assemblyModel information. To be used to build lattice geometry with
+        glow and export to TDT file.
     """
     # Import here to avoid circular import issues
     from ..DDModel.DragonModel import FuelPinModel
@@ -224,9 +226,10 @@ def generate_fuel_cells(assemblyModel):
 
 def add_cells_to_regular_lattice(lattice, ordered_cells, cell_pitch, translation=0.0):
     """
-    Add fuel cells to the lattice, skipping water rod placeholders
-    Parameters:
-    -----------
+    Add fuel cells to the lattice, skipping water rod placeholders.
+
+    Parameters
+    ----------
     lattice : Lattice
         The lattice to which cells will be added
     ordered_cells : list of list of RectCell
@@ -317,9 +320,10 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation=0.
 
 def export_glow_geom(output_path, output_file_name, lattice, tracking_option, export_macro=False):
     """
-    Export the geometry of the lattice to a TDT file for GLOW simulation
-    Parameters:
-    -----------
+    Export the geometry of the lattice to a TDT file for GLOW simulation.
+
+    Parameters
+    ----------
     output_path : str
         Path to save the exported TDT file
     output_file_name : str
@@ -327,8 +331,7 @@ def export_glow_geom(output_path, output_file_name, lattice, tracking_option, ex
     lattice : Lattice
         The lattice whose geometry is to be exported
     tracking_option : str
-        Tracking option, either "TISO" or "TSPC"
-
+        Tracking option, either ``"TISO"`` or ``"TSPC"``
     """
     if export_macro:
         properties_to_export = [PropertyType.MATERIAL, PropertyType.MACRO]

@@ -19,6 +19,12 @@ dependencies = [
 glow = [
     "glow",  # requires glow package for geometry generation
 ]
+# Install with: pip install -e ".[docs]"
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "sphinx-autodoc-typehints",
+]
 
 [tool.setuptools.packages]
 find = {}
