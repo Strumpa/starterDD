@@ -33,7 +33,9 @@ def test_GE14_lower_core_model_mix_numbering_by_pin():
     GE14_assembly.set_rod_ID_to_material_mapping(ROD_to_material)
     GE14_assembly.set_uniform_temperatures(fuel_temperature=900.0, gap_temperature=600.0, coolant_temperature=600.0,moderator_temperature=600.0, structural_temperature=600.0)
 
-    GE14_assembly.analyze_lattice_description(build_pins=True)
+    # Parses information from the geometry description yaml file, including the lattice description and building the lattice of pin objects.
+    # The self-shielding option can be applied form the option selected in the YAML file by using apply_self_shielding="from_yaml" in the analyze_lattice_description method call.
+    GE14_assembly.analyze_lattice_description(build_pins=True, apply_self_shielding="from_yaml")
 
     assert GE14_assembly.lattice_description is not None
     assert GE14_assembly.lattice is not None

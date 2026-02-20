@@ -16,7 +16,9 @@ from .helpers import computeSantamarinaradii
 
 
 def make_grid_faces(parent: Rectangle, nx: int, ny: int):
-    # parent width/height and lower-left corner
+    """
+    Create a regular nx by ny grid of faces within the given parent rectangle, returning a list of the created faces.
+    """
     lx = float(parent.lx) 
     ly = float(parent.ly)  
     dx = lx / nx
