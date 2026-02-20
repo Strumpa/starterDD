@@ -6,10 +6,11 @@ from starterDD.MaterialProperties.material_mixture import parse_all_compositions
 from starterDD.GeometryAnalysis.tdt_parser import read_material_mixture_indices_from_tdt_file
 from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
+from starterDD.InterfaceToDD.dragon_module_calls import LIB
 
 
 # write a test that checks that the assembly model is correctly created and that the lattice description is correctly analyzed.
-def test_full_assembly_model_creation():
+def test_GE14_lower_core_model_mix_numbering_by_pin():
     # Goal : Create an assembly model and instantiate the DDModel builder
     # Model instantiation steps :
     flux_tracking_option = "TISO"  # Tracking type for the assembly model
@@ -18,7 +19,7 @@ def test_full_assembly_model_creation():
     path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
     path_to_yaml_geometry = "../data/BWRProgressionProblems/GE14/inputs/GEOM_GE14_DOM.yaml"
     path_to_tdt = "../../glow_data/tdt_data"
-    tdt_file_name = "GE14_lower_core_IC" #to be produced by glow
+    tdt_file_name = "GE14_DOM_SSH_IC" #produced by glow.
 
 
     # Create the assembly model with the given tdt file and lattice description.
@@ -226,8 +227,96 @@ def test_full_assembly_model_creation():
     print(f"     Old indices: {old_indices[:10]}..." if len(old_indices) > 10 else f"     Old indices: {old_indices}")
     print(f"     New (TDT) indices: {new_indices[:10]}..." if len(new_indices) > 10 else f"     New (TDT) indices: {new_indices}")
     print(f"     Non-fuel entries: {GE14_assembly.non_fuel_material_mixture_indices}")
+    return GE14_assembly
+
+def test_GE14_lower_core_model_LIB_creation():
+    GE14_assembly = test_GE14_lower_core_model_mix_numbering_by_pin()
+    GE14_assembly.identify_generating_and_daughter_mixes()
+    lib = LIB(GE14_assembly)
+    output_path = lib.write_to_c2m("outputs", "GE14_DOM_LIB")
+
+    # ------------------------------------------------------------------
+    # Validate the generated .c2m file content
+    # ------------------------------------------------------------------
+    import os
+
+    assert os.path.isfile(output_path), f"Expected output file at {output_path}"
+    with open(output_path, 'r') as f:
+        content = f.read()
+    assert len(content) > 0, "Generated .c2m file should not be empty."
+
+    # --- CLE-2000 structural keywords ---
+    assert "LIBRARY := LIB:" in content, "Missing 'LIBRARY := LIB:' module call."
+    assert "NMIX" in content, "Missing NMIX keyword."
+    assert "DEPL LIB:" in content, "Missing DEPL directive."
+    assert "MIXS LIB:" in content, "Missing MIXS directive."
+    assert "END: ;" in content, "Missing END: statement."
+    assert "QUIT ." in content, "Missing QUIT statement."
+
+    # --- Procedure header parameters ---
+    assert "PARAMETER LIBRARY" in content, "Missing PARAMETER declaration."
+    assert "<<Library>>" in content, "Missing Library placeholder."
+    assert "<<ssh_method>>" in content, "Missing ssh_method placeholder."
+    assert "<<anis_level>>" in content, "Missing anis_level placeholder."
+    assert "<<tran_correc>>" in content, "Missing tran_correc placeholder."
+    assert "DTFUEL" in content, "Missing DTFUEL temperature parameter."
+
+    # --- Generating mix lines: full isotopic composition ---
+    # The generating mixes should have isotope entries with densities
+    for gen_mix in GE14_assembly.generating_mixes:
+        idx = gen_mix.material_mixture_index
+        assert f"MIX {idx}" in content, \
+            f"Generating mix index {idx} not found in LIB output."
+        # At least one isotope from the composition should be present
+        iso_comp = gen_mix.composition.get_isotope_name_composition()
+        found_isotope = False
+        for isotope in iso_comp:
+            if isotope in content:
+                found_isotope = True
+                break
+        assert found_isotope, \
+            f"No isotope from generating mix '{gen_mix.unique_material_mixture_name}' found in output."
+
+    # --- Daughter mix lines: COMB duplication ---
+    for daughter in GE14_assembly.daughter_mixes:
+        idx = daughter.material_mixture_index
+        gen_idx = daughter.generating_mix.material_mixture_index
+        expected_comb = f"MIX {idx} COMB {gen_idx} 1.0"
+        assert expected_comb in content, \
+            f"Expected daughter COMB line '{expected_comb}' not found in output."
+
+    # --- Non-fuel NOEV entries ---
+    assert "NOEV" in content, "Missing NOEV keyword for non-fuel materials."
+
+    # Check that known non-fuel materials are present
+    non_fuel_indices = GE14_assembly.non_fuel_material_mixture_indices
+    for mat_name, idx in non_fuel_indices.items():
+        # Only materials with compositions will have MIX lines
+        if mat_name in GE14_assembly.composition_lookup:
+            assert f"MIX {idx}" in content, \
+                f"Non-fuel material '{mat_name}' (index {idx}) not found in output."
+
+    # --- Mix index comment block ---
+    assert "MIX INDEX ASSIGNMENTS" in content, "Missing mix index comment block."
+    assert "Fuel mixes" in content, "Missing fuel mixes section in comments."
+
+    # --- NMIX value should be the maximum index ---
+    all_indices = list(GE14_assembly.fuel_material_mixture_indices)
+    all_indices.extend(non_fuel_indices.values())
+    expected_max = max(all_indices)
+    assert f"NMIX {expected_max}" in content, \
+        f"NMIX should be {expected_max}, not found in output."
+
+    print(f"  -> LIB .c2m file validation PASSED ({len(content)} chars)")
+    print(f"     Generating mixes: {len(GE14_assembly.generating_mixes)}")
+    print(f"     Daughter mixes:   {len(GE14_assembly.daughter_mixes)}")
+    print(f"     Non-fuel entries: {len(non_fuel_indices)}")
+    print(f"     NMIX = {expected_max}")
+
+
 
 
 if __name__ == "__main__":
-    test_full_assembly_model_creation()
+    test_GE14_lower_core_model_mix_numbering_by_pin()
+    test_GE14_lower_core_model_LIB_creation()   
     print("Test passed successfully!")

@@ -303,7 +303,7 @@ def test_by_pin_diagonal_symmetry():
             "gap_wide": 0.0,
             "channel_box_thickness": 0.0,
             "Gd_rod_ids": ["ROD5G"],
-            "water_rod_ids": ["WROD"],
+            "non_fuel_rod_ids": ["WROD"],
         },
     }
 
@@ -435,7 +435,7 @@ def test_by_pin_main_diagonal_symmetry():
             "gap_wide": 0.0,
             "channel_box_thickness": 0.0,
             "Gd_rod_ids": ["ROD5G"],
-            "water_rod_ids": ["WROD"],
+            "non_fuel_rod_ids": ["WROD"],
         },
     }
 
@@ -782,7 +782,7 @@ def test_lib_write_to_c2m():
         print(f"     Generating UOX16 idx: {gen_uox16_idx}, UOX40Gd8 idx: {gen_gd_idx}")
 
         # Also write to the test outputs directory for inspection
-        outputs_path = lib.write_to_c2m("outputs", "MIX_LIB_GE14_by_pin")
+        outputs_path = lib.write_to_c2m("outputs", "MIX_LIB_simple_GE14_by_pin")
         print(f"     Also saved to: {outputs_path}")
 
     finally:

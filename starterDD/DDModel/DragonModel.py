@@ -67,6 +67,9 @@ class CartesianAssemblyModel:
         with open(geometry_description_yaml, 'r') as file:
             yaml_data = yaml.safe_load(file)
 
+        # Validate top-level YAML sections
+        self._validate_yaml_keys(yaml_data, geometry_description_yaml)
+
         self.lattice_description = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("lattice_description", [])
         self.assembly_pitch = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("assembly_pitch", None)
         self.gap_wide = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("gap_wide", None)
@@ -92,10 +95,145 @@ class CartesianAssemblyModel:
             self.water_box_outer_side = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("outer_side", None)
         self.water_rod_centers = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("centers", [])
         self.number_of_water_rods = len(self.water_rod_centers)
-        
-        
 
-    def analyze_lattice_description(self, build_pins = True):
+    # ------------------------------------------------------------------
+    # YAML key validation
+    # ------------------------------------------------------------------
+
+    # Expected keys for each top-level YAML section.
+    # Keys mapped to True are required; keys mapped to False are optional.
+    _EXPECTED_ASSEMBLY_KEYS = {
+        "lattice_description": True,
+        "assembly_pitch": True,
+        "gap_wide": False,
+        "channel_box_thickness": False,
+        "corner_inner_radius_of_curvature": False,
+        "Gd_rod_ids": False,
+        "non_fuel_rod_ids": False,
+        "lattice_type": False,
+        "reactor_type": False,
+    }
+
+    _EXPECTED_PIN_KEYS = {
+        "fuel_radius": True,
+        "gap_radius": False,
+        "clad_radius": False,
+        "pin_pitch": True,
+        "height": False,
+        "self_shielding_option": False,
+        "options_dict": False,
+    }
+
+    _EXPECTED_WATER_ROD_KEYS = {
+        "type": True,
+        "inner_radius": False,
+        "outer_radius": False,
+        "inner_side": False,
+        "outer_side": False,
+        "centers": True,
+    }
+
+    @classmethod
+    def _validate_yaml_keys(cls, yaml_data, source_path="<unknown>"):
+        """
+        Validate the top-level and section-level keys of a geometry
+        description YAML.
+
+        * Checks that required top-level sections are present.
+        * Within each section, warns about unrecognised keys (likely typos)
+          and raises for missing required keys.
+
+        Parameters
+        ----------
+        yaml_data : dict
+            Parsed YAML data.
+        source_path : str
+            File path used in error messages.
+
+        Raises
+        ------
+        ValueError
+            If a required key is missing or an unrecognised key is found
+            within a known section.
+        """
+        import warnings
+
+        # --- Top-level sections ---
+        known_sections = {"ASSEMBLY_GEOMETRY", "PIN_GEOMETRY", "WATER_ROD_GEOMETRY"}
+        present_sections = set(yaml_data.keys()) if isinstance(yaml_data, dict) else set()
+        unknown_top = present_sections - known_sections
+        if unknown_top:
+            warnings.warn(
+                f"[YAML validation] Unrecognised top-level section(s) in "
+                f"'{source_path}': {unknown_top}. "
+                f"Expected sections: {known_sections}.",
+                stacklevel=3,
+            )
+
+        if "ASSEMBLY_GEOMETRY" not in present_sections:
+            raise ValueError(
+                f"Geometry YAML '{source_path}' is missing the required "
+                f"'ASSEMBLY_GEOMETRY' section."
+            )
+
+        # --- Section-level key checks ---
+        section_specs = [
+            ("ASSEMBLY_GEOMETRY", cls._EXPECTED_ASSEMBLY_KEYS),
+            ("PIN_GEOMETRY", cls._EXPECTED_PIN_KEYS),
+            ("WATER_ROD_GEOMETRY", cls._EXPECTED_WATER_ROD_KEYS),
+        ]
+
+        for section_name, expected_keys in section_specs:
+            section_data = yaml_data.get(section_name, None)
+            if section_data is None:
+                continue
+            if not isinstance(section_data, dict):
+                raise ValueError(
+                    f"Section '{section_name}' in '{source_path}' "
+                    f"must be a mapping, got {type(section_data).__name__}."
+                )
+
+            found_keys = set(section_data.keys())
+            allowed_keys = set(expected_keys.keys())
+            unknown_keys = found_keys - allowed_keys
+
+            if unknown_keys:
+                raise ValueError(
+                    f"[YAML validation] Unrecognised key(s) in "
+                    f"'{section_name}' of '{source_path}': {unknown_keys}. "
+                    f"Allowed keys: {sorted(allowed_keys)}."
+                )
+
+            missing_required = {
+                k for k, required in expected_keys.items()
+                if required and k not in found_keys
+            }
+            if missing_required:
+                raise ValueError(
+                    f"[YAML validation] Missing required key(s) in "
+                    f"'{section_name}' of '{source_path}': {missing_required}."
+                )
+
+    def analyze_lattice_description(self, build_pins=True, apply_self_shielding=None):
+        """
+        Build the lattice data structure from the lattice description.
+
+        Parameters
+        ----------
+        build_pins : bool
+            If ``True``, create ``FuelPinModel`` / ``DummyPinModel`` objects;
+            otherwise store raw descriptors.
+        apply_self_shielding : str or None
+            Controls radial subdivision at pin creation time:
+
+            * ``None`` (default) – pins are created with a **single fuel zone**
+              (1-region default).  A ``DragonCalculationScheme`` can later call
+              ``CalculationStep.apply_radii()`` to set the desired subdivision.
+            * ``"from_yaml"`` – use the ``self_shielding_option`` stored in the
+              geometry YAML (backward-compatible behaviour).
+            * Any other valid option string (``"Santamarina"``, ``"automatic"``,
+              ``"user_defined"``) – forced for all pins.
+        """
         # create a n by m grid of pin models based on the lattice description and pin geometry information provided in the geometry description yaml file, and store it in the lattice attribute of the assembly model.
         print("Analyzing lattice description and building lattice data structure with pin models based on the geometry description ...")
         print(f"Lattice description: {self.lattice_description}")
@@ -118,8 +256,20 @@ class CartesianAssemblyModel:
                     gap_radius = pin_geometry_info.get("gap_radius", None)
                     clad_radius = pin_geometry_info.get("clad_radius", None)
                     height = pin_geometry_info.get("height", None)
-                    self_shielding_option = pin_geometry_info.get("self_shielding_option", None)
-                    options_dict = pin_geometry_info.get("options_dict", None)
+
+                    # Determine self-shielding option for pin creation
+                    if apply_self_shielding is None:
+                        # Default: 1-region, awaiting DragonCalculationScheme
+                        self_shielding_option = None
+                        options_dict = None
+                    elif apply_self_shielding == "from_yaml":
+                        # Backward compat: use whatever is in the YAML
+                        self_shielding_option = pin_geometry_info.get("self_shielding_option", None)
+                        options_dict = pin_geometry_info.get("options_dict", None)
+                    else:
+                        # Forced option for all pins
+                        self_shielding_option = apply_self_shielding
+                        options_dict = pin_geometry_info.get("options_dict", None)
 
                     if build_pins:
                         if descriptor in self.Gd_rod_ids:
@@ -261,6 +411,7 @@ class CartesianAssemblyModel:
             mix_index = material_mixtures_dict[unique_name]
 
             # Look up the Composition for this base material
+            print(f"Creating MaterialMixture for '{unique_name}' with base material '{base_material_name}' and mix index {mix_index}...")
             composition = self.composition_lookup.get(base_material_name, None)
             if composition is None:
                 raise ValueError(
@@ -772,22 +923,28 @@ class FuelPinModel:
     - radii: list of radii for concentric cylindrical regions (fuel, cladding, gap)
     - region names: list of names for the different regions (fuel, cladding, gap)
     - height: height of the pin
-    - self_shielding_option: by default Santamarina radii; other options include
-      user-defined radii or automatic subdivision
+    - self_shielding_option: radial subdivision strategy.  When ``None``
+      (default), the pin is created with a single fuel zone (awaiting
+      a ``DragonCalculationScheme`` to apply the desired subdivision).
+      Other options: ``"Santamarina"``, ``"automatic"``, ``"user_defined"``.
 
     Methods:
 
     - subdivide_into_radial_zones: subdivide the pin into radial zones for
       self-shielding treatment in Dragon.
     """
-    def __init__(self, fuel_material_name, radii, height, isGd, self_shielding_option = "Santamarina", options_dict = None):
+    def __init__(self, fuel_material_name, radii, height, isGd, self_shielding_option=None, options_dict=None):
         self.fuel_material_name = fuel_material_name
         self.technological_radii = radii # ordered fuel radius, gap radius, clad radius : test if gap radius is smaller or larger than fuel radius to define the order of the regions in the pin and the corresponding radii in the list, which can be used to automatically define the pin geometry based on the input radii and the self-shielding option selected for the pin.
         self.height = height
         self.isGd = isGd
         self.self_shielding_option = self_shielding_option
 
-        if self_shielding_option == "Santamarina":
+        if self_shielding_option is None:
+            # Default: single fuel region (1-zone) – awaiting DragonCalculationScheme
+            self.subdivide_into_radial_zones(num_radial_zones=1)
+            self.self_shielding_option = "default"
+        elif self_shielding_option == "Santamarina":
             self.subdivide_into_Santamarina_radii()
         elif self_shielding_option == "user_defined":
             if options_dict is None or "user_defined_radii" not in options_dict:
@@ -798,7 +955,7 @@ class FuelPinModel:
                 raise ValueError("For automatic self-shielding option, the number of radial zones must be provided in the options_dict with key 'num_radial_zones'.")
             self.subdivide_into_radial_zones(options_dict["num_radial_zones"])
         else:
-            raise ValueError(f"Invalid self_shielding_option {self_shielding_option}. Valid options are 'Santamarina', 'user_defined' and 'automatic'.")
+            raise ValueError(f"Invalid self_shielding_option '{self_shielding_option}'. Valid options are None, 'Santamarina', 'user_defined' and 'automatic'.")
 
         print(f"Created : Pin with fuel material {self.fuel_material_name} subdivided into radial zones with radii {self.radii} based on self-shielding option {self.self_shielding_option}.")
 

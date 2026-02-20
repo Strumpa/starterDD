@@ -31,4 +31,4 @@ ASSEMBLY_GEOMETRY:
   corner_inner_radius_of_curvature: 0.965
 
   Gd_rod_ids: ["ROD5G"]
-  water_rod_ids: ["WROD"]
+  non_fuel_rod_ids: ["WROD"]
