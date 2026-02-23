@@ -23,34 +23,34 @@ class CoreModel:
         Expected YAML structure::
         
             CORE_GEOMETRY:
-            GEOMETRY_TYPE: "cartesian" # or "hexagonal"
-            REACTOR_TYPE: "BWR" # or "PWR", etc.
-            core_2D_layout:
-                - [assembly_id_1, assembly_id_2, ..., assembly_id_N] # list of assembly IDs for row 1
-                - [assembly_id_1, assembly_id_2, ..., assembly_id_N] # list of assembly IDs for row 2
-                - ...
-            assembly_axial_layouts:
-            assembly_id_1:
-                - axial_region: "region_1"
-                    axial_bounds: [z_lower_1, z_upper_1]
-                    assembly_geometry_file: "assembly_id_1_region_1_geometry.yaml"
-                - axial_region: "region_2"
-                    axial_bounds: [z_lower_2, z_upper_2]
-                    assembly_geometry_file: "assembly_id_1_region_2_geometry.yaml"
-                ...
-            assembly_id_2:
-                - axial_region: "region_1"
-                    axial_bounds: [z_lower_1, z_upper_1]
-                    assembly_geometry_file: "assembly_id_2_region_1_geometry.yaml"
-                - axial_region: "region_2"
-                    axial_bounds: [z_lower_2, z_upper_2]
-                    assembly_geometry_file: "assembly_id_2_region_2_geometry.yaml"
+                geometry_type: "cartesian" # or "hexagonal"
+                reactor_type: "BWR" # or "PWR", etc.
+                core_2D_layout:
+                    - [assembly_id_1, assembly_id_2, ..., assembly_id_N] # list of assembly IDs for row 1
+                    - [assembly_id_1, assembly_id_2, ..., assembly_id_N] # list of assembly IDs for row 2
+                    - ...
+                assembly_axial_layouts:
+                assembly_id_1:
+                    - axial_region: "region_1"
+                        axial_bounds: [z_lower_1, z_upper_1]
+                        assembly_geometry_file: "assembly_id_1_region_1_geometry.yaml"
+                    - axial_region: "region_2"
+                        axial_bounds: [z_lower_2, z_upper_2]
+                        assembly_geometry_file: "assembly_id_1_region_2_geometry.yaml"
+                    ...
+                assembly_id_2:
+                    - axial_region: "region_1"
+                        axial_bounds: [z_lower_1, z_upper_1]
+                        assembly_geometry_file: "assembly_id_2_region_1_geometry.yaml"
+                    - axial_region: "region_2"
+                        axial_bounds: [z_lower_2, z_upper_2]
+                        assembly_geometry_file: "assembly_id_2_region_2_geometry.yaml"
         """
         with open(core_description_yaml, 'r') as file:
             yaml_data = yaml.safe_load(file)
         geometric_data = yaml_data.get("CORE_GEOMETRY", {})
-        self.geometry_type = geometric_data.get("GEOMETRY_TYPE", "cartesian") # by default, assume cartesian geometry for the core
-        self.reactor_type = geometric_data.get("REACTOR_TYPE", "BWR") # by default, assume BWR type for the core, which can be used to define default
+        self.geometry_type = geometric_data.get("geometry_type", "cartesian") # by default, assume cartesian geometry for the core
+        self.reactor_type = geometric_data.get("reactor_type", "BWR") # by default, assume BWR type for the core, which can be used to define default
         self.core_2D_layout = geometric_data.get("core_2D_layout", []) # list of lists representing the 2D layout of the core, with each entry corresponding to an assembly ID
         self.assembly_axial_layouts = geometric_data.get("assembly_axial_layouts", []) # list of lists representing the axial layout of the core, with each entry corresponding to an assembly ID and
         # the axial extent of the assembly in the core (if axial variation is present in the core description)

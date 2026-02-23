@@ -102,6 +102,11 @@ class CartesianAssemblyModel:
             self.water_box_outer_side = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("outer_side", None)
         self.water_rod_centers = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("centers", [])
         self.number_of_water_rods = len(self.water_rod_centers)
+        self.channel_box_inner_side = self.assembly_pitch - 2 * self.channel_box_thickness - 2 * self.gap_wide if self.channel_box_thickness is not None and self.gap_wide is not None else None
+        n_cols = len(self.lattice_description[0]) if self.lattice_description else 0
+        pin_pitch = self.pin_geometry_dict.get("pin_pitch", 0)
+        self.intra_assembly_coolant_width = (self.channel_box_inner_side - n_cols * pin_pitch) / 2.0 if self.channel_box_inner_side is not None else None
+        self.translation_offset = self.gap_wide + self.channel_box_thickness + self.intra_assembly_coolant_width if self.gap_wide is not None and self.channel_box_thickness is not None and self.intra_assembly_coolant_width is not None else None
 
     # ------------------------------------------------------------------
     # YAML key validation
@@ -246,9 +251,10 @@ class CartesianAssemblyModel:
         print(f"Lattice description: {self.lattice_description}")
         self.lattice = []
         number_of_water_rod_placeholders = 0
-        for row in self.lattice_description:
+        pin_pitch = self.pin_geometry_dict.get("pin_pitch", 0) if self.pin_geometry_dict else 0
+        for y_index, row in enumerate(self.lattice_description):
             lattice_row = []
-            for descriptor in row:
+            for x_index, descriptor in enumerate(row):
                 if self.rod_ID_to_material_dict is not None:
                     material_name = self.rod_ID_to_material_dict.get(descriptor, None)
                     rod_id = descriptor
@@ -287,9 +293,12 @@ class CartesianAssemblyModel:
                             pin_model = FuelPinModel(fuel_material_name=material_name, radii=[fuel_radius, gap_radius, clad_radius], height=height, isGd=isGd, self_shielding_option=self_shielding_option, options_dict=options_dict)
                             pin_model.set_rod_ID(rod_id)
                             # set the position of the pin in the lattice based on its indices in the lattice description
-                            y_index = self.lattice_description.index(row)
-                            x_index = row.index(descriptor)
                             pin_model.set_position_in_lattice(x_index, y_index)
+                            # compute and set the center of the pin in the assembly coordinate system
+                            if self.translation_offset is not None and pin_pitch > 0:
+                                center_x = self.translation_offset + x_index * pin_pitch + pin_pitch / 2.0
+                                center_y = self.translation_offset + y_index * pin_pitch + pin_pitch / 2.0
+                                pin_model.set_center(center_x, center_y)
                             # set the temperatures for the pin based on the uniform temperatures defined for the assembly
                             pin_model.set_fuel_temperature(self.fuel_temperature)
                             pin_model.set_clad_temperature(self.structural_temperature)
@@ -299,9 +308,12 @@ class CartesianAssemblyModel:
                         elif descriptor in self.non_fuel_rod_ids:
                             number_of_water_rod_placeholders += 1
                             dummy_pin_model = DummyPinModel(descriptor)
-                            x_index = self.lattice_description.index(row)
-                            y_index = row.index(descriptor)
                             dummy_pin_model.set_position_in_lattice(x_index, y_index)
+                            # compute and set the center of the dummy pin in the assembly coordinate system
+                            if self.translation_offset is not None and pin_pitch > 0:
+                                center_x = self.translation_offset + x_index * pin_pitch + pin_pitch / 2.0
+                                center_y = self.translation_offset + y_index * pin_pitch + pin_pitch / 2.0
+                                dummy_pin_model.set_center(center_x, center_y)
                             lattice_row.append(dummy_pin_model)
                     else:
                         lattice_row.append(descriptor) # if not building the pin models, just store the descriptor in the lattice data structure for now
@@ -1054,6 +1066,15 @@ class FuelPinModel:
         """
         self.rod_ID = rod_ID
 
+    def set_center(self, center_x, center_y):
+        """
+        Set the center coordinates (x, y) of the pin in the assembly coordinate system.
+        This is useful for lattice analysis and spatial queries.
+        """
+        self.center_x = center_x
+        self.center_y = center_y
+        self.center = (center_x, center_y)
+
 
 class CircularWaterRodModel:
     """
@@ -1189,3 +1210,12 @@ class DummyPinModel:
         """
         self.x_index = x_index
         self.y_index = y_index
+
+    def set_center(self, center_x, center_y):
+        """
+        Set the center coordinates (x, y) of the dummy pin in the assembly coordinate system.
+        This is useful for lattice analysis and spatial queries.
+        """
+        self.center_x = center_x
+        self.center_y = center_y
+        self.center = (center_x, center_y)
