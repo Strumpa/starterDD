@@ -5,7 +5,7 @@
 
 
 CORE_GEOMETRY:
-  geometry_type: "Cartesian"
+  geometry_type: "cartesian"
   reactor_type: "BWR"
   core_2D_layout:
     - ["single_GE14_assembly"]

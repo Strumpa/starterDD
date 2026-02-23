@@ -74,7 +74,9 @@ class CoreModel:
                 slice_to_geometry_dict = {}
                 for slice_num, region in enumerate(axial_layout):
                     axial_region = region.get("axial_region", "unknown")
-                    lower_bound, upper_bound = region.get("axial_bounds", [0.0, 0.0])
+                    lower_bound, upper_bound = region.get("axial_bounds", [None, None])
+                    if lower_bound is None or upper_bound is None:
+                        raise ValueError(f"Axial bounds are not properly defined for axial region '{axial_region}' of assembly '{assembly_id}' in core '{self.name}'. Please check the core description YAML file to ensure that axial bounds are specified for each axial region.")
                     assembly_geometry_file = region.get("assembly_geometry_file", "")
                     # Here we would load the 2D slice geometry from the specified file (e.g., using a function like load_2D_slice_geometry(assembly_geometry_file))
                     # For this example, we will just create a placeholder for the 2D slice geometry
@@ -107,7 +109,7 @@ class CoreModel:
         for assembly_id, assembly_model in self.assemblies.items():
             for slice_2D in assembly_model.slices_2D:
                 geometry_file = assembly_model.slice_to_geometry_dict.get(slice_2D, "")
-                if os.path.isfile(f"{self.path_to_configs}/material_compositions.yaml"):
+                if os.path.isfile(f"{self.path_to_configs}/material_compositions.yaml") and os.path.isfile(f"{self.path_to_configs}/{geometry_file}"):
                     rod_id_to_material = associate_material_to_rod_ID(f"{self.path_to_configs}/material_compositions.yaml", f"{self.path_to_configs}/{geometry_file}")
                     D5_assembly_model = CartesianAssemblyModel(name=slice_2D, tdt_file=None, geometry_description_yaml=f"{self.path_to_configs}/{geometry_file}")
                     D5_assembly_model.set_rod_ID_to_material_mapping(rod_id_to_material)

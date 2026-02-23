@@ -11,7 +11,7 @@ PIN_GEOMETRY:
   options_dict: {"num_radial_zones": 1} # only used if self_shielding_option is set to "automatic"
 
 ASSEMBLY_GEOMETRY:
-  lattice_type: "Cartesian"
+  lattice_type: "cartesian"
   reactor_type: "BWR"
   lattice_description:
     - ["ROD1", "ROD1", "ROD1", "ROD1", "ROD1", "ROD1", "ROD1", "ROD1", "ROD1", "ROD1"]

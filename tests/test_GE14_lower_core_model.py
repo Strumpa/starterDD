@@ -25,7 +25,7 @@ FLUX_TRACKING_OPTION = "TISO"
 INCLUDE_MACROS = True
 PATH_TO_YAML_COMPOSITIONS = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
 PATH_TO_YAML_GEOMETRY = "../data/BWRProgressionProblems/GE14/inputs/GEOM_GE14_DOM.yaml"
-PATH_TO_TDT = "../../glow_data/tdt_data"
+PATH_TO_TDT = "./reference_tdt_files/GE14"
 TDT_FILE_NAME = "GE14_DOM_SSH_IC"
 
 

@@ -6,7 +6,7 @@
 
 
 CORE_GEOMETRY:
-  geometry_type: "Cartesian"
+  geometry_type: "cartesian"
   reactor_type: "BWR"
   core_2D_layout:
     - ["GE14_10%", "GE14_20%", "GE14_20%", "GE14_10%"]

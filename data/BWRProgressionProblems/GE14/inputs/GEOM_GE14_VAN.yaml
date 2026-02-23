@@ -10,7 +10,7 @@ PIN_GEOMETRY:
   self_shielding_option: "Santamarina"
 
 ASSEMBLY_GEOMETRY:
-  lattice_type: "Cartesian"
+  lattice_type: "cartesian"
   reactor_type: "BWR"
   lattice_description:
     - ["ROD2", "ROD5", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD3"]
