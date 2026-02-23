@@ -1,0 +1,60 @@
+# DRAGON Calculation Scheme for the GE14 BWR progression problem.
+# Defines the sequence of calculation steps (self-shielding, flux)
+# with their respective discretization options.
+#
+# This file is separate from the geometry description (GEOM_GE14_DOM.yaml)
+# and the material compositions (material_compositions.yaml).
+
+DRAGON_CALCULATION_SCHEME:
+  name: "GE14_standard"
+
+  steps:
+    # ------------------------------------------------------------------
+    # Step 1: Self-shielding (SSH)
+    #   - USS: module to treat unresolved resonances (energy treatment)
+    #   - RSE method for resonance self-shielding (energy treatment)
+    #   - CP spatial solution for the self-shielding calculation
+    #   - TISO tracking (isotropic)
+    #   - Santamarina radii for fuel zone subdivision
+    #   - No azimuthal sectorization
+    # ------------------------------------------------------------------
+    - name: "SSH"
+      step_type: "self_shielding"
+      self_shielding_module: "USS"
+      self_shielding_method: "RSE"
+      spatial_method: "CP"
+      tracking: "TISO"
+      radial_scheme: "Santamarina"
+      export_macros: false
+      sectorization:
+        enabled: false
+
+    # ------------------------------------------------------------------
+    # Step 2: Flux calculation (single level)
+    #   - IC spatial solution for the flux calculation
+    #   - TISO tracking (required for IC)
+    #   - Santamarina radii (same subdivision as SSH)
+    #   - Windmill sectorization on coolant region
+    #   - MACRO properties exported for downstream use
+    # ------------------------------------------------------------------
+    - name: "FLUX"
+      step_type: "flux"
+      spatial_method: "IC"
+      tracking: "TISO"
+      radial_scheme: "Santamarina"
+      export_macros: True
+      sectorization:
+        enabled: True
+        windmill: True
+        fuel_pins:
+          # UOX pins: 4 Santamarina fuel zones + gap + clad + coolant = 7 regions
+          sectors: [1, 1, 1, 1, 1, 1, 8]
+          angles:  [0, 0, 0, 0, 0, 0, 22.5]
+        Gd_pins:
+          # Gd pins: 6 Santamarina fuel zones + gap + clad + coolant = 9 regions
+          sectors: [1, 1, 1, 1, 1, 1, 1, 1, 8]
+          angles:  [0, 0, 0, 0, 0, 0, 0, 0, 22.5]
+        water_rods:
+          # Water rods: moderator + clad + coolant = 3 regions
+          sectors: [1, 1, 8]
+          angles:  [0, 0, 0]

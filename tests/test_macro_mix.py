@@ -10,7 +10,21 @@ from test_material_mix import test_material_mixture_instantiation
 
 def test_macro_library_creation():
     # instatiate a composition from BWRProgressionProblems benchmark GE-14 fuel assembly
-    material_mixture = test_material_mixture_instantiation()
+    U40_components = {
+        "U235": 9.277668758368378E-4,
+        "U234": 8.292511730252297E-6,
+        "U236": 4.249616794477542E-6,
+        "U238": 2.226267248428196E-2,
+        "O16": 4.640596297728707E-2
+    }
+    composition = Composition(material_name="Fuel_U40", isotopic_composition=U40_components)
+    material_mixture = MaterialMixture(
+        material_name="Fuel_U40_Mix1",
+        material_mixture_index=1,
+        composition=composition,
+        temperature=900.0,
+        isdepletable=True
+    )
     # material cross section data (dummy data for testing) from DRAGON output of UOX 4.5w% fuel at 900K, 1 energy group from ATRIUM-10 cell
     xs_data_24UOX = XSData(
         mixture_index=material_mixture.material_mixture_index,

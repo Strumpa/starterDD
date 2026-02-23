@@ -63,19 +63,22 @@ class MaterialMixture:
     def __init__(self, material_name: str, material_mixture_index: int, composition: Composition, temperature:float, isdepletable: bool = False):
         """
         Material mixture initialization.
-        In DRAGON5 : a material mixture is defined by a material index. 
-        This class allows for a flexible definition of material mixtures with different compositions and properties.
-        For self-shielding problems, it is recommended to split fuel materials into different material mixture : 
-        This allows to : 
-            - solve for different self-shielded cross sections per mixture.
-            - define a different temperature per mixture.
 
-        
-        :param material_name (str): material given name eg. "UOX_4.5w%", "B4C" or "moderator" 
-        :param material_mixture_index (int): Unique index assigned to the material mixture
-        :param composition (Composition): Composition object defining the isotopic composition of the material mixture
-        :param temperature (float): Temperature of the material mixture in Kelvin
-        :param isdepletable (bool): Flag indicating if the material mixture is depletable
+        In DRAGON5, a material mixture is defined by a material index.
+        This class allows for a flexible definition of material mixtures
+        with different compositions and properties.
+
+        For self-shielding problems, it is recommended to split fuel materials
+        into different material mixtures. This allows to:
+
+        - solve for different self-shielded cross sections per mixture.
+        - define a different temperature per mixture.
+
+        :param material_name: material given name e.g. ``"UOX_4.5w%"``, ``"B4C"`` or ``"moderator"``
+        :param material_mixture_index: Unique index assigned to the material mixture
+        :param composition: Composition object defining the isotopic composition
+        :param temperature: Temperature of the material mixture in Kelvin
+        :param isdepletable: Flag indicating if the material mixture is depletable
         """
         
         self.material_name = material_name

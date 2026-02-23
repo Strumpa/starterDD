@@ -5,6 +5,8 @@
 *venv/
 docs/_build
 build
+# ignore .out files used to test the output of the test functions
+*.out
 
 # Ignore other common Python artifacts
 *.pyc

@@ -10,7 +10,7 @@ PIN_GEOMETRY:
   self_shielding_option: "Santamarina"
 
 ASSEMBLY_GEOMETRY:
-  lattice_type: "Cartesian"
+  lattice_type: "cartesian"
   reactor_type: "BWR"
   lattice_description:
     - ["ROD2", "ROD5", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD3"]
@@ -30,7 +30,7 @@ ASSEMBLY_GEOMETRY:
   corner_inner_radius_of_curvature: 0.965
 
   Gd_rod_ids: ["ROD5G", "ROD6H", "ROD6K", "ROD7G", "ROD7H"]
-  water_rod_ids: ["WROD"]
+  non_fuel_rod_ids: ["WROD"]
 
 WATER_ROD_GEOMETRY:
   type: "circular"

@@ -41,8 +41,6 @@ def test_material_mixture_instantiation():
     assert material_mixture.temperature == 900.0
     assert material_mixture.isdepletable is True
 
-    return material_mixture
-
 
 if __name__ == "__main__":
     mm = test_material_mixture_instantiation()

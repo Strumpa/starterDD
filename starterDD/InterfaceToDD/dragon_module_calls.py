@@ -1,7 +1,7 @@
 ## collection of classes to handle DRAGON module calls
 # Author : R. Guasch
-# Date : 05/02/2026
-# Purpose : Define functions to handle DRAGON module calls for starterDD package
+# Date : 05/02/2026 (creation)
+# Purpose : Define class structures to handle DRAGON module calls for starterDD package
 # ----------------------------------------------------------------------------------------------- 
 
 # classes representing DRAGON modules 
