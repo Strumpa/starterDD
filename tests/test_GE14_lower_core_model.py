@@ -16,6 +16,7 @@ from starterDD.GeometryAnalysis.tdt_parser import read_material_mixture_indices_
 from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel, DummyPinModel
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.InterfaceToDD.dragon_module_calls import LIB
+from starterDD.InterfaceToDD.dragon_module_calls import EDI, COMPO, EDI_COMPO
 
 
 # ---------------------------------------------------------------------------
@@ -509,3 +510,258 @@ class TestLIBCreation:
         expected_max = max(all_indices)
         assert f"NMIX {expected_max}" in lib_content, \
             f"NMIX should be {expected_max}, not found in output."
+
+
+# ---------------------------------------------------------------------------
+# Tests: EDI MERG MIX vector and EDI_COMPO output generation
+# ---------------------------------------------------------------------------
+class TestEDIMergMix:
+    """Tests for EDI class MERG MIX vector construction on the GE14 DOM assembly."""
+
+    def test_merg_mix_fuel_mode(self, ge14_assembly_for_lib):
+        """FUEL mode: all fuel mixes → 1, non-fuel → 0."""
+        edi = EDI("test_fuel", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235", "U238"])
+        edi.set_spatial_homogenization("FUEL")
+
+        vector = edi.build_merg_mix_vector()
+        max_mix = edi._get_max_mix_index()
+
+        assert len(vector) == max_mix
+
+        for mix in ge14_assembly_for_lib.fuel_material_mixtures:
+            assert vector[mix.material_mixture_index - 1] == 1, \
+                f"Fuel mix {mix.unique_material_mixture_name} should be 1"
+
+        for nf_idx in ge14_assembly_for_lib.non_fuel_material_mixture_indices.values():
+            assert vector[nf_idx - 1] == 0, \
+                f"Non-fuel idx {nf_idx} should be 0"
+
+    def test_merg_mix_all_mode(self, ge14_assembly_for_lib):
+        """ALL mode: every position → 1."""
+        edi = EDI("test_all", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("ALL")
+
+        vector = edi.build_merg_mix_vector()
+        assert all(v == 1 for v in vector)
+
+    def test_merg_mix_by_pin_mode(self, ge14_assembly_for_lib):
+        """by_pin mode: each pin position gets its own output index."""
+        edi = EDI("test_by_pin", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("by_pin")
+
+        vector = edi.build_merg_mix_vector()
+
+        # Check that pin_idx from name matches the vector value
+        for mix in ge14_assembly_for_lib.fuel_material_mixtures:
+            expected_pin = int(mix.unique_material_mixture_name.rsplit("_pin", 1)[1])
+            actual = vector[mix.material_mixture_index - 1]
+            assert actual == expected_pin, \
+                f"Mix '{mix.unique_material_mixture_name}' should have pin_idx {expected_pin}, got {actual}"
+
+        # Non-fuel → 0
+        for nf_idx in ge14_assembly_for_lib.non_fuel_material_mixture_indices.values():
+            assert vector[nf_idx - 1] == 0
+
+    def test_merg_mix_by_material_mode(self, ge14_assembly_for_lib):
+        """by_material mode: same base composition → same output index."""
+        edi = EDI("test_by_mat", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("by_material")
+
+        vector = edi.build_merg_mix_vector()
+
+        # Mixes with same material_name must have same value
+        material_to_value = {}
+        for mix in ge14_assembly_for_lib.fuel_material_mixtures:
+            val = vector[mix.material_mixture_index - 1]
+            assert val > 0
+            if mix.material_name in material_to_value:
+                assert material_to_value[mix.material_name] == val
+            else:
+                material_to_value[mix.material_name] = val
+
+        # Different materials should have different values
+        values = list(material_to_value.values())
+        assert len(values) == len(set(values)), "Each material should have a unique family ID"
+
+    def test_merg_mix_by_mix_mode(self, ge14_assembly_for_lib):
+        """by_mix mode: each MaterialMixture gets a unique sequential rank."""
+        edi = EDI("test_by_mix", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("by_mix")
+
+        vector = edi.build_merg_mix_vector()
+        n_fuel = len(ge14_assembly_for_lib.fuel_material_mixtures)
+
+        for rank, mix in enumerate(ge14_assembly_for_lib.fuel_material_mixtures, start=1):
+            assert vector[mix.material_mixture_index - 1] == rank
+
+        # Check uniqueness of fuel output regions
+        fuel_values = [vector[mix.material_mixture_index - 1]
+                       for mix in ge14_assembly_for_lib.fuel_material_mixtures]
+        assert len(set(fuel_values)) == n_fuel
+
+    def test_merg_mix_custom_mode(self, ge14_assembly_for_lib):
+        """custom mode: user-supplied mapping."""
+        first_mix = ge14_assembly_for_lib.fuel_material_mixtures[0]
+        custom_map = {first_mix.material_mixture_index: 42}
+
+        edi = EDI("test_custom", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("custom", custom_map=custom_map)
+
+        vector = edi.build_merg_mix_vector()
+        assert vector[first_mix.material_mixture_index - 1] == 42
+
+        # All other positions should be 0
+        for i, v in enumerate(vector):
+            if i != first_mix.material_mixture_index - 1:
+                assert v == 0
+
+    def test_invalid_spatial_mode_raises(self, ge14_assembly_for_lib):
+        """Invalid spatial mode should raise ValueError."""
+        edi = EDI("test", ge14_assembly_for_lib)
+        with pytest.raises(ValueError, match="Invalid spatial mode"):
+            edi.set_spatial_homogenization("bogus")
+
+    def test_custom_without_map_raises(self, ge14_assembly_for_lib):
+        """custom mode without a map should raise ValueError."""
+        edi = EDI("test", ge14_assembly_for_lib)
+        with pytest.raises(ValueError, match="custom_map is required"):
+            edi.set_spatial_homogenization("custom")
+
+    def test_edi_call_structure(self, ge14_assembly_for_lib):
+        """Verify the full EDI call block has expected CLE-2000 structure."""
+        edi = EDI("EDIHOM_COND", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235", "U238", "Gd155"])
+        edi.set_spatial_homogenization("FUEL")
+        edi.set_energy_condensation([])
+
+        call = edi.build_edi_call()
+        assert "EDIRATES := EDI: FLUX LIBRARY2 TRACK ::" in call
+        assert "EDIT 1" in call
+        assert "MICR 3 U235 U238 Gd155" in call
+        assert "MERG MIX" in call
+        assert "COND" in call
+        assert "SAVE ON EDIHOM_COND" in call
+
+    def test_edi_call_no_condensation(self, ge14_assembly_for_lib):
+        """Verify no COND keyword when energy_bounds is None."""
+        edi = EDI("EDIHOM_295", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("ALL")
+        edi.set_energy_condensation(None)
+
+        call = edi.build_edi_call()
+        assert "COND" not in call
+        assert "SAVE ON EDIHOM_295" in call
+
+
+class TestEDICOMPOCreation:
+    """Tests for EDI_COMPO orchestrator .c2m file generation."""
+
+    @pytest.fixture
+    def edi_compo_output_path(self, ge14_assembly_for_lib):
+        """Generate EDI_COMPO output file and return its path."""
+        edi_compo = EDI_COMPO(ge14_assembly_for_lib)
+
+        edi_compo.add_edition(
+            name="EDIHOM_COND",
+            comment="Condensed, Homogenized over all fuel cells",
+            isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+            spatial_mode="FUEL",
+            energy_bounds=[],
+        )
+        edi_compo.add_edition(
+            name="EDIHOM_295",
+            comment="Homogenized, 295g",
+            isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+            spatial_mode="ALL",
+            energy_bounds=None,
+        )
+        edi_compo.add_edition(
+            name="H_EDI_REGI_1g",
+            comment="Condensed, per unique pin",
+            isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+            spatial_mode="by_pin",
+            energy_bounds=[],
+        )
+        edi_compo.add_edition(
+            name="H_EDI_REGI_2g",
+            comment="Condensed to 2 groups, per unique pin",
+            isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+            spatial_mode="by_pin",
+            energy_bounds=[0.625],
+        )
+
+        return edi_compo.write_to_c2m("outputs", "EDICPO_GE14_DOM")
+
+    @pytest.fixture
+    def edi_compo_content(self, edi_compo_output_path):
+        """Read and return EDI_COMPO output file content."""
+        with open(edi_compo_output_path, 'r') as f:
+            return f.read()
+
+    def test_output_file_exists(self, edi_compo_output_path):
+        """Verify output file is created."""
+        assert os.path.isfile(edi_compo_output_path)
+
+    def test_output_not_empty(self, edi_compo_content):
+        """Verify output file is not empty."""
+        assert len(edi_compo_content) > 0
+
+    def test_procedure_header(self, edi_compo_content):
+        """Verify CLE-2000 procedure header."""
+        assert "PARAMETER COMPO FLUX LIBRARY2 TRACK" in edi_compo_content
+        assert "MODULE EDI: COMPO: DELETE: END:" in edi_compo_content
+        assert "LINKED_LIST EDIRATES" in edi_compo_content
+        assert "SEQ_ASCII _COMPO :: FILE <<name_cpo>>" in edi_compo_content
+
+    def test_compo_initialization(self, edi_compo_content):
+        """Verify COMPO: initialization with all directories."""
+        assert "COMPO := COMPO: ::" in edi_compo_content
+        assert "STEP UP 'EDIHOM_COND'" in edi_compo_content
+        assert "STEP UP 'EDIHOM_295'" in edi_compo_content
+        assert "STEP UP 'H_EDI_REGI_1g'" in edi_compo_content
+        assert "STEP UP 'H_EDI_REGI_2g'" in edi_compo_content
+        assert edi_compo_content.count("\n   INIT\n") == 4
+
+    def test_edi_calls_present(self, edi_compo_content):
+        """Verify all 4 EDI: calls are present."""
+        assert edi_compo_content.count("EDIRATES := EDI: FLUX LIBRARY2 TRACK") == 4
+        assert "SAVE ON EDIHOM_COND" in edi_compo_content
+        assert "SAVE ON EDIHOM_295" in edi_compo_content
+        assert "SAVE ON H_EDI_REGI_1g" in edi_compo_content
+        assert "SAVE ON H_EDI_REGI_2g" in edi_compo_content
+
+    def test_compo_store_calls(self, edi_compo_content):
+        """Verify all 4 COMPO: store calls are present."""
+        assert edi_compo_content.count("COMPO := COMPO: COMPO EDIRATES LIBRARY2") == 4
+
+    def test_edirates_cleanup(self, edi_compo_content):
+        """Verify EDIRATES cleanup after each edition."""
+        assert edi_compo_content.count("EDIRATES := DELETE: EDIRATES") == 4
+
+    def test_energy_condensation_keywords(self, edi_compo_content):
+        """Verify COND keywords for editions that specify condensation."""
+        # EDIHOM_295 has no condensation → no COND between its EDI and COMPO
+        # EDIHOM_COND has COND (1 group)
+        # H_EDI_REGI_2g has COND 0.625
+        assert "COND 0.625" in edi_compo_content
+
+    def test_save_and_end_footer(self, edi_compo_content):
+        """Verify footer with save conditional and END."""
+        assert "IF save_opt 'SAVE' = THEN" in edi_compo_content
+        assert "_COMPO := COMPO" in edi_compo_content
+        assert "END: ;" in edi_compo_content
+
+    def test_merg_mix_vectors_present(self, edi_compo_content):
+        """Verify MERG MIX keyword is present in EDI calls."""
+        assert edi_compo_content.count("MERG MIX") == 4
+
+    def test_micr_keyword(self, edi_compo_content):
+        """Verify MICR keyword with isotope lists."""
+        assert "MICR 5 U235 U238 U234 Gd155 Gd157" in edi_compo_content

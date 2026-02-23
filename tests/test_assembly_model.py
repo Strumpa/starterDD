@@ -7,6 +7,7 @@ from starterDD.GeometryAnalysis.tdt_parser import read_material_mixture_indices_
 from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.InterfaceToDD.dragon_module_calls import LIB
+from starterDD.InterfaceToDD.dragon_module_calls import EDI, COMPO, EDI_COMPO
 
 
 # write a test that checks that the assembly model is correctly created and that the lattice description is correctly analyzed.
@@ -18,7 +19,7 @@ def test_assembly_model_creation():
     include_macros = True
     path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
     path_to_yaml_geometry = "../data/BWRProgressionProblems/GE14/inputs/simplified_geometry.yaml"
-    path_to_tdt = "../../glow_data/tdt_data"
+    path_to_tdt = "./reference_tdt_files/GE14"
     tdt_file_name = "GE14_simplified"
 
 
@@ -598,7 +599,7 @@ def test_lib_write_to_c2m():
 
     path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
     path_to_yaml_geometry = "../data/BWRProgressionProblems/GE14/inputs/simplified_geometry.yaml"
-    path_to_tdt = "../../glow_data/tdt_data"
+    path_to_tdt = "./reference_tdt_files/GE14"
     tdt_file_name = "GE14_simplified_pin_numbering"
     flux_tracking_option = "TISO"
 
@@ -788,6 +789,416 @@ def test_lib_write_to_c2m():
     finally:
         shutil.rmtree(tmpdir)
 
+# ---------------------------------------------------------------------------
+# Helper: build a by_pin assembly with TDT-enforced indices for EDI tests
+# ---------------------------------------------------------------------------
+def _build_by_pin_assembly_with_tdt():
+    """
+    Build and return a GE14 simplified assembly with by_pin numbering and
+    TDT-enforced indices.  Shared setup for several EDI/COMPO tests.
+    """
+    path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
+    path_to_yaml_geometry = "../data/BWRProgressionProblems/GE14/inputs/simplified_geometry.yaml"
+    path_to_tdt = "../../glow_data/tdt_data"
+    tdt_file_name = "GE14_simplified_pin_numbering"
+    flux_tracking_option = "TISO"
+
+    ROD_to_material = associate_material_to_rod_ID(path_to_yaml_compositions,
+                                                   path_to_yaml_geometry)
+    compositions = parse_all_compositions_from_yaml(path_to_yaml_compositions)
+
+    assembly = CartesianAssemblyModel(name="GE14_edi_test",
+                                      tdt_file=path_to_tdt + "/" + tdt_file_name + ".tdt",
+                                      geometry_description_yaml=path_to_yaml_geometry)
+    assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+    assembly.set_uniform_temperatures(fuel_temperature=900.0, gap_temperature=600.0,
+                                      coolant_temperature=600.0, moderator_temperature=600.0,
+                                      structural_temperature=600.0)
+    assembly.analyze_lattice_description(build_pins=True)
+    assembly.set_material_compositions(compositions)
+    assembly.number_fuel_material_mixtures_by_pin()
+
+    tdt_indices = read_material_mixture_indices_from_tdt_file(
+        path_to_tdt,
+        tdt_file_name=tdt_file_name,
+        tracking_option=flux_tracking_option,
+        include_macros=True,
+        material_names=None
+    )
+    assembly.enforce_material_mixture_indices_from_tdt(tdt_indices)
+    assembly.identify_generating_and_daughter_mixes()
+    return assembly, tdt_indices
+
+
+# ---------------------------------------------------------------------------
+# Tests: EDI MERG MIX vector construction
+# ---------------------------------------------------------------------------
+def test_edi_merg_mix_by_material():
+    """
+    Test by_material spatial mode: all mixes sharing the same base composition
+    get the same output region index.
+    """
+    assembly, tdt_indices = _build_by_pin_assembly_with_tdt()
+
+    edi = EDI("test_by_material", assembly)
+    edi.set_isotopes(["U235", "U238"])
+    edi.set_spatial_homogenization("by_material")
+
+    vector = edi.build_merg_mix_vector()
+    max_mix = edi._get_max_mix_index()
+
+    assert len(vector) == max_mix, f"Vector length {len(vector)} != max_mix {max_mix}"
+
+    # All fuel mixes should have a value > 0
+    # All non-fuel mixes should have value 0
+    non_fuel_idxs = set(assembly.non_fuel_material_mixture_indices.values())
+
+    # Collect unique family IDs assigned to fuel mixes
+    family_ids = set()
+    for mix in assembly.fuel_material_mixtures:
+        idx = mix.material_mixture_index
+        val = vector[idx - 1]
+        assert val > 0, f"Fuel mix {mix.unique_material_mixture_name} (idx {idx}) should be > 0, got {val}"
+        family_ids.add(val)
+
+    # Two unique fuel materials (UOX16, UOX40Gd8) → 2 family IDs
+    assert len(family_ids) == 2, f"Expected 2 family IDs, got {len(family_ids)}: {family_ids}"
+
+    # Non-fuel should be 0
+    for nf_idx in non_fuel_idxs:
+        assert vector[nf_idx - 1] == 0, f"Non-fuel idx {nf_idx} should be 0, got {vector[nf_idx - 1]}"
+
+    # Mixes with same material_name must have same value
+    material_to_value = {}
+    for mix in assembly.fuel_material_mixtures:
+        val = vector[mix.material_mixture_index - 1]
+        if mix.material_name in material_to_value:
+            assert material_to_value[mix.material_name] == val, \
+                f"All mixes of {mix.material_name} should have same family id"
+        else:
+            material_to_value[mix.material_name] = val
+
+    print("  -> test_edi_merg_mix_by_material PASSED")
+
+
+def test_edi_merg_mix_by_pin():
+    """
+    Test by_pin spatial mode: each unique pin position gets its own output
+    region, zones within the same pin are merged.
+    """
+    assembly, tdt_indices = _build_by_pin_assembly_with_tdt()
+
+    edi = EDI("test_by_pin", assembly)
+    edi.set_isotopes(["U235", "U238"])
+    edi.set_spatial_homogenization("by_pin")
+
+    vector = edi.build_merg_mix_vector()
+    max_mix = edi._get_max_mix_index()
+
+    assert len(vector) == max_mix
+
+    # Non-fuel → 0
+    non_fuel_idxs = set(assembly.non_fuel_material_mixture_indices.values())
+    for nf_idx in non_fuel_idxs:
+        assert vector[nf_idx - 1] == 0
+
+    # Check that fuel mixes carry the pin_idx from their name
+    for mix in assembly.fuel_material_mixtures:
+        expected_pin_idx = int(mix.unique_material_mixture_name.rsplit("_pin", 1)[1])
+        actual = vector[mix.material_mixture_index - 1]
+        assert actual == expected_pin_idx, \
+            f"Mix '{mix.unique_material_mixture_name}' should have pin_idx {expected_pin_idx}, got {actual}"
+
+    # Unique output values = number of unique pin positions = 51
+    unique_output_ids = set(v for v in vector if v > 0)
+    assert len(unique_output_ids) == 51, f"Expected 51 unique pin ids, got {len(unique_output_ids)}"
+
+    print("  -> test_edi_merg_mix_by_pin PASSED")
+
+
+def test_edi_merg_mix_fuel_and_all():
+    """
+    Test FUEL and ALL spatial modes.
+    """
+    assembly, tdt_indices = _build_by_pin_assembly_with_tdt()
+
+    # --- FUEL mode ---
+    edi_fuel = EDI("test_fuel", assembly)
+    edi_fuel.set_isotopes(["U235"])
+    edi_fuel.set_spatial_homogenization("FUEL")
+
+    vector_fuel = edi_fuel.build_merg_mix_vector()
+
+    # All fuel positions → 1
+    for mix in assembly.fuel_material_mixtures:
+        assert vector_fuel[mix.material_mixture_index - 1] == 1
+
+    # Non-fuel → 0
+    for nf_idx in assembly.non_fuel_material_mixture_indices.values():
+        assert vector_fuel[nf_idx - 1] == 0
+
+    # Only one unique output region
+    assert set(v for v in vector_fuel if v > 0) == {1}
+
+    # --- ALL mode ---
+    edi_all = EDI("test_all", assembly)
+    edi_all.set_isotopes(["U235"])
+    edi_all.set_spatial_homogenization("ALL")
+
+    vector_all = edi_all.build_merg_mix_vector()
+
+    # Every position → 1
+    assert all(v == 1 for v in vector_all), "ALL mode: every position should be 1"
+
+    print("  -> test_edi_merg_mix_fuel_and_all PASSED")
+
+
+def test_edi_merg_mix_by_mix():
+    """
+    Test by_mix spatial mode: each MaterialMixture gets its own sequential
+    output region.
+    """
+    assembly, tdt_indices = _build_by_pin_assembly_with_tdt()
+
+    edi = EDI("test_by_mix", assembly)
+    edi.set_isotopes(["U235"])
+    edi.set_spatial_homogenization("by_mix")
+
+    vector = edi.build_merg_mix_vector()
+
+    # Each fuel mix gets a unique sequential rank
+    ranks_seen = set()
+    for rank, mix in enumerate(assembly.fuel_material_mixtures, start=1):
+        val = vector[mix.material_mixture_index - 1]
+        assert val == rank, f"Mix rank {rank} should have value {rank}, got {val}"
+        ranks_seen.add(val)
+
+    assert len(ranks_seen) == len(assembly.fuel_material_mixtures)
+
+    # Non-fuel → 0
+    for nf_idx in assembly.non_fuel_material_mixture_indices.values():
+        assert vector[nf_idx - 1] == 0
+
+    print("  -> test_edi_merg_mix_by_mix PASSED")
+
+
+def test_edi_merg_mix_custom():
+    """
+    Test custom spatial mode: user supplies an explicit mapping.
+    """
+    assembly, tdt_indices = _build_by_pin_assembly_with_tdt()
+
+    # Build a custom map: first 3 fuel mixes → output regions 10, 20, 30
+    first_three = assembly.fuel_material_mixtures[:3]
+    custom_map = {
+        first_three[0].material_mixture_index: 10,
+        first_three[1].material_mixture_index: 20,
+        first_three[2].material_mixture_index: 30,
+    }
+
+    edi = EDI("test_custom", assembly)
+    edi.set_isotopes(["U235"])
+    edi.set_spatial_homogenization("custom", custom_map=custom_map)
+
+    vector = edi.build_merg_mix_vector()
+
+    for tdt_idx, output_idx in custom_map.items():
+        assert vector[tdt_idx - 1] == output_idx, \
+            f"Custom map: idx {tdt_idx} should be {output_idx}, got {vector[tdt_idx - 1]}"
+
+    # Positions not in custom_map should be 0
+    mapped_positions = set(k - 1 for k in custom_map.keys())
+    for i, v in enumerate(vector):
+        if i not in mapped_positions:
+            assert v == 0, f"Unmapped position {i+1} should be 0, got {v}"
+
+    print("  -> test_edi_merg_mix_custom PASSED")
+
+
+def test_edi_energy_condensation_options():
+    """
+    Test EDI energy condensation keyword generation.
+    """
+    assembly, _ = _build_by_pin_assembly_with_tdt()
+
+    # None → no COND
+    edi = EDI("test", assembly)
+    edi.set_energy_condensation(None)
+    assert edi.build_cond_option() == ""
+
+    # [] → COND
+    edi.set_energy_condensation([])
+    assert edi.build_cond_option() == "COND"
+
+    # [0.625] → COND 0.625
+    edi.set_energy_condensation([0.625])
+    assert edi.build_cond_option() == "COND 0.625"
+
+    # Multiple bounds
+    edi.set_energy_condensation([0.625, 100.0])
+    assert edi.build_cond_option() == "COND 0.625 100.0"
+
+    # Verify COND appears/does not appear in full EDI call
+    edi.set_isotopes(["U235"])
+    edi.set_spatial_homogenization("FUEL")
+
+    edi.set_energy_condensation(None)
+    call_no_cond = edi.build_edi_call()
+    assert "COND" not in call_no_cond
+
+    edi.set_energy_condensation([0.625])
+    call_with_cond = edi.build_edi_call()
+    assert "COND 0.625" in call_with_cond
+
+    print("  -> test_edi_energy_condensation_options PASSED")
+
+
+def test_edi_spatial_mode_validation():
+    """
+    Test that invalid spatial modes raise ValueError.
+    """
+    assembly, _ = _build_by_pin_assembly_with_tdt()
+
+    edi = EDI("test", assembly)
+    import pytest
+    with pytest.raises(ValueError, match="Invalid spatial mode"):
+        edi.set_spatial_homogenization("invalid_mode")
+
+    with pytest.raises(ValueError, match="custom_map is required"):
+        edi.set_spatial_homogenization("custom")
+
+    print("  -> test_edi_spatial_mode_validation PASSED")
+
+
+def test_compo_init_and_store():
+    """
+    Test COMPO initialization and store block generation.
+    """
+    compo = COMPO()
+    compo.add_directory("EDIHOM_COND",
+                        "Condensed, Homogenized over all fuel cells",
+                        ["U235", "U238", "Gd155"])
+    compo.add_directory("EDIHOM_295",
+                        "Homogenized, 295g",
+                        ["U235", "U238"])
+
+    init_block = compo.build_compo_init()
+
+    # Structural checks
+    assert "COMPO := COMPO: ::" in init_block
+    assert "STEP UP 'EDIHOM_COND'" in init_block
+    assert "STEP UP 'EDIHOM_295'" in init_block
+    assert "ISOT 3 U235 U238 Gd155" in init_block
+    assert "ISOT 2 U235 U238" in init_block
+    assert "COMM 'Condensed, Homogenized over all fuel cells' ENDC" in init_block
+    assert "COMM 'Homogenized, 295g' ENDC" in init_block
+    assert init_block.count("INIT") == 2
+
+    # Store block
+    store = compo.build_compo_store("EDIHOM_COND")
+    assert "COMPO := COMPO: COMPO EDIRATES LIBRARY2 ::" in store
+    assert "STEP UP EDIHOM_COND" in store
+
+    print("  -> test_compo_init_and_store PASSED")
+
+
+def test_edi_compo_write_to_c2m():
+    """
+    Test full EDI_COMPO pipeline: add multiple editions, write .c2m,
+    verify structural correctness.
+    """
+    import tempfile, shutil, os
+
+    assembly, tdt_indices = _build_by_pin_assembly_with_tdt()
+
+    edi_compo = EDI_COMPO(assembly)
+
+    edi_compo.add_edition(
+        name="EDIHOM_COND",
+        comment="Condensed, Homogenized over all fuel cells",
+        isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+        spatial_mode="FUEL",
+        energy_bounds=[],
+    )
+    edi_compo.add_edition(
+        name="EDIHOM_295",
+        comment="Homogenized, 295g",
+        isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+        spatial_mode="ALL",
+        energy_bounds=None,
+    )
+    edi_compo.add_edition(
+        name="H_EDI_REGI_1g",
+        comment="Condensed, per unique pin",
+        isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+        spatial_mode="by_pin",
+        energy_bounds=[],
+    )
+    edi_compo.add_edition(
+        name="H_EDI_REGI_2g",
+        comment="Condensed to 2 groups, per unique pin",
+        isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+        spatial_mode="by_pin",
+        energy_bounds=[0.625],
+    )
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        filepath = edi_compo.write_to_c2m(tmpdir, "EDICPO_GE14_test")
+        assert os.path.isfile(filepath)
+
+        with open(filepath, 'r') as f:
+            content = f.read()
+
+        # Header checks
+        assert "PARAMETER COMPO FLUX LIBRARY2 TRACK" in content
+        assert "MODULE EDI: COMPO: DELETE: END:" in content
+        assert "LINKED_LIST EDIRATES" in content
+        assert "SEQ_ASCII _COMPO :: FILE <<name_cpo>>" in content
+
+        # COMPO initialization
+        assert "COMPO := COMPO: ::" in content
+        assert "STEP UP 'EDIHOM_COND'" in content
+        assert "STEP UP 'EDIHOM_295'" in content
+        assert "STEP UP 'H_EDI_REGI_1g'" in content
+        assert "STEP UP 'H_EDI_REGI_2g'" in content
+        assert content.count("\n   INIT\n") == 4  # 4 directories
+
+        # EDI calls
+        assert content.count("EDIRATES := EDI: FLUX LIBRARY2 TRACK") == 4
+        assert "SAVE ON EDIHOM_COND" in content
+        assert "SAVE ON EDIHOM_295" in content
+        assert "SAVE ON H_EDI_REGI_1g" in content
+        assert "SAVE ON H_EDI_REGI_2g" in content
+
+        # COMPO store calls
+        assert content.count("COMPO := COMPO: COMPO EDIRATES LIBRARY2") == 4
+
+        # Cleanup
+        assert content.count("EDIRATES := DELETE: EDIRATES") == 4
+
+        # Footer
+        assert "IF save_opt 'SAVE' = THEN" in content
+        assert "_COMPO := COMPO" in content
+        assert "END: ;" in content
+
+        # COND keyword presence
+        assert "COND 0.625" in content  # H_EDI_REGI_2g
+        # EDIHOM_295 has no COND
+        # EDIHOM_COND and H_EDI_REGI_1g have "COND" (1 group)
+
+        # MERG MIX vectors should be present
+        assert "MERG MIX" in content
+
+        # Also write to outputs for inspection
+        filepath_out = edi_compo.write_to_c2m("outputs", "EDICPO_GE14_simple_by_pin")
+
+        print(f"  -> test_edi_compo_write_to_c2m PASSED")
+        print(f"     Generated: {filepath}")
+        print(f"     Also saved to: {filepath_out}")
+
+    finally:
+        shutil.rmtree(tmpdir)
 
 if __name__ == "__main__":
     test_assembly_model_creation()
@@ -796,4 +1207,13 @@ if __name__ == "__main__":
     test_by_pin_main_diagonal_symmetry()
     test_generating_and_daughter_mixes()
     test_lib_write_to_c2m()
+    test_edi_merg_mix_by_material()
+    test_edi_merg_mix_by_pin()
+    test_edi_merg_mix_fuel_and_all()
+    test_edi_merg_mix_by_mix()
+    test_edi_merg_mix_custom()
+    test_edi_energy_condensation_options()
+    test_edi_spatial_mode_validation()
+    test_compo_init_and_store()
+    test_edi_compo_write_to_c2m()
     print("All tests passed successfully!")
