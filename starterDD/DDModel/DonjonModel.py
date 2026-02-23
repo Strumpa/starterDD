@@ -1,5 +1,6 @@
 # DonjonModel classes : used to create a DONJON core model from a collection of DRAGON assembly models.
 
+import os
 import yaml
 from starterDD.DDModel.DragonModel import CartesianAssemblyModel
 from ..MaterialProperties.material_mixture import parse_all_compositions_from_yaml
@@ -106,7 +107,7 @@ class CoreModel:
         for assembly_id, assembly_model in self.assemblies.items():
             for slice_2D in assembly_model.slices_2D:
                 geometry_file = assembly_model.slice_to_geometry_dict.get(slice_2D, "")
-                if f"{self.path_to_configs}/material_compositions.yaml":
+                if os.path.isfile(f"{self.path_to_configs}/material_compositions.yaml"):
                     rod_id_to_material = associate_material_to_rod_ID(f"{self.path_to_configs}/material_compositions.yaml", f"{self.path_to_configs}/{geometry_file}")
                     D5_assembly_model = CartesianAssemblyModel(name=slice_2D, tdt_file=None, geometry_description_yaml=f"{self.path_to_configs}/{geometry_file}")
                     D5_assembly_model.set_rod_ID_to_material_mapping(rod_id_to_material)
