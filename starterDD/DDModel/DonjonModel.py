@@ -19,6 +19,32 @@ class CoreModel:
         """
         Parse the core description YAML file to extract the necessary information for building the core model.
         This includes the list of assemblies, their positions in the core, and any other relevant information.
+
+        Expected YAML structure::
+        
+            CORE_GEOMETRY:
+            GEOMETRY_TYPE: "cartesian" # or "hexagonal"
+            REACTOR_TYPE: "BWR" # or "PWR", etc.
+            core_2D_layout:
+                - [assembly_id_1, assembly_id_2, ..., assembly_id_N] # list of assembly IDs for row 1
+                - [assembly_id_1, assembly_id_2, ..., assembly_id_N] # list of assembly IDs for row 2
+                - ...
+            assembly_axial_layouts:
+            assembly_id_1:
+                - axial_region: "region_1"
+                    axial_bounds: [z_lower_1, z_upper_1]
+                    assembly_geometry_file: "assembly_id_1_region_1_geometry.yaml"
+                - axial_region: "region_2"
+                    axial_bounds: [z_lower_2, z_upper_2]
+                    assembly_geometry_file: "assembly_id_1_region_2_geometry.yaml"
+                ...
+            assembly_id_2:
+                - axial_region: "region_1"
+                    axial_bounds: [z_lower_1, z_upper_1]
+                    assembly_geometry_file: "assembly_id_2_region_1_geometry.yaml"
+                - axial_region: "region_2"
+                    axial_bounds: [z_lower_2, z_upper_2]
+                    assembly_geometry_file: "assembly_id_2_region_2_geometry.yaml"
         """
         with open(core_description_yaml, 'r') as file:
             yaml_data = yaml.safe_load(file)
@@ -93,7 +119,7 @@ class CoreModel:
 
 class AxiallyExtrudedAssemblyModel:
     """
-    Docstring for AxiallyExtrudedAssemblyModel
+    Class representing an axially extruded assembly. Consists of a collection of 2D slices with respective axial bounds, and a mapping between each slice and its geometry description file. This class can be used to build the assembly model for each axial region of the assembly based on the geometry descriptions specified in the core description YAML file.
     """
     def __init__(self, name, slices_2D, z_bounds):
         self.name = name

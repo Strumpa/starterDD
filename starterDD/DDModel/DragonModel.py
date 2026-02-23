@@ -34,35 +34,42 @@ class CartesianAssemblyModel:
         """
         Parse the geometry description YAML file for the assembly.
 
-        The YAML file should contain the following sections:
+        Expected YAML structure::
 
-        **ASSEMBLY_GEOMETRY**:
+            ASSEMBLY_GEOMETRY:
 
-        - lattice_description: n by m grid describing the material composition of each pin
-          (e.g. for a 10x10 BWR assembly, entries like ``"ROD1"``, ``"ROD5G"``, etc.)
+                lattice_description: n by m grid describing the material composition of each pin
+                (e.g. for a 10x10 BWR assembly, entries like ``"ROD1"``, ``"ROD5G"``, etc.)
 
-          Convention is x-increasing, y-increasing:
+            Convention is x-increasing, y-increasing:
 
-          - the first row is the bottom of the lattice, ordered in x-increasing direction
-          - the last row is the top of the lattice
-          - the first column is the left, ordered in y-increasing direction
-          - the last column is the right
+                - the first row is the bottom of the lattice, ordered in x-increasing direction
+                - the last row is the top of the lattice
+                - the first column is the left, ordered in y-increasing direction
+                - the last column is the right
 
-        - assembly_pitch: pitch of the assembly lattice
-        - gap_wide: width of the gap between fuel pins
-        - channel_box_thickness: thickness of the channel box (if any)
-        - corner_inner_radius_of_curvature: inner radius of curvature for corners (if any)
-        - Gd_rod_ids: material descriptors for Gd-bearing fuel pins
-        - non_fuel_rod_ids: material descriptors for water rods, guide tubes, etc.
+                assembly_pitch: pitch of the assembly lattice
+                gap_wide: width of the gap between fuel pins
+                channel_box_thickness: thickness of the channel box (if any)
+                corner_inner_radius_of_curvature: inner radius of curvature for corners (if any)
+                Gd_rod_ids: material descriptors for Gd-bearing fuel pins
+                non_fuel_rod_ids: material descriptors for water rods, guide tubes, etc.
 
-        **PIN_GEOMETRY**:
+            PIN_GEOMETRY:
+                fuel_radius: radius of the fuel region
+                gap_radius: radius of the gap region (if any)
+                clad_radius: radius of the cladding region (if any)
+                height: height of the pin
+                self_shielding_option: ``"Santamarina"``, ``"user_defined"``, or ``"automatic"``
+                options_dict: additional options (user-defined radii, number of radial zones, etc.)
 
-        - fuel_radius: radius of the fuel region
-        - gap_radius: radius of the gap region (if any)
-        - clad_radius: radius of the cladding region (if any)
-        - height: height of the pin
-        - self_shielding_option: ``"Santamarina"``, ``"user_defined"``, or ``"automatic"``
-        - options_dict: additional options (user-defined radii, number of radial zones, etc.)
+            WATER_ROD_GEOMETRY:
+                type: "circular" or "square"
+                inner_radius : <value> (for circular water rods)
+                outer_radius : <value> (for circular water rods)
+                inner_side : <value> (for square water rods)
+                outer_side : <value> (for square water rods)
+                centers: [(x, y) coordinates for the centers of the water rods in the lattice, e.g. [(0.5, 0.5), (2.5, 0.5)] for two water rods centered in the middle of the first and third cells of the first row of the lattice)]
         """
         with open(geometry_description_yaml, 'r') as file:
             yaml_data = yaml.safe_load(file)
