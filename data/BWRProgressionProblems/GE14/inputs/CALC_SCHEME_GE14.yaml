@@ -20,7 +20,7 @@ DRAGON_CALCULATION_SCHEME:
     # ------------------------------------------------------------------
     - name: "SSH"
       step_type: "self_shielding"
-      # implement self_shielding_module
+      self_shielding_module: "USS"
       self_shielding_method: "RSE"
       spatial_method: "CP"
       tracking: "TISO"

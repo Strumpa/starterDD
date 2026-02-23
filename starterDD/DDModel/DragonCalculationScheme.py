@@ -15,7 +15,8 @@ from copy import deepcopy
 # ---------------------------------------------------------------------------
 
 VALID_STEP_TYPES = ("self_shielding", "flux")
-VALID_SELF_SHIELDING_METHODS = ("USS", "SHI", "RSE", "None")  # USS: subgroup, SHI: Stammler, RSE: subgroup+equivalence, None: no self-shielding
+VALID_SELF_SHIELDING_MODULES = ("USS", "SHI")  # USS: unresolved resonance, SHI: Stammler
+VALID_SELF_SHIELDING_METHODS = ("RSE", "PT")  # RSE: subgroup+equivalence, PT: probability tables
 VALID_SPATIAL_METHODS = ("CP", "IC", "MOC")
 VALID_TRACKING_OPTIONS = ("TISO", "TSPC")
 VALID_RADIAL_SCHEMES = ("Santamarina", "automatic", "user_defined")
@@ -132,8 +133,12 @@ class CalculationStep:
     A step combines:
 
     * **Step type** (``"self_shielding"`` or ``"flux"``).
-    * **Method pair**: a self-shielding/energy method (``"USS"`` or ``"SHI"``)
-      coupled with a spatial solution method (``"CP"``, ``"IC"``, ``"MOC"``).
+    * **Self-shielding module** (only for ``step_type="self_shielding"``):
+      ``"USS"`` or ``"SHI"`` DRAGON5 module to be used at the self-shielding step.
+    * **Self-shielding method** (only for ``step_type="self_shielding"``):
+      ``"RSE"`` (Resoncance Spectrum Expansion) or ``"PT"`` (CALENDF Probability Tables).
+    * **Spatial solution method** (``"CP"``, ``"IC"``, ``"MOC"``).
+      ``"MOC"`` is only valid for flux steps.
     * **Tracking option** (``"TISO"`` or ``"TSPC"``).  For the ``IC`` spatial
       method only ``"TISO"`` is valid; ``CP`` and ``MOC`` support both.
     * **Radial discretization** (self-shielding radii strategy) applied to
@@ -150,8 +155,12 @@ class CalculationStep:
         Human-readable step identifier (e.g. ``"SSH"``, ``"FLUX_L1"``).
     step_type : str
         ``"self_shielding"`` or ``"flux"``.
-    self_shielding_method : str
-        Energy self-shielding method: ``"USS"`` or ``"SHI"``.
+    self_shielding_module : str or None
+        DRAGON self-shielding module: ``"USS"`` or ``"SHI"``.
+        Only applicable for ``step_type="self_shielding"``, ignored otherwise.
+    self_shielding_method : str or None
+        Energy self-shielding method: ``"RSE"`` or ``"PT"``.
+        Only applicable for ``step_type="self_shielding"``, ignored otherwise.
     spatial_method : str
         Spatial solution method: ``"CP"``, ``"IC"``, or ``"MOC"``.
         ``"MOC"`` is only valid for flux steps.
@@ -191,8 +200,9 @@ class CalculationStep:
         self,
         name,
         step_type,
-        self_shielding_method,
         spatial_method,
+        self_shielding_module=None,
+        self_shielding_method=None,
         tracking="TISO",
         flux_level=None,
         radial_scheme="Santamarina",
@@ -212,12 +222,7 @@ class CalculationStep:
                 f"Valid options: {VALID_STEP_TYPES}"
             )
 
-        # --- Validate method pair ---
-        if self_shielding_method not in VALID_SELF_SHIELDING_METHODS:
-            raise ValueError(
-                f"Invalid self_shielding_method '{self_shielding_method}'. "
-                f"Valid options: {VALID_SELF_SHIELDING_METHODS}"
-            )
+        # --- Validate spatial method ---
         if spatial_method not in VALID_SPATIAL_METHODS:
             raise ValueError(
                 f"Invalid spatial_method '{spatial_method}'. "
@@ -228,6 +233,39 @@ class CalculationStep:
                 "MOC spatial method is only available for flux steps, "
                 "not for self-shielding steps."
             )
+
+        # --- Validate self-shielding module/method (only for self_shielding steps) ---
+        if step_type == "self_shielding":
+            if self_shielding_module is None:
+                raise ValueError(
+                    "self_shielding_module is required for self_shielding steps. "
+                    f"Valid options: {VALID_SELF_SHIELDING_MODULES}"
+                )
+            if self_shielding_module not in VALID_SELF_SHIELDING_MODULES:
+                raise ValueError(
+                    f"Invalid self_shielding_module '{self_shielding_module}'. "
+                    f"Valid options: {VALID_SELF_SHIELDING_MODULES}"
+                )
+            if self_shielding_method is None:
+                raise ValueError(
+                    "self_shielding_method is required for self_shielding steps. "
+                    f"Valid options: {VALID_SELF_SHIELDING_METHODS}"
+                )
+            if self_shielding_method not in VALID_SELF_SHIELDING_METHODS:
+                raise ValueError(
+                    f"Invalid self_shielding_method '{self_shielding_method}'. "
+                    f"Valid options: {VALID_SELF_SHIELDING_METHODS}"
+                )
+        else:
+            # For non-self-shielding steps, these should be None
+            if self_shielding_module is not None:
+                raise ValueError(
+                    "self_shielding_module should not be set for flux steps."
+                )
+            if self_shielding_method is not None:
+                raise ValueError(
+                    "self_shielding_method should not be set for flux steps."
+                )
 
         # --- Validate tracking vs spatial method ---
         if tracking not in VALID_TRACKING_OPTIONS:
@@ -250,6 +288,7 @@ class CalculationStep:
 
         self.name = name
         self.step_type = step_type
+        self.self_shielding_module = self_shielding_module
         self.self_shielding_method = self_shielding_method
         self.spatial_method = spatial_method
         self.tracking = tracking
@@ -389,10 +428,14 @@ class CalculationStep:
 
     def __repr__(self):
         level_str = f", flux_level={self.flux_level}" if self.flux_level else ""
+        if self.step_type == "self_shielding":
+            method_str = f"module={self.self_shielding_module}, method={self.self_shielding_method}, spatial={self.spatial_method}"
+        else:
+            method_str = f"spatial={self.spatial_method}"
         return (
             f"CalculationStep(name='{self.name}', "
             f"type='{self.step_type}', "
-            f"method=({self.self_shielding_method}, {self.spatial_method}), "
+            f"{method_str}, "
             f"tracking='{self.tracking}'{level_str})"
         )
 
@@ -491,38 +534,39 @@ class DragonCalculationScheme:
         Expected YAML structure::
 
             DRAGON_CALCULATION_SCHEME:
-              name: "GE14_standard"
+              name: "MyScheme" (human-readable identifier)
               steps:
-                - name: "SSH"
-                  step_type: "self_shielding"
-                  self_shielding_method: "USS"
-                  spatial_method: "CP"
-                  tracking: "TISO"
+                - name: "name_of_step" (human-readable identifier)
+                  step_type: "flux" or "self_shielding"
+                  self_shielding_module: "USS" or "SHI" (only for self_shielding steps)
+                  self_shielding_method: "RSE" or "PT"  (only for self_shielding steps)
+                  spatial_method: "IC" or "MOC" or "CP"
+                  tracking: "TISO" or "TSPC" (TISO only for IC)
+                  flux_level: <n>  # optional, for multi-level flux schemes
                   radial_scheme: "Santamarina"
+                  export_macros: boolean flag to export MACRO properties defined in glow_builder, used in IC tracking
+                  
                   sectorization:
-                    enabled: false
-
-                - name: "FLUX"
-                  step_type: "flux"
-                  self_shielding_method: "USS"
-                  spatial_method: "IC"
-                  tracking: "TISO"
-                  flux_level: null
-                  radial_scheme: "Santamarina"
-                  export_macros: true
-                  sectorization:
-                    enabled: true
-                    windmill: true
+                    enabled: boolean flag to enable azimuthal sectorization for this step
+                    windmill: boolean flag to apply windmill sectorization (in outermost region only)
                     fuel_pins:
-                      sectors: [1, 1, 1, 1, 1, 1, 8]
-                      angles:  [0, 0, 0, 0, 0, 0, 22.5]
+                      sectors: [(list of sector counts per region, e.g. [1, 1, 1, 1, 1, 1, 8] for UOX (4 regions)+gap+clad with subdivided coolant)]
+                      angles:  [(list of angles to apply to each region sector, e.g. [0, 0, 0, 0, 0, 0, 0, 0, 22.5] for 22.5° offset on coolant only)]
                     Gd_pins:
-                      sectors: [1, 1, 1, 1, 1, 1, 1, 1, 8]
-                      angles:  [0, 0, 0, 0, 0, 0, 0, 0, 22.5]
+                      sectors: [(same as fuel_pins but for Gd-bearing pins, e.g. [1, 1, 1, 1, 1, 1, 1, 1, 8] for Santamarina sectorization on all rings and subdivided coolant)]
+                      angles:  [(same as fuel_pins but for Gd-bearing pins, e.g. [0, 0, 0, 0, 0, 0, 0, 0, 22.5] for 22.5° offset on coolant only)]
                     water_rods:
-                      sectors: [1, 1, 8]
-                      angles:  [0, 0, 0]
-
+                      sectors: [(list of sector counts per ring for water rods, e.g. [1, 1, 8] for 1 moderator, 1 clad, and subdivided coolant)]
+                      angles:  [(list of angles for water rods, e.g. [0, 0, 22.5] for 22.5° offset on coolant only)]
+                
+                  box_discretization: 
+                    enabled: boolean flag to enable sub-meshing of the assembly box peripheral regions into a grid of sub-faces (for MOC tracking)
+                    corner_splits: [nx, ny]  # grid size for corner regions, default [4, 4]
+                    side_x_splits: [nx, ny]  # grid size to submesh inter assembly moderator, horizontal sides : [10, 1] by default
+                    side_y_splits: [8, 30]   # grid size to submesh inter assembly moderator, vertical sides : [1, 10] by default
+        
+        Note : the sectorization config matches sectorization options in glow's ``Cell.sectorize()`` method.
+                      
         Parameters
         ----------
         yaml_path : str
@@ -599,23 +643,47 @@ class DragonCalculationScheme:
                 side_y_splits=box_disc_raw.get("side_y_splits", None),
             )
 
-        return CalculationStep(
-            name=d["name"],
-            step_type=d["step_type"],
-            self_shielding_method=d.get("self_shielding_method", "USS"),
-            spatial_method=d.get("spatial_method", "CP"),
-            tracking=d.get("tracking", "TISO"),
-            flux_level=d.get("flux_level", None),
-            radial_scheme=d.get("radial_scheme", "Santamarina"),
-            radial_params=d.get("radial_params", {}),
-            radial_overrides=radial_overrides,
-            sectorization_enabled=sect_enabled,
-            fuel_sectors=fuel_sectors,
-            gd_sectors=gd_sectors,
-            water_rod_sectors=water_rod_sectors,
-            export_macros=d.get("export_macros", False),
-            box_discretization=box_disc,
-        )
+        # --- Build CalculationStep with appropriate parameters ---
+        step_type = d["step_type"]
+        
+        # Only include self_shielding_module and self_shielding_method for self_shielding steps
+        if step_type == "self_shielding":
+            return CalculationStep(
+                name=d["name"],
+                step_type=step_type,
+                self_shielding_module=d.get("self_shielding_module", "USS"),
+                self_shielding_method=d.get("self_shielding_method", "RSE"),
+                spatial_method=d.get("spatial_method", "CP"),
+                tracking=d.get("tracking", "TISO"),
+                flux_level=d.get("flux_level", None),
+                radial_scheme=d.get("radial_scheme", "Santamarina"),
+                radial_params=d.get("radial_params", {}),
+                radial_overrides=radial_overrides,
+                sectorization_enabled=sect_enabled,
+                fuel_sectors=fuel_sectors,
+                gd_sectors=gd_sectors,
+                water_rod_sectors=water_rod_sectors,
+                export_macros=d.get("export_macros", False),
+                box_discretization=box_disc,
+            )
+        else:
+            # Flux steps: no self_shielding_module or self_shielding_method
+            return CalculationStep(
+                name=d["name"],
+                step_type=step_type,
+                spatial_method=d.get("spatial_method", "CP"),
+                tracking=d.get("tracking", "TISO"),
+                flux_level=d.get("flux_level", None),
+                radial_scheme=d.get("radial_scheme", "Santamarina"),
+                radial_params=d.get("radial_params", {}),
+                radial_overrides=radial_overrides,
+                sectorization_enabled=sect_enabled,
+                fuel_sectors=fuel_sectors,
+                gd_sectors=gd_sectors,
+                water_rod_sectors=water_rod_sectors,
+                export_macros=d.get("export_macros", False),
+                box_discretization=box_disc,
+            )
 
     # ------------------------------------------------------------------
     # Presets
@@ -628,28 +696,36 @@ class DragonCalculationScheme:
 
         Available presets:
 
-        ``"BWR_standard"``
-            Two-step scheme for BWR assemblies:
+        ``"BWR_fine_1L"``
+            Two-step scheme for BWR assemblies with fine MOC flux:
 
-            1. **SSH**: USS self-shielding with CP spatial method,
-               Santamarina radii, no sectorization, TISO tracking.
-            2. **FLUX**: USS self-shielding with IC spatial method,
-               Santamarina radii, windmill sectorization
-               (8 coolant sectors), TISO tracking, macro export.
+            1. **SSH**: USS module, RSE self-shielding method, IC spatial
+               method, Santamarina radii, no sectorization, TISO tracking,
+               macro export enabled.
+            2. **FLUX**: MOC spatial method, TSPC tracking, Santamarina radii,
+               full windmill sectorization (8 sectors on all regions),
+               box discretization enabled.
 
-        ``"BWR_fine"``
+        ``"BWR_2L"``
             Three-step scheme with two flux levels:
 
-            1. **SSH**: same as BWR_standard.
-            2. **FLUX_L1**: IC flux on Santamarina radii with windmill.
-            3. **FLUX_L2**: MOC flux on Santamarina radii with finer
-               sectorization, TSPC tracking.
+            1. **SSH**: USS module, RSE self-shielding method, IC spatial
+               method, Santamarina radii, no sectorization, TISO tracking,
+               macro export enabled.
+            2. **FLUX_L1**: IC spatial method, TISO tracking, flux_level=1,
+               Santamarina radii, windmill sectorization (8 sectors on
+               coolant only), macro export enabled.
+            3. **FLUX_L2**: MOC spatial method, TSPC tracking, flux_level=2,
+               Santamarina radii, full windmill sectorization (8 sectors
+               on all regions), box discretization enabled, macro export.
 
         ``"BWR_CP"``
             Two-step CP-based scheme:
 
-            1. **SSH**: USS + CP, Santamarina, no sectors, TISO.
-            2. **FLUX**: USS + CP, Santamarina, no sectors, TISO.
+            1. **SSH**: USS module, PT self-shielding method, CP spatial
+               method, Santamarina radii, no sectorization, TISO tracking.
+            2. **FLUX**: CP spatial method, TSPC tracking, Santamarina radii,
+               no sectorization.
 
         Parameters
         ----------
@@ -660,8 +736,8 @@ class DragonCalculationScheme:
         DragonCalculationScheme
         """
         builders = {
-            "BWR_standard": cls._preset_BWR_standard,
-            "BWR_fine": cls._preset_BWR_fine,
+            "BWR_fine_1L": cls._preset_BWR_fine_1L,
+            "BWR_2L": cls._preset_BWR_2L,
             "BWR_CP": cls._preset_BWR_CP,
         }
         if preset_name not in builders:
@@ -672,69 +748,77 @@ class DragonCalculationScheme:
         return builders[preset_name]()
 
     @classmethod
-    def _preset_BWR_standard(cls):
-        scheme = cls(name="BWR_standard")
+    def _preset_BWR_fine_1L(cls):
+        scheme = cls(name="BWR_fine_1L")
 
-        # Step 1: Self-shielding (USS + CP, no sectorization)
+        # Step 1: Self-shielding (USS + RSE + IC, no sectorization)
         scheme.add_step(CalculationStep(
             name="SSH",
             step_type="self_shielding",
-            self_shielding_method="USS",
-            spatial_method="CP",
-            tracking="TISO",
-            radial_scheme="Santamarina",
-            sectorization_enabled=False,
-        ))
-
-        # Step 2: Flux (USS + IC, windmill sectorization)
-        scheme.add_step(CalculationStep(
-            name="FLUX",
-            step_type="flux",
-            self_shielding_method="USS",
+            self_shielding_module="USS",
+            self_shielding_method="RSE",
             spatial_method="IC",
             tracking="TISO",
             radial_scheme="Santamarina",
-            sectorization_enabled=True,
+            sectorization_enabled=False,
             export_macros=True,
+        ))
+
+        # Step 2: Flux (MOC, windmill sectorization)
+        scheme.add_step(CalculationStep(
+            name="FLUX",
+            step_type="flux",
+            spatial_method="MOC",
+            tracking="TSPC",
+            radial_scheme="Santamarina",
+            sectorization_enabled=True,
+            export_macros=False,
             fuel_sectors=SectorConfig(
-                sectors=[1, 1, 1, 1, 1, 1, 8],
-                angles=[0, 0, 0, 0, 0, 0, 22.5],
+                sectors=[8, 8, 8, 8, 8, 8, 8],
+                angles=[22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5],
                 windmill=True,
             ),
             gd_sectors=SectorConfig(
-                sectors=[1, 1, 1, 1, 1, 1, 1, 1, 8],
-                angles=[0, 0, 0, 0, 0, 0, 0, 0, 22.5],
+                sectors=[8, 8, 8, 8, 8, 8, 8, 8, 8],
+                angles=[22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5],
                 windmill=True,
             ),
             water_rod_sectors=SectorConfig(
-                sectors=[1, 1, 8],
-                angles=[0, 0, 0],
+                sectors=[8, 8, 8],
+                angles=[22.5, 22.5, 22.5],
                 windmill=True,
+            ),
+            box_discretization=BoxDiscretizationConfig(
+                enabled=True,
+                corner_splits=(8, 8),
+                side_x_splits=(30, 8),
+                side_y_splits=(30, 8),
             ),
         ))
 
         return scheme
 
     @classmethod
-    def _preset_BWR_fine(cls):
-        scheme = cls(name="BWR_fine")
+    def _preset_BWR_2L(cls):
+        scheme = cls(name="BWR_2L")
 
         # Step 1: Self-shielding
         scheme.add_step(CalculationStep(
             name="SSH",
             step_type="self_shielding",
-            self_shielding_method="USS",
-            spatial_method="CP",
+            self_shielding_module="USS",
+            self_shielding_method="RSE",
+            spatial_method="IC",
             tracking="TISO",
             radial_scheme="Santamarina",
             sectorization_enabled=False,
+            export_macros=True,
         ))
 
         # Step 2: Flux level 1 (IC, windmill)
         scheme.add_step(CalculationStep(
             name="FLUX_L1",
             step_type="flux",
-            self_shielding_method="USS",
             spatial_method="IC",
             tracking="TISO",
             flux_level=1,
@@ -762,7 +846,6 @@ class DragonCalculationScheme:
         scheme.add_step(CalculationStep(
             name="FLUX_L2",
             step_type="flux",
-            self_shielding_method="USS",
             spatial_method="MOC",
             tracking="TSPC",
             flux_level=2,
@@ -770,25 +853,25 @@ class DragonCalculationScheme:
             sectorization_enabled=True,
             export_macros=True,
             fuel_sectors=SectorConfig(
-                sectors=[1, 1, 1, 1, 1, 1, 12],
-                angles=[0, 0, 0, 0, 0, 0, 15.0],
+                sectors=[8, 8, 8, 8, 8, 8, 8],
+                angles=[22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5],
                 windmill=True,
             ),
             gd_sectors=SectorConfig(
-                sectors=[1, 1, 1, 1, 1, 1, 1, 1, 12],
-                angles=[0, 0, 0, 0, 0, 0, 0, 0, 15.0],
+                sectors=[8, 8, 8, 8, 8, 8, 8, 8, 8],
+                angles=[22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5],
                 windmill=True,
             ),
             water_rod_sectors=SectorConfig(
-                sectors=[1, 1, 12],
-                angles=[0, 0, 0],
+                sectors=[8, 8, 8],
+                angles=[22.5, 22.5, 22.5],
                 windmill=True,
             ),
             box_discretization=BoxDiscretizationConfig(
                 enabled=True,
-                corner_splits=(4, 4),
-                side_x_splits=None,  # defaults to (n_cols, 1)
-                side_y_splits=None,  # defaults to (1, n_rows)
+                corner_splits=(8, 8),
+                side_x_splits=(30, 8),
+                side_y_splits=(30, 8),
             ),
         ))
 
@@ -801,7 +884,8 @@ class DragonCalculationScheme:
         scheme.add_step(CalculationStep(
             name="SSH",
             step_type="self_shielding",
-            self_shielding_method="USS",
+            self_shielding_module="USS",
+            self_shielding_method="PT",
             spatial_method="CP",
             tracking="TISO",
             radial_scheme="Santamarina",
@@ -811,9 +895,8 @@ class DragonCalculationScheme:
         scheme.add_step(CalculationStep(
             name="FLUX",
             step_type="flux",
-            self_shielding_method="USS",
             spatial_method="CP",
-            tracking="TISO",
+            tracking="TSPC",
             radial_scheme="Santamarina",
             sectorization_enabled=False,
         ))
@@ -835,6 +918,7 @@ class DragonCalculationScheme:
             lines.append(f"\nStep {i}: {step.name}")
             lines.append(f"  Type:       {step.step_type}")
             if step.step_type == "self_shielding":
+                lines.append(f"  SH module:  {step.self_shielding_module}")
                 lines.append(f"  SH method:  {step.self_shielding_method}")
             lines.append(f"  Method:     {step.spatial_method}")
             lines.append(f"  Tracking:   {step.tracking}")
@@ -854,7 +938,7 @@ class DragonCalculationScheme:
                 if step.water_rod_sectors:
                     lines.append(f"    WRod:  {step.water_rod_sectors}")
             lines.append(f"  Macros:     {step.export_macros}")
-            print(f"  Box disc:   {'enabled' if step.box_discretization and step.box_discretization.enabled else 'disabled'}")
+            lines.append(f"  Box disc:   {'enabled' if step.box_discretization and step.box_discretization.enabled else 'disabled'}")
             if step.box_discretization and step.box_discretization.enabled:
-                lines.append(f"  Box disc:   {step.box_discretization}")
+                lines.append(f"    {step.box_discretization}")
         return "\n".join(lines)

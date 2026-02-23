@@ -11,6 +11,14 @@ DragonModel
    :undoc-members:
    :show-inheritance:
 
+DragonCalculationScheme
+-----------------------
+
+.. automodule:: starterDD.DDModel.DragonCalculationScheme
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 DonjonModel
 -----------
 

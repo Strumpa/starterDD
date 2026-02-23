@@ -74,4 +74,8 @@ To rebuild this documentation locally:
    cd docs/
    make html
 
-Then open ``_build/html/index.html`` in your browser.
+Then open ``_build/html/index.html`` in your browser or use the following command:
+
+.. code-block:: bash
+
+   sphinx-autobuild . ./_build/html

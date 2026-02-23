@@ -12,7 +12,8 @@ a python package aiming to help get a more user friendly experience with using D
 - GeometryBuilder : uses the GLOW application developped by newcleo, avaialble at https://github.com/newcleo-dev-team/glow for surface element geometry definition of complex lattice geometries.
 
 
-## To be implemented [20/02/2026] : 
+## To be implemented [23/02/2026] : 
 - full "abstract" reactor model to support multi-physics.
+- Calls to EDI: and COMPO: modules to assist with post treatment. Equivalent Serpent2 detector creation.
 - adapting the meshing of neutronics calculation geometries to assembly geometries with control crosses.
 - python to CLE-2000 generator : create a full Dragon&Donjon case from the python model and generate equivalent CLE-2000 instructions to run. 

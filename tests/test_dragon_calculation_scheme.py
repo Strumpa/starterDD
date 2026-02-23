@@ -12,6 +12,7 @@ from starterDD.DDModel.DragonCalculationScheme import (
     SectorConfig,
     BoxDiscretizationConfig,
     VALID_STEP_TYPES,
+    VALID_SELF_SHIELDING_MODULES,
     VALID_SELF_SHIELDING_METHODS,
     VALID_SPATIAL_METHODS,
     VALID_TRACKING_OPTIONS,
@@ -133,13 +134,15 @@ class TestCalculationStep:
         step = CalculationStep(
             name="SSH",
             step_type="self_shielding",
-            self_shielding_method="USS",
+            self_shielding_module="USS",
+            self_shielding_method="RSE",
             spatial_method="CP",
             tracking="TISO",
         )
         assert step.name == "SSH"
         assert step.step_type == "self_shielding"
-        assert step.self_shielding_method == "USS"
+        assert step.self_shielding_module == "USS"
+        assert step.self_shielding_method == "RSE"
         assert step.spatial_method == "CP"
         assert step.tracking == "TISO"
         assert step.flux_level is None
@@ -151,13 +154,14 @@ class TestCalculationStep:
         step = CalculationStep(
             name="FLUX",
             step_type="flux",
-            self_shielding_method="USS",
             spatial_method="IC",
             tracking="TISO",
             flux_level=1,
             export_macros=True,
         )
         assert step.step_type == "flux"
+        assert step.self_shielding_module is None
+        assert step.self_shielding_method is None
         assert step.flux_level == 1
         assert step.export_macros is True
 
@@ -165,35 +169,78 @@ class TestCalculationStep:
         with pytest.raises(ValueError, match="Invalid step_type"):
             CalculationStep(
                 name="BAD", step_type="depletion",
-                self_shielding_method="USS", spatial_method="CP",
+                self_shielding_module="USS", self_shielding_method="RSE",
+                spatial_method="CP",
+            )
+
+    def test_invalid_self_shielding_module(self):
+        with pytest.raises(ValueError, match="Invalid self_shielding_module"):
+            CalculationStep(
+                name="BAD", step_type="self_shielding",
+                self_shielding_module="MAGIC", self_shielding_method="RSE",
+                spatial_method="CP",
             )
 
     def test_invalid_self_shielding_method(self):
         with pytest.raises(ValueError, match="Invalid self_shielding_method"):
             CalculationStep(
                 name="BAD", step_type="self_shielding",
-                self_shielding_method="MAGIC", spatial_method="CP",
+                self_shielding_module="USS", self_shielding_method="MAGIC",
+                spatial_method="CP",
+            )
+
+    def test_self_shielding_module_required_for_ssh_step(self):
+        with pytest.raises(ValueError, match="self_shielding_module is required"):
+            CalculationStep(
+                name="BAD", step_type="self_shielding",
+                self_shielding_method="RSE",
+                spatial_method="CP",
+            )
+
+    def test_self_shielding_method_required_for_ssh_step(self):
+        with pytest.raises(ValueError, match="self_shielding_method is required"):
+            CalculationStep(
+                name="BAD", step_type="self_shielding",
+                self_shielding_module="USS",
+                spatial_method="CP",
+            )
+
+    def test_self_shielding_module_not_allowed_for_flux_step(self):
+        with pytest.raises(ValueError, match="self_shielding_module should not be set for flux"):
+            CalculationStep(
+                name="BAD", step_type="flux",
+                self_shielding_module="USS",
+                spatial_method="CP",
+            )
+
+    def test_self_shielding_method_not_allowed_for_flux_step(self):
+        with pytest.raises(ValueError, match="self_shielding_method should not be set for flux"):
+            CalculationStep(
+                name="BAD", step_type="flux",
+                self_shielding_method="RSE",
+                spatial_method="CP",
             )
 
     def test_invalid_spatial_method(self):
         with pytest.raises(ValueError, match="Invalid spatial_method"):
             CalculationStep(
                 name="BAD", step_type="flux",
-                self_shielding_method="USS", spatial_method="FEM",
+                spatial_method="FEM",
             )
 
     def test_moc_only_for_flux(self):
         with pytest.raises(ValueError, match="MOC spatial method is only available for flux"):
             CalculationStep(
                 name="BAD", step_type="self_shielding",
-                self_shielding_method="USS", spatial_method="MOC",
+                self_shielding_module="USS", self_shielding_method="RSE",
+                spatial_method="MOC",
             )
 
     def test_ic_requires_tiso(self):
         with pytest.raises(ValueError, match="only supports 'TISO'"):
             CalculationStep(
                 name="BAD", step_type="flux",
-                self_shielding_method="USS", spatial_method="IC",
+                spatial_method="IC",
                 tracking="TSPC",
             )
 
@@ -201,7 +248,7 @@ class TestCalculationStep:
         with pytest.raises(ValueError, match="Invalid tracking"):
             CalculationStep(
                 name="BAD", step_type="flux",
-                self_shielding_method="USS", spatial_method="CP",
+                spatial_method="CP",
                 tracking="ANISO",
             )
 
@@ -209,14 +256,14 @@ class TestCalculationStep:
         with pytest.raises(ValueError, match="Invalid radial_scheme"):
             CalculationStep(
                 name="BAD", step_type="flux",
-                self_shielding_method="USS", spatial_method="CP",
+                spatial_method="CP",
                 radial_scheme="random",
             )
 
     def test_moc_with_tspc_valid(self):
         step = CalculationStep(
             name="FLUX_MOC", step_type="flux",
-            self_shielding_method="USS", spatial_method="MOC",
+            spatial_method="MOC",
             tracking="TSPC",
         )
         assert step.spatial_method == "MOC"
@@ -225,7 +272,7 @@ class TestCalculationStep:
     def test_sectorization_query_disabled(self):
         step = CalculationStep(
             name="S", step_type="flux",
-            self_shielding_method="USS", spatial_method="CP",
+            spatial_method="CP",
             sectorization_enabled=False,
             fuel_sectors=SectorConfig(sectors=[8]),
         )
@@ -238,7 +285,7 @@ class TestCalculationStep:
         wr_sc = SectorConfig(sectors=[1, 8])
         step = CalculationStep(
             name="S", step_type="flux",
-            self_shielding_method="USS", spatial_method="IC",
+            spatial_method="IC",
             sectorization_enabled=True,
             fuel_sectors=fuel_sc,
             gd_sectors=gd_sc,
@@ -251,7 +298,8 @@ class TestCalculationStep:
     def test_repr(self):
         step = CalculationStep(
             name="SSH", step_type="self_shielding",
-            self_shielding_method="USS", spatial_method="CP",
+            self_shielding_module="USS", self_shielding_method="RSE",
+            spatial_method="CP",
         )
         r = repr(step)
         assert "SSH" in r
@@ -260,7 +308,8 @@ class TestCalculationStep:
     def test_radial_overrides(self):
         step = CalculationStep(
             name="SSH", step_type="self_shielding",
-            self_shielding_method="USS", spatial_method="CP",
+            self_shielding_module="USS", self_shielding_method="RSE",
+            spatial_method="CP",
             radial_scheme="Santamarina",
             radial_overrides={
                 "Gd": {"scheme": "automatic", "params": {"num_radial_zones": 6}},
@@ -305,7 +354,8 @@ class TestDragonCalculationScheme:
         scheme = DragonCalculationScheme()
         step = CalculationStep(
             name="SSH", step_type="self_shielding",
-            self_shielding_method="USS", spatial_method="CP",
+            self_shielding_module="USS", self_shielding_method="RSE",
+            spatial_method="CP",
         )
         scheme.add_step(step)
         assert len(scheme.steps) == 1
@@ -320,7 +370,8 @@ class TestDragonCalculationScheme:
         scheme = DragonCalculationScheme()
         step = CalculationStep(
             name="SSH", step_type="self_shielding",
-            self_shielding_method="USS", spatial_method="CP",
+            self_shielding_module="USS", self_shielding_method="RSE",
+            spatial_method="CP",
         )
         scheme.add_step(step)
         assert scheme.get_step("SSH") is step
@@ -334,16 +385,17 @@ class TestDragonCalculationScheme:
         scheme = DragonCalculationScheme()
         ssh = CalculationStep(
             name="SSH", step_type="self_shielding",
-            self_shielding_method="USS", spatial_method="CP",
+            self_shielding_module="USS", self_shielding_method="RSE",
+            spatial_method="CP",
         )
         flux1 = CalculationStep(
             name="FLUX_L1", step_type="flux",
-            self_shielding_method="USS", spatial_method="IC",
+            spatial_method="IC",
             flux_level=1,
         )
         flux2 = CalculationStep(
             name="FLUX_L2", step_type="flux",
-            self_shielding_method="USS", spatial_method="MOC",
+            spatial_method="MOC",
             tracking="TSPC", flux_level=2,
         )
         scheme.add_step(ssh)
@@ -364,14 +416,15 @@ class TestDragonCalculationScheme:
         scheme = DragonCalculationScheme(name="test_scheme")
         scheme.add_step(CalculationStep(
             name="SSH", step_type="self_shielding",
-            self_shielding_method="USS", spatial_method="CP",
+            self_shielding_module="USS", self_shielding_method="RSE",
+            spatial_method="CP",
         ))
         r = repr(scheme)
         assert "test_scheme" in r
         assert "SSH" in r
 
     def test_summary(self):
-        scheme = DragonCalculationScheme.preset("BWR_standard")
+        scheme = DragonCalculationScheme.preset("BWR_fine_1L")
         summary = scheme.summary()
         assert "SSH" in summary
         assert "FLUX" in summary
@@ -385,38 +438,51 @@ class TestDragonCalculationScheme:
 
 class TestPresets:
 
-    def test_BWR_standard(self):
-        scheme = DragonCalculationScheme.preset("BWR_standard")
-        assert scheme.name == "BWR_standard"
+    def test_BWR_fine_1L(self):
+        scheme = DragonCalculationScheme.preset("BWR_fine_1L")
+        assert scheme.name == "BWR_fine_1L"
         assert len(scheme.steps) == 2
 
         ssh = scheme.get_step("SSH")
         assert ssh.step_type == "self_shielding"
-        assert ssh.self_shielding_method == "USS"
-        assert ssh.spatial_method == "CP"
+        assert ssh.self_shielding_module == "USS"
+        assert ssh.self_shielding_method == "RSE"
+        assert ssh.spatial_method == "IC"
         assert ssh.tracking == "TISO"
         assert ssh.radial_scheme == "Santamarina"
         assert ssh.sectorization_enabled is False
+        assert ssh.export_macros is True
 
         flux = scheme.get_step("FLUX")
         assert flux.step_type == "flux"
-        assert flux.spatial_method == "IC"
+        assert flux.self_shielding_module is None
+        assert flux.self_shielding_method is None
+        assert flux.spatial_method == "MOC"
+        assert flux.tracking == "TSPC"
         assert flux.sectorization_enabled is True
-        assert flux.export_macros is True
+        assert flux.export_macros is False
         assert flux.fuel_sectors is not None
         assert flux.fuel_sectors.windmill is True
         assert flux.gd_sectors is not None
         assert flux.water_rod_sectors is not None
+        assert flux.box_discretization is not None
+        assert flux.box_discretization.enabled is True
 
-    def test_BWR_fine(self):
-        scheme = DragonCalculationScheme.preset("BWR_fine")
-        assert scheme.name == "BWR_fine"
+    def test_BWR_2L(self):
+        scheme = DragonCalculationScheme.preset("BWR_2L")
+        assert scheme.name == "BWR_2L"
         assert len(scheme.steps) == 3
+
+        ssh = scheme.get_step("SSH")
+        assert ssh.step_type == "self_shielding"
+        assert ssh.self_shielding_module == "USS"
+        assert ssh.self_shielding_method == "RSE"
 
         flux_steps = scheme.get_flux_steps()
         assert len(flux_steps) == 2
         assert flux_steps[0].flux_level == 1
         assert flux_steps[0].spatial_method == "IC"
+        assert flux_steps[0].self_shielding_module is None
         assert flux_steps[1].flux_level == 2
         assert flux_steps[1].spatial_method == "MOC"
         assert flux_steps[1].tracking == "TSPC"
@@ -427,9 +493,20 @@ class TestPresets:
         scheme = DragonCalculationScheme.preset("BWR_CP")
         assert scheme.name == "BWR_CP"
         assert len(scheme.steps) == 2
-        for step in scheme.steps:
-            assert step.spatial_method == "CP"
-            assert step.sectorization_enabled is False
+
+        ssh = scheme.get_step("SSH")
+        assert ssh.step_type == "self_shielding"
+        assert ssh.self_shielding_module == "USS"
+        assert ssh.self_shielding_method == "PT"
+        assert ssh.spatial_method == "CP"
+        assert ssh.sectorization_enabled is False
+
+        flux = scheme.get_step("FLUX")
+        assert flux.step_type == "flux"
+        assert flux.self_shielding_module is None
+        assert flux.spatial_method == "CP"
+        assert flux.tracking == "TSPC"
+        assert flux.sectorization_enabled is False
 
     def test_invalid_preset(self):
         with pytest.raises(ValueError, match="Unknown preset"):
@@ -449,12 +526,15 @@ class TestFromYAML:
 
         ssh = scheme.get_step("SSH")
         assert ssh.step_type == "self_shielding"
+        assert ssh.self_shielding_module == "USS"
         assert ssh.self_shielding_method == "RSE"
         assert ssh.spatial_method == "CP"
         assert ssh.sectorization_enabled is False
 
         flux = scheme.get_step("FLUX")
         assert flux.step_type == "flux"
+        assert flux.self_shielding_module is None
+        assert flux.self_shielding_method is None
         assert flux.spatial_method == "IC"
         assert flux.tracking == "TISO"
         assert flux.export_macros is True
@@ -473,7 +553,8 @@ class TestFromYAML:
                     {
                         "name": "SSH",
                         "step_type": "self_shielding",
-                        "self_shielding_method": "USS",
+                        "self_shielding_module": "USS",
+                        "self_shielding_method": "RSE",
                         "spatial_method": "CP",
                         "tracking": "TISO",
                         "radial_scheme": "Santamarina",
@@ -482,7 +563,6 @@ class TestFromYAML:
                     {
                         "name": "FLUX_MOC",
                         "step_type": "flux",
-                        "self_shielding_method": "USS",
                         "spatial_method": "MOC",
                         "tracking": "TSPC",
                         "flux_level": 2,
@@ -542,7 +622,8 @@ class TestFromYAML:
                     {
                         "name": "SSH",
                         "step_type": "self_shielding",
-                        "self_shielding_method": "USS",
+                        "self_shielding_module": "USS",
+                        "self_shielding_method": "RSE",
                         "spatial_method": "CP",
                         "radial_scheme": "Santamarina",
                         "radial_overrides": {
@@ -584,7 +665,8 @@ class TestApplyRadii:
 
         step = CalculationStep(
             name="SSH", step_type="self_shielding",
-            self_shielding_method="USS", spatial_method="CP",
+            self_shielding_module="USS", self_shielding_method="RSE",
+            spatial_method="CP",
             radial_scheme="Santamarina",
         )
         step.apply_radii(assembly)
@@ -606,7 +688,8 @@ class TestApplyRadii:
 
         step = CalculationStep(
             name="SSH", step_type="self_shielding",
-            self_shielding_method="USS", spatial_method="CP",
+            self_shielding_module="USS", self_shielding_method="RSE",
+            spatial_method="CP",
             radial_scheme="automatic",
             radial_params={"num_radial_zones": 3},
         )
@@ -625,7 +708,8 @@ class TestApplyRadii:
 
         step = CalculationStep(
             name="SSH", step_type="self_shielding",
-            self_shielding_method="USS", spatial_method="CP",
+            self_shielding_module="USS", self_shielding_method="RSE",
+            spatial_method="CP",
             radial_scheme="Santamarina",
             radial_overrides={
                 "Gd": {"scheme": "automatic", "params": {"num_radial_zones": 6}},
@@ -650,7 +734,8 @@ class TestApplyRadii:
         )
         step = CalculationStep(
             name="SSH", step_type="self_shielding",
-            self_shielding_method="USS", spatial_method="CP",
+            self_shielding_module="USS", self_shielding_method="RSE",
+            spatial_method="CP",
         )
         with pytest.raises(RuntimeError, match="lattice has not been built"):
             step.apply_radii(assembly)
