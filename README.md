@@ -7,7 +7,7 @@ a python package aiming to help get a more user friendly experience with using D
 ## The main modules are : 
 - DDModel : allows users to define an Donjon&Dragon model based on an input yaml file
     - The Dragon model handles fuel regions sub-divisions for self-shielding problems, physical property assignment and isotopic library definition in CLE-2000 format.
-    - The Donjon model allows to build 3D cartesian core goemtries from a 2D core layout and associated axial layout descriptors provided in YAML format.
+    - The Donjon model allows to build 3D cartesian core geometries from a 2D core layout and associated axial layout descriptors provided in YAML format.
     - The DragonCalculationScheme model allows to create CalculationSteps and associate a SECTORIZED geometry to the DragonModel's TECHNOLOGICAL geometry based on selected dicretization options.
 - GeometryBuilder : uses the GLOW application developped by newcleo, available at https://github.com/newcleo-dev-team/glow for surface element geometry definition of complex lattice geometries.
 
