@@ -25,7 +25,7 @@ DRAGON_CALCULATION_SCHEME:
       radial_scheme: "Santamarina"
       export_macros: True
       sectorization:
-        enabled: False
+        enabled: True
         windmill: False
         fuel_pins:
           # UOX pins: 4 Santamarina fuel zones + gap + clad + coolant = 7 regions

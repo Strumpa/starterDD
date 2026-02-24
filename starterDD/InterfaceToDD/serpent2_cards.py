@@ -6,7 +6,8 @@
 
 import re
 import string
-from typing import Optional
+import warnings
+from typing import Optional, Union
 
 # ── Reaction MT number mappings ──
 
@@ -108,6 +109,37 @@ def get_xs_suffix(temperature: float, suffix_map: dict = None) -> str:
     # Find closest temperature
     closest_temp = min(suffix_map.keys(), key=lambda t: abs(t - temperature))
     return suffix_map[closest_temp]
+
+
+def _reaction_name_to_mt(reaction: Union[str, int]) -> int:
+    """Convert a reaction name to its MT number.
+    
+    Args:
+        reaction: Either a reaction name string (e.g., 'Fission', 'absorption')
+                 or an MT number (int). If already an int, returns it unchanged.
+    
+    Returns:
+        MT number (int).
+    
+    Raises:
+        ValueError: If reaction name is not found in REACTION_TO_MT_NUMBER.
+    """
+    if isinstance(reaction, int):
+        return reaction
+    
+    if reaction in REACTION_TO_MT_NUMBER:
+        return REACTION_TO_MT_NUMBER[reaction]
+    
+    # Try case-insensitive match
+    reaction_lower = reaction.lower()
+    for name, mt in REACTION_TO_MT_NUMBER.items():
+        if name.lower() == reaction_lower:
+            return mt
+    
+    raise ValueError(
+        f"Unknown reaction name: '{reaction}'. "
+        f"Valid names: {list(REACTION_TO_MT_NUMBER.keys())}"
+    )
 
 
 def parse_isotope_name(name: str) -> tuple:
@@ -985,6 +1017,25 @@ class S2_EnergyGrid:
         self.boundaries = sorted(boundaries)
     
     @classmethod
+    def full_range(cls, name: str = "full",
+                   e_min: float = 1.0E-11,
+                   e_max: float = 2.0E+1):
+        """Create a single-bin energy grid covering the full energy range.
+        
+        This is the default for reaction rate detectors where energy-resolved
+        results are not needed — scores are integrated over all energies.
+        
+        Args:
+            name: Grid name.
+            e_min: Minimum energy in MeV (default: 1e-11 MeV = 0.01 meV).
+            e_max: Maximum energy in MeV (default: 20 MeV).
+        
+        Returns:
+            S2_EnergyGrid instance with a single energy bin.
+        """
+        return cls(name, [e_min, e_max])
+    
+    @classmethod
     def two_group(cls, name: str = "2g",
                   thermal_cutoff: float = 6.25E-7,
                   e_min: float = 1.0E-11,
@@ -1045,17 +1096,25 @@ class S2_Detector:
     """Represents a single Serpent2 `det` card.
     
     Supports scoring reaction rates for specified isotopes over specified
-    material domains, with energy binning.
+    material or universe domains, with energy binning.
     
     In Serpent2, a detector response is defined by:
         dr <MT> <material>  -- where material is a single-isotope "response material"
         dm <material>       -- domain material(s) where the reaction is scored
+        du <universe>       -- domain universe where the reaction is scored
         de <energy_grid>    -- energy binning
         dt <flag>           -- detector type flag
+    
+    Using `du` (detector universe) is preferred when you want to score
+    reaction rates integrated over an entire pin universe, as it automatically
+    sums over all material regions within that universe.
+    
+    Using `dm` with `dt -4` provides cumulative scores over materials.
     """
     
     def __init__(self, name: str, energy_grid_name: str = None,
                  domain_materials: list = None,
+                 domain_universe: str = None,
                  responses: list = None,
                  detector_type: int = None):
         """
@@ -1063,15 +1122,18 @@ class S2_Detector:
             name: Detector name/identifier.
             energy_grid_name: Name of the energy grid (ene card) to use.
             domain_materials: List of material names over which to integrate.
+            domain_universe: Universe name for universe-based scoring (du card).
+                            If set, scores are integrated over the entire universe.
             responses: List of (MT_number, response_material_name) tuples.
                       MT_number: positive for standard MT, negative for special.
                       response_material_name: single-isotope material for dr card.
                       Use MT=-6 for total fission, MT=-2 for total absorption, etc.
-            detector_type: dt flag value (e.g., -4 for division by volume).
+            detector_type: dt flag value (e.g., -4 for cumulative over materials).
         """
         self.name = name
         self.energy_grid_name = energy_grid_name
         self.domain_materials = domain_materials or []
+        self.domain_universe = domain_universe
         self.responses = responses or []
         self.detector_type = detector_type
     
@@ -1106,7 +1168,11 @@ class S2_Detector:
         if self.detector_type is not None:
             lines.append(f"    dt {self.detector_type}")
         
-        # Domain materials
+        # Universe-based domain (preferred for pin-wise scoring)
+        if self.domain_universe:
+            lines.append(f"    du {self.domain_universe}")
+        
+        # Material-based domains
         if self.domain_materials:
             dm_parts = "  ".join(f"dm {m}" for m in self.domain_materials)
             lines.append(f"    {dm_parts}")
@@ -1119,23 +1185,35 @@ class S2_Detector:
     
     @classmethod
     def for_pin(cls, pin_universe: 'S2_PinUniverse',
-                isotopes: list, reactions: list,
+                reaction_isotope_map: dict = None,
                 energy_grid_name: str = None,
                 detector_type: int = -4,
-                suffix: str = ""):
+                suffix: str = "",
+                # Deprecated parameters for backward compatibility
+                isotopes: list = None,
+                reactions: list = None):
         """Create a detector for a specific pin universe.
         
-        Creates responses for each (reaction, isotope) combination.
-        Domain materials are the fuel materials of the pin.
+        Creates responses for each (reaction, isotope) combination as specified
+        in the reaction_isotope_map. Uses material-based scoring (`dm` cards)
+        with the fuel materials of the pin. Combined with `dt -4`, this sums
+        scores over all fuel material zones within the pin, matching the Dragon
+        _by_pin numbering convention.
+        
+        Only fuel materials are included in the domain (gap, clad, coolant
+        are excluded), ensuring reaction rates are scored in the fuel pellet only.
         
         Args:
-            pin_universe: S2_PinUniverse whose fuel materials define the domain.
-            isotopes: List of isotope names (e.g., ['U235', 'U238', 'Pu239']).
-                     These must correspond to single-isotope response materials.
-            reactions: List of MT numbers to score (e.g., [18, 102]).
+            pin_universe: S2_PinUniverse whose fuel materials define the
+                         scoring domain.
+            reaction_isotope_map: Dict mapping reaction names to lists of isotopes.
+                         e.g., {'Fission': ['U235', 'U238'], 'absorption': ['U235', 'Gd155']}
+                         Reaction names are converted to MT numbers internally.
             energy_grid_name: Energy grid to use.
-            detector_type: dt flag.
+            detector_type: dt flag (default -4 to sum over all fuel zones).
             suffix: Optional suffix for detector name.
+            isotopes: DEPRECATED. Use reaction_isotope_map instead.
+            reactions: DEPRECATED. Use reaction_isotope_map instead.
         
         Returns:
             S2_Detector instance.
@@ -1148,16 +1226,31 @@ class S2_Detector:
             detector_type=detector_type,
         )
         
-        for mt in reactions:
-            for iso in isotopes:
-                # Response material name = bare isotope name (AT10 convention)
-                det.add_response(mt, iso)
+        # Handle new API: reaction_isotope_map
+        if reaction_isotope_map is not None:
+            for reaction_name, isotope_list in reaction_isotope_map.items():
+                mt = _reaction_name_to_mt(reaction_name)
+                for iso in isotope_list:
+                    det.add_response(mt, iso)
+        # Handle deprecated API: isotopes + reactions
+        elif isotopes is not None and reactions is not None:
+            warnings.warn(
+                "The 'isotopes' and 'reactions' parameters are deprecated. "
+                "Use 'reaction_isotope_map' instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            for reaction in reactions:
+                mt = _reaction_name_to_mt(reaction) if isinstance(reaction, str) else reaction
+                for iso in isotopes:
+                    det.add_response(mt, iso)
         
         return det
     
     def __repr__(self):
+        n_domains = len(self.domain_materials) + (1 if self.domain_universe else 0)
         return (f"S2_Detector('{self.name}', {len(self.responses)} responses, "
-                f"{len(self.domain_materials)} domains)")
+                f"{n_domains} domains)")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1700,12 +1793,15 @@ class Serpent2Model:
             outer_water_material=outer_water_material,
         )
     
-    def add_detector_config(self, isotopes: list, reactions: list,
+    def add_detector_config(self, reaction_isotope_map: dict = None,
                             energy_bounds: list = None,
-                            energy_grid_name: str = "2g",
+                            energy_grid_name: str = "full",
                             fuel_temperature: float = 900.0,
                             xs_suffix: str = None,
-                            detector_type: int = -4):
+                            detector_type: int = -4,
+                            # Deprecated parameters for backward compatibility
+                            isotopes: list = None,
+                            reactions: list = None):
         """Configure detectors for reaction rate scoring.
         
         Creates:
@@ -1716,31 +1812,71 @@ class Serpent2Model:
         This is analogous to the Dragon5 EDI/COMPO export functionality.
         
         Args:
-            isotopes: List of isotope names to track (e.g., ['U235', 'U238', 'Pu239']).
-            reactions: List of MT numbers to score (e.g., [18, 102] for fission + capture).
-                      Use Serpent2 special codes: -6 for total fission rate, etc.
+            reaction_isotope_map: Dict mapping reaction names to lists of isotopes.
+                         e.g., {'Fission': ['U235', 'U238'], 'absorption': ['Gd155', 'Gd157']}
+                         Reaction names are converted to MT numbers internally.
+                         Only isotopes with data for each reaction should be listed.
             energy_bounds: Energy boundaries in MeV for binning.
-                          Default: 2-group [1e-11, 6.25e-7, 19.64].
-            energy_grid_name: Name for the energy grid.
+                          Default: full range (single bin, no energy resolution).
+                          Use [1e-11, 6.25e-7, 19.64] for 2-group.
+            energy_grid_name: Name for the energy grid (default: 'full').
             fuel_temperature: Temperature for response materials.
             xs_suffix: Override XS suffix for response materials.
-            detector_type: dt flag for detectors.
+            detector_type: dt flag for detectors (default: -4 to sum over
+                          all fuel zones in each pin).
+            isotopes: DEPRECATED. Use reaction_isotope_map instead.
+            reactions: DEPRECATED. Use reaction_isotope_map instead.
+        
+        Example:
+            model.add_detector_config(
+                reaction_isotope_map={
+                    'Fission': ['U234', 'U235', 'U236', 'U238'],
+                    'absorption': ['U234', 'U235', 'U236', 'U238', 'Gd155', 'Gd157'],
+                },
+            )
         """
+        # Handle deprecated API
+        if reaction_isotope_map is None and isotopes is not None and reactions is not None:
+            warnings.warn(
+                "The 'isotopes' and 'reactions' parameters are deprecated. "
+                "Use 'reaction_isotope_map' instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            # Convert old API to new format (all isotopes for all reactions)
+            reaction_isotope_map = {}
+            for reaction in reactions:
+                reaction_name = reaction if isinstance(reaction, str) else str(reaction)
+                reaction_isotope_map[reaction_name] = list(isotopes)
+        
+        if reaction_isotope_map is None:
+            raise ValueError(
+                "Must provide 'reaction_isotope_map' argument. "
+                "Example: {'Fission': ['U235', 'U238'], 'absorption': ['Gd155']}"
+            )
+        
         # Build energy grid
         if energy_bounds is None:
-            eg = S2_EnergyGrid.two_group(name=energy_grid_name)
+            eg = S2_EnergyGrid.full_range(name=energy_grid_name)
         else:
             eg = S2_EnergyGrid(name=energy_grid_name, boundaries=energy_bounds)
         self.energy_grids.append(eg)
         
-        # Build isotope response materials
-        for iso in isotopes:
-            resp_mat = S2_IsotopeResponseMaterial(
-                isotope_name=iso,
-                temperature=fuel_temperature,
-                xs_suffix=xs_suffix,
-            )
-            self.isotope_response_materials.append(resp_mat)
+        # Collect all unique isotopes from the map
+        all_isotopes = set()
+        for isotope_list in reaction_isotope_map.values():
+            all_isotopes.update(isotope_list)
+        
+        # Build isotope response materials (one per unique isotope)
+        existing_response_names = {rm.isotope_name for rm in self.isotope_response_materials}
+        for iso in all_isotopes:
+            if iso not in existing_response_names:
+                resp_mat = S2_IsotopeResponseMaterial(
+                    isotope_name=iso,
+                    temperature=fuel_temperature,
+                    xs_suffix=xs_suffix,
+                )
+                self.isotope_response_materials.append(resp_mat)
         
         # Build detectors — one per unique fuel pin
         for univ in self.pin_universes:
@@ -1750,8 +1886,7 @@ class Serpent2Model:
             
             det = S2_Detector.for_pin(
                 pin_universe=univ,
-                isotopes=isotopes,
-                reactions=reactions,
+                reaction_isotope_map=reaction_isotope_map,
                 energy_grid_name=energy_grid_name,
                 detector_type=detector_type,
             )

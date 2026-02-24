@@ -30,6 +30,7 @@ from starterDD.InterfaceToDD.dragon_module_calls import LIB, EDI, COMPO, EDI_COM
 from starterDD.InterfaceToDD.serpent2_cards import (
     Serpent2Model, S2_Settings, S2_Material, S2_PinUniverse, S2_Lattice,
     S2_ChannelGeometry, S2_EnergyGrid, S2_Detector,
+    REACTION_TO_MT_NUMBER, _reaction_name_to_mt,
 )
 
 
@@ -730,17 +731,11 @@ class TestAT10SquareWaterRodCornerRadius:
                 "non_fuel_rod_ids": ["WROD"],
             },
             "WATER_ROD_GEOMETRY": {
-                "water_rod_type": "square",
-                "moderator_box_inner_side": 1.5,
-                "moderator_box_outer_side": 1.7,
+                "type": "square",
+                "inner_side": 1.5,
+                "outer_side": 1.7,
                 "corner_radius": 0.25,
                 "centers": [[2.59, 2.59]],
-                "bounding_box_positions": [
-                    [[0, 2], [1, 1], [1, 2], [2, 0], [2, 1], [2, 2]],
-                ],
-                "moderator_material_name": "MODERATOR",
-                "cladding_material_name": "CLAD",
-                "coolant_material_name": "COOLANT",
             },
         }
 
@@ -771,15 +766,11 @@ class TestAT10SquareWaterRodCornerRadius:
                 "assembly_pitch": 1.295,
             },
             "WATER_ROD_GEOMETRY": {
-                "water_rod_type": "square",
-                "moderator_box_inner_side": 1.0,
-                "moderator_box_outer_side": 1.1,
+                "type": "square",
+                "inner_side": 1.0,
+                "outer_side": 1.1,
                 "corner_radius": 0.1,
                 "centers": [[0.0, 0.0]],
-                "bounding_box_positions": [[[0, 0]]],
-                "moderator_material_name": "MODERATOR",
-                "cladding_material_name": "CLAD",
-                "coolant_material_name": "COOLANT",
             },
         }
 
@@ -851,3 +842,224 @@ class TestAT10CalcSchemeWithSplits:
                 assert wr_cfg.splits == (3, 3)
                 found = True
         assert found, "No step with water_rod splits found in CALC_SCHEME_AT10.yaml"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Serpent2 Detector API (reaction_isotope_map)
+# ---------------------------------------------------------------------------
+class TestSerpent2DetectorAPI:
+    """Tests for the updated Serpent2 detector API with reaction_isotope_map."""
+
+    def test_reaction_name_to_mt_conversion(self):
+        """Verify reaction name to MT number conversion works."""
+        assert _reaction_name_to_mt('Fission') == 18
+        assert _reaction_name_to_mt('absorption') == 27
+        assert _reaction_name_to_mt('n,gamma') == 102
+        # Case-insensitive
+        assert _reaction_name_to_mt('fission') == 18
+        assert _reaction_name_to_mt('ABSORPTION') == 27
+        # Already an int should pass through
+        assert _reaction_name_to_mt(18) == 18
+        assert _reaction_name_to_mt(102) == 102
+
+    def test_reaction_name_invalid_raises(self):
+        """Verify invalid reaction name raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown reaction name"):
+            _reaction_name_to_mt('invalid_reaction')
+
+    def test_energy_grid_full_range(self):
+        """Verify S2_EnergyGrid.full_range() creates single-bin grid."""
+        eg = S2_EnergyGrid.full_range(name="full_test")
+        assert eg.name == "full_test"
+        assert eg.n_groups == 1
+        assert len(eg.boundaries) == 2
+        assert eg.boundaries[0] < eg.boundaries[1]
+
+    def test_energy_grid_two_group(self):
+        """Verify S2_EnergyGrid.two_group() creates 2-bin grid."""
+        eg = S2_EnergyGrid.two_group(name="2g_test")
+        assert eg.name == "2g_test"
+        assert eg.n_groups == 2
+        assert len(eg.boundaries) == 3
+
+    def test_detector_for_pin_with_reaction_isotope_map(self):
+        """Verify S2_Detector.for_pin() works with reaction_isotope_map."""
+        # Create a mock pin universe
+        pin_univ = S2_PinUniverse(
+            universe_name="UOX_test_1",
+            material_names=["UOX_zone1_pin1", "UOX_zone2_pin1", "gap", "clad", "cool"],
+            radii=[0.3, 0.4, 0.45, 0.51],
+        )
+        
+        reaction_map = {
+            'Fission': ['U235', 'U238'],
+            'absorption': ['U235', 'U238', 'Gd155'],
+        }
+        
+        det = S2_Detector.for_pin(
+            pin_universe=pin_univ,
+            reaction_isotope_map=reaction_map,
+            energy_grid_name="full",
+            detector_type=-4,
+        )
+        
+        # Check detector name
+        assert det.name == "det_UOX_test_1"
+        
+        # Check domain materials (fuel zones only)
+        assert "UOX_zone1_pin1" in det.domain_materials
+        assert "UOX_zone2_pin1" in det.domain_materials
+        assert "gap" not in det.domain_materials
+        assert "clad" not in det.domain_materials
+        
+        # Check responses: should have (2 reactions × isotopes per reaction)
+        # Fission: 2 isotopes, absorption: 3 isotopes = 5 total responses
+        assert len(det.responses) == 5
+        
+        # Verify Fission responses use MT=18
+        fission_responses = [r for r in det.responses if r[0] == 18]
+        assert len(fission_responses) == 2
+        fission_isotopes = {r[1] for r in fission_responses}
+        assert fission_isotopes == {'U235', 'U238'}
+        
+        # Verify absorption responses use MT=27
+        absorption_responses = [r for r in det.responses if r[0] == 27]
+        assert len(absorption_responses) == 3
+        absorption_isotopes = {r[1] for r in absorption_responses}
+        assert absorption_isotopes == {'U235', 'U238', 'Gd155'}
+
+    def test_detector_format_card_with_reaction_isotope_map(self):
+        """Verify detector card formatting with reaction_isotope_map."""
+        pin_univ = S2_PinUniverse(
+            universe_name="test_pin",
+            material_names=["fuel_z1", "fuel_z2", "gap", "clad", "cool"],
+            radii=[0.3, 0.4, 0.45, 0.51],
+        )
+        
+        det = S2_Detector.for_pin(
+            pin_universe=pin_univ,
+            reaction_isotope_map={'Fission': ['U235']},
+            energy_grid_name="full",
+            detector_type=-4,
+        )
+        
+        card = det.format_card()
+        
+        assert "det det_test_pin" in card
+        assert "de full" in card
+        assert "dt -4" in card
+        assert "dm fuel_z1" in card
+        assert "dm fuel_z2" in card
+        assert "dr 18  U235" in card
+
+    def test_deprecated_api_issues_warning(self):
+        """Verify deprecated isotopes/reactions API issues warning."""
+        pin_univ = S2_PinUniverse(
+            universe_name="deprecated_test",
+            material_names=["fuel_z1", "gap", "clad", "cool"],
+            radii=[0.4, 0.45, 0.51],
+        )
+        
+        with pytest.warns(DeprecationWarning, match="reaction_isotope_map"):
+            det = S2_Detector.for_pin(
+                pin_universe=pin_univ,
+                isotopes=['U235', 'U238'],
+                reactions=[18, 27],
+            )
+        
+        # Should still work
+        assert len(det.responses) == 4  # 2 isotopes × 2 reactions
+
+    def test_serpent2_model_add_detector_config_with_map(self):
+        """Verify Serpent2Model.add_detector_config() with reaction_isotope_map."""
+        # Load assembly model
+        ROD_to_material = associate_material_to_rod_ID(
+            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_GEOMETRY
+        )
+        compositions = parse_all_compositions_from_yaml(PATH_TO_YAML_COMPOSITIONS)
+
+        assembly = CartesianAssemblyModel(
+            name="detector_test",
+            tdt_file="dummy.tdt",
+            geometry_description_yaml=PATH_TO_YAML_GEOMETRY,
+        )
+        assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+        assembly.set_uniform_temperatures(
+            fuel_temperature=900.0,
+            gap_temperature=600.0,
+            coolant_temperature=600.0,
+            moderator_temperature=600.0,
+            structural_temperature=600.0,
+        )
+        assembly.analyze_lattice_description(build_pins=True, apply_self_shielding="from_yaml")
+        assembly.set_material_compositions(compositions)
+        assembly.number_fuel_material_mixtures_by_pin()
+
+        model = Serpent2Model(assembly_model=assembly)
+        model.build(
+            gap_material_name="gap",
+            clad_material_name="clad",
+            coolant_material_name="cool",
+        )
+        
+        # Use new API
+        model.add_detector_config(
+            reaction_isotope_map={
+                'Fission': ['U235', 'U238'],
+                'absorption': ['U235', 'U238', 'Gd155'],
+            },
+        )
+        
+        # Check energy grid is full range by default
+        assert len(model.energy_grids) == 1
+        assert model.energy_grids[0].n_groups == 1
+        
+        # Check isotope response materials are created for unique isotopes
+        response_isotopes = {rm.isotope_name for rm in model.isotope_response_materials}
+        assert response_isotopes == {'U235', 'U238', 'Gd155'}
+        
+        # Check detectors are created
+        assert len(model.detectors) > 0
+
+    def test_energy_grid_full_range_is_default(self):
+        """Verify full_range energy grid is default when energy_bounds=None."""
+        # Create a simple assembly model
+        ROD_to_material = associate_material_to_rod_ID(
+            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_GEOMETRY
+        )
+        compositions = parse_all_compositions_from_yaml(PATH_TO_YAML_COMPOSITIONS)
+
+        assembly = CartesianAssemblyModel(
+            name="energy_grid_test",
+            tdt_file="dummy.tdt",
+            geometry_description_yaml=PATH_TO_YAML_GEOMETRY,
+        )
+        assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+        assembly.set_uniform_temperatures(
+            fuel_temperature=900.0,
+            gap_temperature=600.0,
+            coolant_temperature=600.0,
+            moderator_temperature=600.0,
+            structural_temperature=600.0,
+        )
+        assembly.analyze_lattice_description(build_pins=True, apply_self_shielding="from_yaml")
+        assembly.set_material_compositions(compositions)
+        assembly.number_fuel_material_mixtures_by_pin()
+
+        model = Serpent2Model(assembly_model=assembly)
+        model.build(
+            gap_material_name="gap",
+            clad_material_name="clad",
+            coolant_material_name="cool",
+        )
+        
+        # energy_bounds=None should create full_range grid
+        model.add_detector_config(
+            reaction_isotope_map={'Fission': ['U235']},
+            energy_bounds=None,
+        )
+        
+        eg = model.energy_grids[0]
+        assert eg.n_groups == 1  # Single bin = full range
+        assert eg.name == "full"
+
