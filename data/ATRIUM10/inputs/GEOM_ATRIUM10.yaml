@@ -1,0 +1,39 @@
+# Geometry description for the ATRIUM-10 BWR fuel bundle.
+# This file describes the geometry of the pincell, including the fuel radius, gap radius, clad radius, and the number of fuel zones. 
+# This information is used to build the pincell geometry.
+
+PIN_GEOMETRY:
+  fuel_radius: 0.4435
+  gap_radius: 0.4520
+  clad_radius: 0.5140
+  pin_pitch: 1.295
+  self_shielding_option: "Santamarina"
+
+ASSEMBLY_GEOMETRY:
+  lattice_type: "RODartesian"
+  reactor_type: "BWR"
+  lattice_description:
+    - ["ROD1", "ROD2", "ROD3", "ROD5", "ROD6", "ROD5", "ROD4", "ROD3", "ROD2", "ROD1"]
+    - ["ROD2", "ROD4", "ROD7", "ROD6", "ROD7", "ROD6", "ROD6", "ROD7", "ROD4", "ROD2"]
+    - ["ROD3", "ROD7", "ROD6", "ROD6", "ROD6", "ROD7", "ROD6", "ROD6", "ROD7", "ROD3"]
+    - ["ROD5", "ROD6", "ROD6", "ROD6", "ROD6", "ROD6", "ROD7", "ROD6", "ROD5", "ROD4"]
+    - ["ROD6", "ROD7", "ROD6", "ROD6", "WROD", "WROD", "WROD", "ROD4", "ROD6", "ROD4"]
+    - ["ROD5", "ROD6", "ROD7", "ROD6", "WROD", "WROD", "WROD", "ROD3", "ROD7", "ROD4"]
+    - ["ROD4", "ROD6", "ROD6", "ROD7", "WROD", "WROD", "WROD", "ROD4", "ROD4", "ROD4"]
+    - ["ROD3", "ROD7", "ROD6", "ROD6", "ROD4", "ROD3", "ROD4", "ROD4", "ROD8", "ROD3"]
+    - ["ROD2", "ROD4", "ROD7", "ROD5", "ROD6", "ROD7", "ROD4", "ROD8", "ROD4", "ROD2"]
+    - ["ROD1", "ROD2", "ROD3", "ROD4", "ROD4", "ROD4", "ROD4", "ROD3", "ROD2", "ROD1"]
+
+  assembly_pitch: 15.24
+  gap_wide: 0.75
+  channel_box_thickness: 0.17
+  corner_inner_radius_of_curvature: 0
+
+  Gd_rod_ids: ["ROD7", "ROD8"]
+  non_fuel_rod_ids: ["WROD"]
+
+WATER_ROD_GEOMETRY:
+  type: "square"
+  inner_side : 3.34
+  outer_side : 3.5
+  centers: [[7.1225, 7.1225]]

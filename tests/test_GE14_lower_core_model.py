@@ -17,6 +17,10 @@ from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel, 
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.InterfaceToDD.dragon_module_calls import LIB
 from starterDD.InterfaceToDD.dragon_module_calls import EDI, COMPO, EDI_COMPO
+from starterDD.InterfaceToDD.serpent2_cards import (
+    Serpent2Model, S2_Settings, S2_Material, S2_PinUniverse, S2_Lattice,
+    S2_ChannelGeometry,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -765,3 +769,168 @@ class TestEDICOMPOCreation:
     def test_micr_keyword(self, edi_compo_content):
         """Verify MICR keyword with isotope lists."""
         assert "MICR 5 U235 U238 U234 Gd155 Gd157" in edi_compo_content
+
+
+# ---------------------------------------------------------------------------
+# Tests: Serpent2 model generation
+# ---------------------------------------------------------------------------
+class TestGE14Serpent2Model:
+    """Tests for Serpent2 model generation from the GE14 DOM assembly."""
+
+    @pytest.fixture(scope="class")
+    def ge14_serpent2_model(self):
+        """Build and return a Serpent2Model from the GE14 DOM assembly."""
+        from starterDD.MaterialProperties.material_mixture import parse_all_compositions_from_yaml
+        from starterDD.GeometryAnalysis.tdt_parser import read_material_mixture_indices_from_tdt_file
+        from starterDD.DDModel.DragonModel import CartesianAssemblyModel
+        from starterDD.DDModel.helpers import associate_material_to_rod_ID
+
+        ROD_to_material = associate_material_to_rod_ID(
+            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_GEOMETRY
+        )
+        compositions = parse_all_compositions_from_yaml(PATH_TO_YAML_COMPOSITIONS)
+
+        assembly = CartesianAssemblyModel(
+            name="GE14_S2",
+            tdt_file=f"{PATH_TO_TDT}/{TDT_FILE_NAME}.tdt",
+            geometry_description_yaml=PATH_TO_YAML_GEOMETRY,
+        )
+        assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+        assembly.set_uniform_temperatures(
+            fuel_temperature=900.0,
+            gap_temperature=600.0,
+            coolant_temperature=600.0,
+            moderator_temperature=600.0,
+            structural_temperature=600.0,
+        )
+        assembly.analyze_lattice_description(build_pins=True, apply_self_shielding="from_yaml")
+        assembly.set_material_compositions(compositions)
+        assembly.number_fuel_material_mixtures_by_pin()
+
+        # Enforce TDT indices
+        tdt_indices = read_material_mixture_indices_from_tdt_file(
+            PATH_TO_TDT,
+            tdt_file_name=TDT_FILE_NAME,
+            tracking_option=FLUX_TRACKING_OPTION,
+            include_macros=INCLUDE_MACROS,
+            material_names=None,
+        )
+        assembly.enforce_material_mixture_indices_from_tdt(tdt_indices)
+        assembly.identify_generating_and_daughter_mixes()
+
+        settings = S2_Settings()
+        settings.title = "GE14 DOM lower core - starterDD generated"
+        settings.bc = 2
+        settings.neutrons_per_cycle = 10000
+        settings.active_cycles = 200
+        settings.inactive_cycles = 50
+
+        model = Serpent2Model(assembly_model=assembly, settings=settings)
+        model.build(
+            gap_material_name="gap",
+            clad_material_name="clad",
+            coolant_material_name="cool",
+            outer_water_material_name="cool_outer",
+            channel_box_material_name="zr4",
+        )
+        model.build_structural_materials_from_assembly(
+            name_map={
+                "COOLANT": "cool",
+                "CLAD": "clad",
+                "GAP": "gap",
+                "MODERATOR": "moderator",
+                "CHANNEL_BOX": "zr4",
+            },
+            temperature_map={
+                "COOLANT": 600.0,
+                "CLAD": 600.0,
+                "GAP": 600.0,
+                "MODERATOR": 600.0,
+                "CHANNEL_BOX": 600.0,
+            },
+        )
+        return model, assembly
+
+    @pytest.fixture(scope="class")
+    def ge14_serpent2_output_path(self, ge14_serpent2_model):
+        """Write Serpent2 model and return the file path."""
+        model, _ = ge14_serpent2_model
+        filepath = "outputs/GE14_DOM_assembly.serp"
+        model.write(filepath)
+        return filepath
+
+    @pytest.fixture(scope="class")
+    def ge14_serpent2_content(self, ge14_serpent2_output_path):
+        """Read and return Serpent2 output file content."""
+        with open(ge14_serpent2_output_path, 'r') as f:
+            return f.read()
+
+    def test_output_file_exists(self, ge14_serpent2_output_path):
+        """Verify Serpent2 output file is created."""
+        assert os.path.isfile(ge14_serpent2_output_path)
+
+    def test_output_not_empty(self, ge14_serpent2_content):
+        """Verify output file is not empty."""
+        assert len(ge14_serpent2_content) > 0
+
+    def test_title_present(self, ge14_serpent2_content):
+        """Verify title is in the output."""
+        assert "GE14 DOM" in ge14_serpent2_content
+
+    def test_fuel_materials_present(self, ge14_serpent2_content, ge14_serpent2_model):
+        """Verify fuel material cards are present."""
+        _, assembly = ge14_serpent2_model
+        for mix in assembly.fuel_material_mixtures:
+            mat_name = mix.unique_material_mixture_name
+            assert f"mat {mat_name}" in ge14_serpent2_content, \
+                f"Fuel material '{mat_name}' not found in Serpent2 output"
+
+    def test_pin_universes_present(self, ge14_serpent2_content, ge14_serpent2_model):
+        """Verify pin universe cards are present."""
+        model, _ = ge14_serpent2_model
+        for pin_univ in model.pin_universes:
+            assert f"pin {pin_univ.universe_name}" in ge14_serpent2_content
+
+    def test_lattice_present(self, ge14_serpent2_content):
+        """Verify lattice card is present."""
+        assert "lat " in ge14_serpent2_content
+
+    def test_channel_geometry_present(self, ge14_serpent2_content):
+        """Verify channel box and assembly boundary surfaces."""
+        assert "surf" in ge14_serpent2_content
+        assert "cell" in ge14_serpent2_content
+
+    def test_circular_water_rod_surfaces(self, ge14_serpent2_content):
+        """Verify circular water rod surfaces are generated (GE14 uses circular WR)."""
+        assert "Water rod" in ge14_serpent2_content
+        assert "cyl" in ge14_serpent2_content
+
+    def test_boundary_conditions(self, ge14_serpent2_content):
+        """Verify reflective boundary conditions."""
+        assert "set bc 2" in ge14_serpent2_content
+
+    def test_materials_have_temperature(self, ge14_serpent2_content):
+        """Verify materials have temperature specification."""
+        assert "tmp 900.0" in ge14_serpent2_content
+        assert "tmp 600.0" in ge14_serpent2_content
+
+    def test_empty_universe_in_lattice(self, ge14_serpent2_content):
+        """Verify empty universe for water rod placeholders is defined."""
+        assert "pin empty" in ge14_serpent2_content
+
+    def test_number_of_unique_pin_universes(self, ge14_serpent2_model):
+        """Verify number of unique pin universes matches expectations."""
+        model, assembly = ge14_serpent2_model
+        n_unique_fuel = len(set(
+            pin.pin_idx for row in assembly.lattice for pin in row
+            if isinstance(pin, FuelPinModel)
+        ))
+        # model.pin_universes includes fuel pins + empty universe
+        assert len(model.pin_universes) == n_unique_fuel + 1
+
+    def test_model_summary(self, ge14_serpent2_model):
+        """Verify model summary is generated."""
+        model, _ = ge14_serpent2_model
+        summary = model.summary()
+        assert "Serpent2 Model Summary" in summary
+        assert "Materials" in summary

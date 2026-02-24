@@ -170,6 +170,173 @@ def add_cells_to_regular_lattice(lattice, ordered_cells, cell_pitch, translation
     return lattice
 
 
+def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
+    """
+    Build a ``RectCell`` for a square water rod with 3 concentric
+    rectangular regions (moderator / cladding / coolant).
+
+    The construction follows the same pattern as ``build_assembly_box``:
+    two inner ``Rectangle`` boundaries are partitioned into the bounding
+    box cell, then materials are assigned from innermost to outermost.
+
+    If the ``calculation_step`` provides a ``SectorConfig`` with a
+    ``splits`` attribute, the cell is further sub-meshed into an
+    ``(nx, ny)`` Cartesian grid.  Material is then reassigned to each
+    sub-face by geometric containment against the two boundary
+    rectangles.
+
+    Parameters
+    ----------
+    water_rod_model : SquareWaterRodModel
+        The square water rod model with ``bounding_box_side_length``,
+        ``moderator_box_inner_side``, ``moderator_box_outer_side``,
+        ``center``, ``rod_ID``, and material names.
+    calculation_step : CalculationStep or None
+        Optional calculation step providing discretization config via
+        ``get_water_rod_sectorization().splits``.
+
+    Returns
+    -------
+    tmp_cell : RectCell
+        The constructed cell ready to be added to the lattice.
+    """
+    import warnings
+
+    bb = water_rod_model.bounding_box_side_length
+    inner_side = water_rod_model.moderator_box_inner_side
+    outer_side = water_rod_model.moderator_box_outer_side
+    corner_radius = getattr(water_rod_model, 'corner_radius', None)
+    center = (0.0, 0.0, 0.0)
+
+    # Build rounded-corner specs if a corner radius is provided
+    if corner_radius is not None and corner_radius > 0.0:
+        wall_thickness = (outer_side - inner_side) / 2.0
+        inner_rc = [(i, corner_radius) for i in range(4)]
+        outer_rc = [(i, corner_radius + wall_thickness) for i in range(4)]
+    else:
+        inner_rc = None
+        outer_rc = None
+
+    # --- 1. Create bounding-box cell ---
+    tmp_cell = RectCell(
+        name=water_rod_model.rod_ID,
+        height_x_width=(bb, bb),
+        center=center,
+    )
+
+    # --- 2. Create inner boundary rectangles ---
+    inner_rect = Rectangle(
+        name=f"{water_rod_model.rod_ID}_inner",
+        height=inner_side,
+        width=inner_side,
+        center=center,
+        rounded_corners=inner_rc,
+    )
+    outer_rect = Rectangle(
+        name=f"{water_rod_model.rod_ID}_outer",
+        height=outer_side,
+        width=outer_side,
+        center=center,
+        rounded_corners=outer_rc,
+    )
+
+    # --- 3. Partition the cell face with the two boundaries ---
+    partitioned_face = make_partition(
+        [tmp_cell.face],
+        [inner_rect.face, outer_rect.face],
+        shape_type=ShapeType.COMPOUND,
+    )
+    tmp_cell.update_geometry_from_face(
+        GeometryType.TECHNOLOGICAL, partitioned_face,
+    )
+
+    # --- 4. Base material and MACRO assignment (3 regions) ---
+    tmp_cell.set_properties({
+        PropertyType.MATERIAL: [
+            water_rod_model.moderator_material_name,
+            water_rod_model.cladding_material_name,
+            water_rod_model.coolant_material_name,
+        ],
+        PropertyType.MACRO: [f"MACRO_{water_rod_model.rod_ID}"] * 3,
+    })
+
+    # --- 5. Optional Cartesian grid sub-meshing ---
+    splits = None
+    if calculation_step is not None:
+        wr_cfg = calculation_step.get_water_rod_sectorization()
+        if wr_cfg is not None:
+            if wr_cfg.splits is not None:
+                splits = wr_cfg.splits
+                # Warn if circular-only keys are also populated
+                if wr_cfg.sectors:
+                    warnings.warn(
+                        "Square water rod: 'sectors'/'angles' in the "
+                        "water_rods config are ignored; only 'splits' "
+                        "is used for square water rods.",
+                        stacklevel=2,
+                    )
+            elif wr_cfg.sectors:
+                # Warn if user supplied sectors for a square water rod
+                warnings.warn(
+                    "Square water rod: 'sectors'/'angles' sectorization "
+                    "is not applicable to square water rods.  Use "
+                    "'splits: [nx, ny]' instead.  No discretization "
+                    "will be applied.",
+                    stacklevel=2,
+                )
+
+    if splits is not None:
+        nx, ny = splits
+        # Build the grid of splitting faces over the bounding box
+        bb_rect = Rectangle(
+            name=f"{water_rod_model.rod_ID}_grid",
+            height=bb,
+            width=bb,
+            center=center,
+        )
+        splitting_faces = make_grid_faces(bb_rect, nx, ny)
+
+        # Re-partition the (already 3-region) cell face
+        re_partitioned = make_partition(
+            [tmp_cell.face],
+            splitting_faces,
+            shape_type=ShapeType.COMPOUND,
+        )
+        tmp_cell.update_geometry_from_face(
+            GeometryType.TECHNOLOGICAL, re_partitioned,
+        )
+
+        # Reassign materials by geometric containment
+        subfaces = tmp_cell.extract_subfaces()
+        n_regions = len(subfaces)
+        materials_list = [""] * n_regions
+        macros_list = [f"MACRO_{water_rod_model.rod_ID}"] * n_regions
+
+        for i, subface in enumerate(subfaces):
+            pt = make_vertex_inside_face(subface)
+            if is_point_inside_shape(pt, inner_rect.face):
+                materials_list[i] = water_rod_model.moderator_material_name
+            elif is_point_inside_shape(pt, outer_rect.face):
+                materials_list[i] = water_rod_model.cladding_material_name
+            else:
+                materials_list[i] = water_rod_model.coolant_material_name
+
+        tmp_cell.set_properties({
+            PropertyType.MATERIAL: materials_list,
+            PropertyType.MACRO: macros_list,
+        })
+
+        print(f"_build_square_water_rod_cell: sub-meshed "
+              f"'{water_rod_model.rod_ID}' into {n_regions} sub-regions "
+              f"(splits={splits}).")
+    else:
+        print(f"_build_square_water_rod_cell: built "
+              f"'{water_rod_model.rod_ID}' with 3 base regions "
+              f"(no grid sub-meshing).")
+
+    return tmp_cell
+
+
 def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation=0.0, windmill=False, calculation_step=None):
     """
     Create water rod cells from the assembly model and add them to the lattice at their centers.
@@ -222,12 +389,21 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation=0.
             if calculation_step is not None:
                 wr_sectors = calculation_step.get_water_rod_sectorization()
                 if wr_sectors is not None:
+                    if wr_sectors.splits is not None:
+                        import warnings
+                        warnings.warn(
+                            "Circular water rod: 'splits' in the "
+                            "water_rods config is ignored; only "
+                            "'sectors'/'angles' are used for circular "
+                            "water rods.",
+                            stacklevel=2,
+                        )
                     tmp_cell.sectorize(wr_sectors.sectors, wr_sectors.angles, windmill=wr_sectors.windmill)
             elif windmill:
                 tmp_cell.sectorize([1, 1, 8], [0, 0, 0], windmill=True)
         elif assembly_model.water_rod_type == "square":
-            raise NotImplementedError(
-                "Square water rod geometry is not yet implemented in the glow builder."
+            tmp_cell = _build_square_water_rod_cell(
+                water_rod_model, calculation_step=calculation_step,
             )
 
         # water_rod_model.center is set by analyze_lattice_description and
@@ -312,20 +488,41 @@ def build_assembly_box(assembly_model, center=None):
 
     channel_box_inner_side = ap - 2.0 * cbt - 2.0 * gap
     channel_box_outer_side = ap - 2.0 * gap
-    corner_r_outer = corner_r_inner + cbt
+    if corner_r_inner > 0.0:
+        corner_r_outer = corner_r_inner + cbt
+    else:
+        corner_r_outer = 0.0
+    print(f"Building assembly box with parameters:\n")
+    print(f"corner_r_inner: {corner_r_inner}")
+    print(f"corner_r_outer: {corner_r_outer}")
+    print(f"channel_box_inner_side: {channel_box_inner_side}")
+    print(f"channel_box_outer_side: {channel_box_outer_side}")
 
+    if corner_r_inner > 0.0 and corner_r_outer > 0.0:
+        print("Using rounded corners for assembly box boundaries.")
+        rounded_corners_coolant = [
+            (0, corner_r_inner),
+            (1, corner_r_inner),
+            (2, corner_r_inner),
+            (3, corner_r_inner),
+        ]
+        rounded_corners_chanbox = [
+            (0, corner_r_outer),
+            (1, corner_r_outer),
+            (2, corner_r_outer),
+            (3, corner_r_outer),
+        ]
+    else:
+        rounded_corners_coolant = None
+        rounded_corners_chanbox = None
+        
     # Inner coolant boundary (rounded-corner rectangle)
     coolant_rect = Rectangle(
         name="intra_assembly_coolant",
         height=channel_box_inner_side,
         width=channel_box_inner_side,
         center=center,
-        rounded_corners=[
-            (0, corner_r_inner),
-            (1, corner_r_inner),
-            (2, corner_r_inner),
-            (3, corner_r_inner),
-        ],
+        rounded_corners=rounded_corners_coolant
     )
     # Channel box boundary (rounded-corner rectangle)
     channel_box_rect = Rectangle(
@@ -333,12 +530,7 @@ def build_assembly_box(assembly_model, center=None):
         height=channel_box_outer_side,
         width=channel_box_outer_side,
         center=center,
-        rounded_corners=[
-            (0, corner_r_outer),
-            (1, corner_r_outer),
-            (2, corner_r_outer),
-            (3, corner_r_outer),
-        ],
+        rounded_corners=rounded_corners_chanbox,
     )
     # Outer moderator cell
     assembly_box_cell = RectCell(
@@ -555,27 +747,51 @@ def subdivide_box_into_macros(assembly_box_cell, assembly_model):
 
     channel_box_inner_side = ap - 2.0 * cbt - 2.0 * gap
     channel_box_outer_side = ap - 2.0 * gap
-    corner_r_outer = corner_r_inner + cbt
+    if corner_r_inner > 0.0:
+        corner_r_outer = corner_r_inner + cbt
+    else:
+        corner_r_outer = 0.0
+        
+    if corner_r_inner > 0.0 and corner_r_outer > 0.0:
+        print("Using rounded corners for assembly box boundaries.")
+        coolant_corners = [
+            (0, corner_r_inner),
+            (1, corner_r_inner),
+            (2, corner_r_inner),
+            (3, corner_r_inner),
+        ]
+        chanbox_corners = [
+            (0, corner_r_outer),
+            (1, corner_r_outer),
+            (2, corner_r_outer),
+            (3, corner_r_outer),
+        ]
+    else:
+        coolant_corners = None
+        chanbox_corners = None
+        
+    print(f"Rebuilding reference boundaries for material classification with parameters:\n")
+    print(f"corner_r_inner: {corner_r_inner}")
+    print(f"corner_r_outer: {corner_r_outer}")
+    print(f"channel_box_inner_side: {channel_box_inner_side}")
+    print(f"channel_box_outer_side: {channel_box_outer_side}")
+    print(f"center: {center}")
+    print(f"coolant_corners: {coolant_corners}")
+    print(f"chanbox_corners: {chanbox_corners}")
 
     coolant_boundary = Rectangle(
         name="_coolant_ref",
         height=channel_box_inner_side,
         width=channel_box_inner_side,
         center=center,
-        rounded_corners=[
-            (0, corner_r_inner), (1, corner_r_inner),
-            (2, corner_r_inner), (3, corner_r_inner),
-        ],
+        rounded_corners=coolant_corners,
     )
     channel_box_boundary = Rectangle(
         name="_chanbox_ref",
         height=channel_box_outer_side,
         width=channel_box_outer_side,
         center=center,
-        rounded_corners=[
-            (0, corner_r_outer), (1, corner_r_outer),
-            (2, corner_r_outer), (3, corner_r_outer),
-        ],
+        rounded_corners=chanbox_corners,
     )
 
     # ------------------------------------------------------------------

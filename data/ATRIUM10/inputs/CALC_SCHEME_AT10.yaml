@@ -1,0 +1,41 @@
+# DRAGON Calculation Scheme for the ATRIUM-10 BWR fuel bundle.
+# Defines the sequence of calculation steps (self-shielding, flux)
+# with their respective discretization options.
+#
+# This file is separate from the geometry description (GEOM_ATRIUM10.yaml)
+# and the material compositions (material_compositions.yaml).
+
+DRAGON_CALCULATION_SCHEME:
+  name: "AT10_standard"
+
+  steps:
+    # ------------------------------------------------------------------
+    # Step 1: Self-shielding (SSH)
+    #   - RSE method for resonance self-shielding (energy treatment)
+    #   - CP spatial solution for the self-shielding calculation
+    #   - TISO tracking (isotropic)
+    #   - Santamarina radii for fuel zone subdivision
+    #   - No azimuthal sectorization
+    # ------------------------------------------------------------------
+    - name: "SSH"
+      step_type: "self_shielding"
+      self_shielding_method: "RSE"
+      spatial_method: "IC"
+      tracking: "TISO"
+      radial_scheme: "Santamarina"
+      export_macros: True
+      sectorization:
+        enabled: False
+        windmill: False
+        fuel_pins:
+          # UOX pins: 4 Santamarina fuel zones + gap + clad + coolant = 7 regions
+          sectors: [1, 1, 1, 1, 1, 1, 8]
+          angles:  [0, 0, 0, 0, 0, 0, 22.5]
+        Gd_pins:
+          # Gd pins: 6 Santamarina fuel zones + gap + clad + coolant = 9 regions
+          sectors: [1, 1, 1, 1, 1, 1, 1, 1, 8]
+          angles:  [0, 0, 0, 0, 0, 0, 0, 0, 22.5]
+        water_rods:
+          # Square water rods: Cartesian grid sub-meshing (nx, ny)
+          # Material is reassigned by geometric containment against inner/outer boundaries
+          splits: [3, 3]

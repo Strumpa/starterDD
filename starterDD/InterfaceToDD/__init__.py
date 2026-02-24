@@ -1,5 +1,27 @@
 """InterfaceToDD module - Dragon module call generation."""
 
 from .dragon_module_calls import LIB, MAC, EDI, COMPO, EDI_COMPO
+from .serpent2_cards import (
+    # Constants and utilities
+    REACTION_TO_MT_NUMBER,
+    DRAGON_REAC_TO_REACTION_NAME,
+    ELEMENT_TO_Z,
+    Z_TO_ELEMENT,
+    TEMPERATURE_TO_XS_SUFFIX,
+    get_xs_suffix,
+    parse_isotope_name,
+    isotope_name_to_zaid_str,
+    # Core classes
+    S2_Material,
+    S2_PinUniverse,
+    S2_Lattice,
+    S2_ChannelGeometry,
+    S2_EnergyGrid,
+    S2_Detector,
+    S2_IsotopeResponseMaterial,
+    S2_ThermalScattering,
+    S2_Settings,
+    Serpent2Model,
+)
 
 __all__ = ["LIB", "MAC", "EDI", "COMPO", "EDI_COMPO"]
