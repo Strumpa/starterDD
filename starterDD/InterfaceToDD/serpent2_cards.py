@@ -636,9 +636,25 @@ class S2_Lattice:
                     row.append(empty_universe_name)
             universe_map.append(row)
         
-        # Compute lattice center
-        center_x = (nx - 1) * pin_pitch / 2.0
-        center_y = -(ny - 1) * pin_pitch / 2.0
+        # Pad the lattice with one row/column of empty universes on each
+        # side to account for the coolant strip between the outermost
+        # fuel pins and the channel box inner wall.
+        padded_nx = nx + 2
+        padded_ny = ny + 2
+        empty_row = [empty_universe_name] * padded_nx
+        padded_map = [list(empty_row)]
+        for row in universe_map:
+            padded_map.append([empty_universe_name] + row + [empty_universe_name])
+        padded_map.append(list(empty_row))
+        universe_map = padded_map
+        nx = padded_nx
+        ny = padded_ny
+        
+        # Compute lattice center: lower-left assembly corner at (0,0),
+        # everything in the +x/+y quadrant.
+        assembly_pitch = getattr(assembly, 'assembly_pitch', nx * pin_pitch)
+        center_x = assembly_pitch / 2.0
+        center_y = assembly_pitch / 2.0
         
         return cls(
             name=lattice_name,
@@ -762,11 +778,13 @@ class S2_ChannelGeometry:
         am = assembly_model
         pin_pitch = _get_pin_pitch(am)
         
-        # Compute lattice center (same logic as S2_Lattice)
+        # Compute center: lower-left assembly corner at (0,0),
+        # everything in the +x/+y quadrant.
         nx = len(am.lattice[0])
         ny = len(am.lattice)
-        cx = (nx - 1) * pin_pitch / 2.0
-        cy = -(ny - 1) * pin_pitch / 2.0
+        assembly_pitch = getattr(am, 'assembly_pitch', nx * pin_pitch)
+        cx = assembly_pitch / 2.0
+        cy = assembly_pitch / 2.0
         
         # Try to get channel box dimensions
         inner_hw = getattr(am, 'channel_box_inner_half_width', None)
@@ -795,28 +813,40 @@ class S2_ChannelGeometry:
             assembly_hp = assembly_hp / 2.0
         
         # ── Extract water rod geometry ──────────────────────────────
+        #
+        # Compute the translation offset (gap + cbt + intra-assembly
+        # coolant strip), mirroring glow_builder.build_full_assembly_geometry.
+        gap = getattr(am, 'gap_wide', 0.0) or 0.0
+        cbt = getattr(am, 'channel_box_thickness', 0.0) or 0.0
+        channel_box_inner_side = getattr(am, 'channel_box_inner_side', None)
+        if channel_box_inner_side is not None:
+            intra_coolant = (channel_box_inner_side - nx * pin_pitch) / 2.0
+        else:
+            intra_coolant = 0.0
+        translation = getattr(am, 'translation_offset', None)
+        if translation is None:
+            translation = gap + cbt + intra_coolant
+        
+        # Map Dragon-convention material names (set by
+        # water_rod_model.set_materials) to the Serpent2 names chosen
+        # by the caller.
+        dragon_to_s2 = {
+            "MODERATOR": inner_water_material,
+            "CLAD": channel_box_material,
+            "COOLANT": inner_water_material,
+        }
+        
         wr_list = []
         for wr in getattr(am, 'water_rods', []):
             wr_info = {"rod_id": getattr(wr, 'rod_ID', 'WR')}
-            # Get center coordinates in the assembly coordinate system.
-            # Water rod centers in the YAML are given in lattice-cell
-            # index coordinates; the model converts them to cm.
+            # Water rod centers in the YAML are already in cm in the
+            # lattice-local coordinate system.  Apply the same
+            # translation used in glow_builder to place them in the
+            # assembly coordinate system (lower-left corner at 0,0).
             center = getattr(wr, 'center', None)
             if center is not None:
-                # Convert lattice-index center to assembly coordinates
-                # (same transform used for pin centers in DragonModel)
-                translation = getattr(am, 'translation_offset', 0.0) or 0.0
-                wr_cx = translation + center[0] * pin_pitch + pin_pitch / 2.0
-                wr_cy = translation + center[1] * pin_pitch + pin_pitch / 2.0
-                # Serpent2 y-axis is inverted relative to lattice y-index
-                wr_cy_s2 = -(wr_cy - cy * -1) + cy * -1  # keep same transform
-                # Actually, simpler: Serpent lattice center is at cy,
-                # and the lattice fills from top (row 0) to bottom.
-                # Pin centres in DragonModel use y_index counting from 0 (bottom).
-                # We need the Serpent2 y coordinate.
-                wr_cx_s2 = wr_cx - (nx * pin_pitch / 2.0) + cx
-                wr_cy_s2 = -(wr_cy - (ny * pin_pitch / 2.0)) + cy
-                wr_info["center"] = (wr_cx_s2, wr_cy_s2)
+                wr_info["center"] = (center[0] + translation,
+                                     center[1] + translation)
             else:
                 wr_info["center"] = (cx, cy)
             
@@ -836,11 +866,13 @@ class S2_ChannelGeometry:
                 wr_info["inner_half_side"] = inner_side / 2.0
                 wr_info["outer_half_side"] = outer_side / 2.0
             
-            # Materials
-            wr_info["moderator_material"] = getattr(
-                wr, 'moderator_material_name', inner_water_material)
-            wr_info["wall_material"] = getattr(
-                wr, 'cladding_material_name', channel_box_material)
+            # Materials — map Dragon names to Serpent2 names
+            raw_mod = getattr(wr, 'moderator_material_name', None)
+            raw_wall = getattr(wr, 'cladding_material_name', None)
+            wr_info["moderator_material"] = dragon_to_s2.get(
+                raw_mod, raw_mod if raw_mod else inner_water_material)
+            wr_info["wall_material"] = dragon_to_s2.get(
+                raw_wall, raw_wall if raw_wall else channel_box_material)
             
             if "type" in wr_info:
                 wr_list.append(wr_info)
@@ -1649,10 +1681,27 @@ class Serpent2Model:
         temperature_map = temperature_map or {}
         existing_names = {m.name for m in self.materials}
         
+        # Collect base fuel material names so that their parent
+        # compositions (e.g. '24UOX', '32UOX', '45Gd') are not emitted
+        # as standalone materials — only the per-pin numbered variants
+        # (e.g. '24UOX_zone1_pin1') are used in pin universes.
+        fuel_base_names = set()
+        for row in getattr(self.assembly, 'lattice', []):
+            for pin in row:
+                fname = getattr(pin, 'fuel_material_name', None)
+                if fname:
+                    fuel_base_names.add(fname)
+                    fuel_base_names.add(fname.upper())
+                    fuel_base_names.add(fname.lower())
+        
         for comp_name, composition in comp_lookup.items():
             # Skip compositions that already have a material (fuel mixes)
             s2_name = name_map.get(comp_name, comp_name.lower())
             if s2_name in existing_names:
+                continue
+            
+            # Skip base fuel compositions (not assigned to any cell)
+            if comp_name in fuel_base_names or s2_name in fuel_base_names:
                 continue
             
             temp = temperature_map.get(comp_name, default_temperature)
@@ -1768,9 +1817,25 @@ class Serpent2Model:
         ny = len(universe_map)
         nx = len(universe_map[0]) if ny > 0 else 0
         
-        # Compute lattice center
-        center_x = (nx - 1) * pin_pitch / 2.0
-        center_y = -(ny - 1) * pin_pitch / 2.0
+        # Pad the lattice with one row/column of empty universes on each
+        # side to account for the coolant strip between the outermost
+        # fuel pins and the channel box inner wall.
+        padded_nx = nx + 2
+        padded_ny = ny + 2
+        empty_row = [empty_universe_name] * padded_nx
+        padded_map = [list(empty_row)]
+        for row in universe_map:
+            padded_map.append([empty_universe_name] + row + [empty_universe_name])
+        padded_map.append(list(empty_row))
+        universe_map = padded_map
+        nx = padded_nx
+        ny = padded_ny
+        
+        # Compute lattice center: lower-left assembly corner at (0,0),
+        # everything in the +x/+y quadrant.
+        assembly_pitch = getattr(self.assembly, 'assembly_pitch', nx * pin_pitch)
+        center_x = assembly_pitch / 2.0
+        center_y = assembly_pitch / 2.0
         
         self.lattice = S2_Lattice(
             name=lattice_name,
