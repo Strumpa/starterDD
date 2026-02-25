@@ -2002,125 +2002,6 @@ mat UOX16_zone4_pin51 sum tmp 900.0 burn 1
     92238.09c 2.281585E-02
     8016.09c 4.639349E-02
 
-mat uox16 sum tmp 600.0
-    92235.05c 3.758179E-04
-    92234.05c 3.359114E-06
-    92236.05c 1.721426E-06
-    92238.05c 2.281585E-02
-    8016.05c 4.639349E-02
-
-mat uox28 sum tmp 600.0
-    92235.05c 6.576692E-04
-    92234.05c 5.878340E-06
-    92236.05c 3.012440E-06
-    92238.05c 2.253337E-02
-    8016.05c 4.639986E-02
-
-mat uox32 sum tmp 600.0
-    92235.05c 7.516173E-04
-    92234.05c 6.718062E-06
-    92236.05c 3.442767E-06
-    92238.05c 2.243921E-02
-    8016.05c 4.640198E-02
-
-mat uox36 sum tmp 600.0
-    92235.05c 8.455642E-04
-    92234.05c 7.557773E-06
-    92236.05c 3.873089E-06
-    92238.05c 2.234506E-02
-    8016.05c 4.640410E-02
-
-mat uox40 sum tmp 600.0
-    92235.05c 9.277669E-04
-    92234.05c 8.292512E-06
-    92236.05c 4.249617E-06
-    92238.05c 2.226267E-02
-    8016.05c 4.640596E-02
-
-mat uox40gd8 sum tmp 600.0
-    92235.05c 8.363105E-04
-    92234.05c 7.475061E-06
-    92236.05c 3.830703E-06
-    92238.05c 2.006809E-02
-    64152.05c 5.417362E-06
-    64154.05c 5.904828E-05
-    64155.05c 4.008765E-04
-    64156.05c 5.544573E-04
-    64157.05c 4.239013E-04
-    64158.05c 6.728237E-04
-    64160.05c 5.921081E-04
-    8016.05c 4.589437E-02
-
-mat uox44 sum tmp 600.0
-    92235.05c 1.033455E-03
-    92234.05c 9.237164E-06
-    92236.05c 4.733718E-06
-    92238.05c 2.215675E-02
-    8016.05c 4.640835E-02
-
-mat uox44gd6 sum tmp 600.0
-    92235.05c 9.518316E-04
-    92234.05c 8.507606E-06
-    92236.05c 4.359845E-06
-    92238.05c 2.040679E-02
-    64152.05c 4.063022E-06
-    64154.05c 4.428621E-05
-    64155.05c 3.006574E-04
-    64156.05c 4.158430E-04
-    64157.05c 3.179260E-04
-    64158.05c 5.046178E-04
-    64160.05c 4.440811E-04
-    8016.05c 4.579020E-02
-
-mat uox44gd3 sum tmp 600.0
-    92235.05c 9.822092E-04
-    92234.05c 8.779125E-06
-    92236.05c 4.498989E-06
-    92238.05c 2.105807E-02
-    64152.05c 2.031511E-06
-    64154.05c 2.214310E-05
-    64155.05c 1.503287E-04
-    64156.05c 2.079215E-04
-    64157.05c 1.589630E-04
-    64158.05c 2.523089E-04
-    64160.05c 2.220406E-04
-    8016.05c 4.563073E-02
-
-mat uox49 sum tmp 600.0
-    92235.05c 1.150884E-03
-    92234.05c 1.028676E-05
-    92236.05c 5.271599E-06
-    92238.05c 2.203906E-02
-    8016.05c 4.641101E-02
-
-mat uox49gd8 sum tmp 600.0
-    92235.05c 1.037433E-03
-    92234.05c 9.272726E-06
-    92236.05c 4.751941E-06
-    92238.05c 1.986652E-02
-    64152.05c 5.417362E-06
-    64154.05c 5.904828E-05
-    64155.05c 4.008765E-04
-    64156.05c 5.544573E-04
-    64157.05c 4.239013E-04
-    64158.05c 6.728237E-04
-    64160.05c 5.921081E-04
-    8016.05c 4.589891E-02
-
-mat uox49gd6 sum tmp 600.0
-    92235.05c 1.059986E-03
-    92234.05c 9.474307E-06
-    92236.05c 4.855245E-06
-    92238.05c 2.029840E-02
-    64152.05c 4.063022E-06
-    64154.05c 4.428621E-05
-    64155.05c 3.006574E-04
-    64156.05c 4.158430E-04
-    64157.05c 3.179260E-04
-    64158.05c 5.046178E-04
-    64160.05c 4.440811E-04
-    8016.05c 4.579265E-02
-
 mat clad sum tmp 600.0
     24050.05c 3.301214E-06
     24052.05c 6.366102E-05
@@ -2715,43 +2596,45 @@ pin empty
 %  LATTICE DEFINITION
 % ============================================================
 
-lat 10  1  5.850000 -5.850000  10 10  1.3000
-UOX28_1      UOX40_2      UOX49_3      UOX49_4      UOX49_5      UOX49_6      UOX49_7      UOX49_8      UOX49_9      UOX32_10   
-UOX40_11     UOX40_12     UOX44Gd6_13  UOX49_14     UOX49_15     UOX49Gd8_16  UOX49_17     UOX49Gd8_18  UOX49_19     UOX49_9    
-UOX40_20     UOX44Gd6_21  UOX44_22     UOX49_23     UOX49_24     UOX49_25     UOX49Gd8_26  UOX49_27     UOX49Gd8_18  UOX49_8    
-UOX40_28     UOX40_29     UOX44Gd6_30  empty        empty        UOX49_31     UOX49_32     UOX49Gd8_26  UOX49_17     UOX49_7    
-UOX40_33     UOX40Gd8_34  UOX44_35     empty        empty        UOX49_36     UOX49_31     UOX49_25     UOX49Gd8_16  UOX49_6    
-UOX40_37     UOX36_38     UOX49Gd6_39  UOX40_40     UOX49_41     empty        empty        UOX49_24     UOX49_15     UOX49_5    
-UOX40_42     UOX40_43     UOX44_44     UOX49Gd8_45  UOX40_40     empty        empty        UOX49_23     UOX49_14     UOX49_4    
-UOX32_46     UOX32_47     UOX44Gd3_48  UOX44_44     UOX49Gd6_39  UOX44_35     UOX44Gd6_30  UOX44_22     UOX44Gd6_13  UOX49_3    
-UOX28_49     UOX28_50     UOX32_47     UOX40_43     UOX36_38     UOX40Gd8_34  UOX40_29     UOX44Gd6_21  UOX40_12     UOX40_2    
-UOX16_51     UOX28_49     UOX32_46     UOX40_42     UOX40_37     UOX40_33     UOX40_28     UOX40_20     UOX40_11     UOX28_1    
+lat 10  1  7.620000 7.620000  12 12  1.3000
+empty        empty        empty        empty        empty        empty        empty        empty        empty        empty        empty        empty      
+empty        UOX28_1      UOX40_2      UOX49_3      UOX49_4      UOX49_5      UOX49_6      UOX49_7      UOX49_8      UOX49_9      UOX32_10     empty      
+empty        UOX40_11     UOX40_12     UOX44Gd6_13  UOX49_14     UOX49_15     UOX49Gd8_16  UOX49_17     UOX49Gd8_18  UOX49_19     UOX49_9      empty      
+empty        UOX40_20     UOX44Gd6_21  UOX44_22     UOX49_23     UOX49_24     UOX49_25     UOX49Gd8_26  UOX49_27     UOX49Gd8_18  UOX49_8      empty      
+empty        UOX40_28     UOX40_29     UOX44Gd6_30  empty        empty        UOX49_31     UOX49_32     UOX49Gd8_26  UOX49_17     UOX49_7      empty      
+empty        UOX40_33     UOX40Gd8_34  UOX44_35     empty        empty        UOX49_36     UOX49_31     UOX49_25     UOX49Gd8_16  UOX49_6      empty      
+empty        UOX40_37     UOX36_38     UOX49Gd6_39  UOX40_40     UOX49_41     empty        empty        UOX49_24     UOX49_15     UOX49_5      empty      
+empty        UOX40_42     UOX40_43     UOX44_44     UOX49Gd8_45  UOX40_40     empty        empty        UOX49_23     UOX49_14     UOX49_4      empty      
+empty        UOX32_46     UOX32_47     UOX44Gd3_48  UOX44_44     UOX49Gd6_39  UOX44_35     UOX44Gd6_30  UOX44_22     UOX44Gd6_13  UOX49_3      empty      
+empty        UOX28_49     UOX28_50     UOX32_47     UOX40_43     UOX36_38     UOX40Gd8_34  UOX40_29     UOX44Gd6_21  UOX40_12     UOX40_2      empty      
+empty        UOX16_51     UOX28_49     UOX32_46     UOX40_42     UOX40_37     UOX40_33     UOX40_28     UOX40_20     UOX40_11     UOX28_1      empty      
+empty        empty        empty        empty        empty        empty        empty        empty        empty        empty        empty        empty      
 
 % ============================================================
 %  GEOMETRY (CHANNEL BOX & BOUNDARY)
 % ============================================================
 
 % --- Channel box and assembly boundary surfaces ---
-surf 1000  sqc  5.850000  -5.850000  6.700000  0.965000
-surf 1001  sqc  5.850000  -5.850000  6.865100  0.965000
-surf 1002  sqc  5.850000  -5.850000  7.620000
+surf 1000  sqc  7.620000  7.620000  6.700000  0.965000
+surf 1001  sqc  7.620000  7.620000  6.865100  1.130100
+surf 1002  sqc  7.620000  7.620000  7.620000
 
 % --- Water rod WaterRod_1 ---
-surf 1003  cyl  7.880000  -7.880000  1.170000
-surf 1004  cyl  7.880000  -7.880000  1.245000
+surf 1003  cyl  6.320000  6.320000  1.170000
+surf 1004  cyl  6.320000  6.320000  1.245000
 
 % --- Water rod WaterRod_2 ---
-surf 1005  cyl  11.260000  -11.260000  1.170000
-surf 1006  cyl  11.260000  -11.260000  1.245000
+surf 1005  cyl  8.920000  8.920000  1.170000
+surf 1006  cyl  8.920000  8.920000  1.245000
 
 % --- Cells ---
 % Water rod / moderator box: WaterRod_1
-cell 500  0  MODERATOR  -1003
-cell 501  0  CLAD  1003 -1004
+cell 500  0  moderator  -1003
+cell 501  0  zr4  1003 -1004
 % Water rod / moderator box: WaterRod_2
-cell 502  0  MODERATOR  -1005
-cell 503  0  CLAD  1005 -1006
+cell 502  0  moderator  -1005
+cell 503  0  zr4  1005 -1006
 cell 504  0  fill 10  -1000 1004 1006
 cell 505  0  zr4  1000 -1001
-cell 506  0  cool_outer  1001 -1002
+cell 506  0  moderator  1001 -1002
 cell 507  0  outside  1002

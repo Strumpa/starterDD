@@ -9,15 +9,76 @@ import string
 import warnings
 from typing import Optional, Union
 
+# ── Supported energy meshes ──
+
+# 2g collapsed at 0.625 eV
+
+ene2g = [1.1E-11, 6.25E-7, 1.9640E+1]
+
+
+# 26g condensed from SHEM295 : used in 2nd level DRAGON flux calculations
+ene26g = [
+    1.10002700E-10,  1.04505001E-08,  3.43997590E-08,  7.64968619E-08,  1.37999400E-07,
+    2.31192306E-07,  3.52993488E-07,  6.24998689E-07,  8.80024374E-07,  9.63959813E-07,
+    1.00903499E-06,  1.10395002E-06,  1.14796901E-06,  1.25093901E-06,  4.00000000E-05,
+    5.29895287E-05,  4.19093597E-04,  1.81183301E-03,  9.11880762E-03,  2.49990801E-02,
+    6.73793828E-02,  1.95066203E-01,  4.94001812E-01,  1.33694100E+00,  2.23129900E+00,
+    4.96584700E+00,  1.96403000E+01
+]
+
+#295g SHEM295 energy mesh used in light water reactor calculations in DRAGON5
+ene295g = [
+    1.10003E-10,  2.49990E-09,  4.55602E-09,  7.14526E-09,  1.04505E-08,  1.48300E-08,  2.00104E-08,  2.49394E-08,  2.92989E-08,  3.43998E-08, 
+    4.02999E-08,  4.73019E-08,  5.54981E-08,  6.51994E-08,  7.64969E-08,  8.97968E-08,  1.04298E-07,  1.19995E-07,  1.37999E-07,  1.61895E-07,  
+    1.90005E-07,  2.09610E-07,  2.31192E-07,  2.54997E-07,  2.79989E-07,  3.05012E-07,  3.25008E-07,  3.52993E-07,  3.90001E-07,  4.31579E-07,  
+    4.75017E-07,  5.20011E-07,  5.54990E-07,  5.94993E-07,  6.24999E-07,  7.19999E-07,  8.20037E-07,  8.80024E-07,  9.19978E-07,  9.44022E-07,  
+    9.63960E-07,  9.81959E-07,  9.96500E-07,  1.00903E-06,  1.02101E-06,  1.03499E-06,  1.07799E-06,  1.09198E-06,  1.10395E-06,  1.11605E-06,  
+    1.12997E-06,  1.14797E-06,  1.16999E-06,  1.21397E-06,  1.25094E-06,  1.29304E-06,  1.33095E-06,  1.38098E-06,  1.41001E-06,  1.44397E-06,  
+    1.51998E-06,  1.58803E-06,  1.66895E-06,  1.77997E-06,  1.90008E-06,  1.98992E-06,  2.07010E-06,  2.15695E-06,  2.21709E-06,  2.27299E-06,  
+    2.33006E-06,  2.46994E-06,  2.55000E-06,  2.59009E-06,  2.62005E-06,  2.64004E-06,  2.70011E-06,  2.71990E-06,  2.74092E-06,  2.77512E-06,  
+    2.88405E-06,  3.14211E-06,  3.54307E-06,  3.71209E-06,  3.88217E-06,  4.00000E-06,  4.21983E-06,  4.30981E-06,  4.40216E-06,  4.63249E-06,  
+    4.95846E-06,  5.31798E-06,  5.61867E-06,  5.91857E-06,  6.22824E-06,  6.50841E-06,  6.82843E-06,  7.21451E-06,  7.62242E-06,  7.96530E-06,  
+    8.41566E-06,  8.85599E-06,  9.31005E-06,  9.78738E-06,  1.02379E-05,  1.07091E-05,  1.12020E-05,  1.17411E-05,  1.22325E-05,  1.28854E-05,  
+    1.35732E-05,  1.42121E-05,  1.49707E-05,  1.57382E-05,  1.65617E-05,  1.73761E-05,  1.83035E-05,  1.90315E-05,  2.01075E-05,  2.05343E-05,  
+    2.12232E-05,  2.20011E-05,  2.26712E-05,  2.46578E-05,  2.78852E-05,  3.16929E-05,  3.30855E-05,  3.45392E-05,  3.56980E-05,  3.60568E-05,  
+    3.64191E-05,  3.68588E-05,  3.73038E-05,  3.77919E-05,  3.87874E-05,  3.97295E-05,  4.12270E-05,  4.21441E-05,  4.31246E-05,  4.41721E-05,  
+    4.52904E-05,  4.62053E-05,  4.75173E-05,  4.92591E-05,  5.17847E-05,  5.29895E-05,  5.40600E-05,  5.70595E-05,  5.99250E-05,  6.23083E-05,  
+    6.36306E-05,  6.45922E-05,  6.50460E-05,  6.55029E-05,  6.58312E-05,  6.61612E-05,  6.64929E-05,  6.68261E-05,  6.90682E-05,  7.18869E-05,  
+    7.35595E-05,  7.63322E-05,  7.93679E-05,  8.39393E-05,  8.87740E-05,  9.33256E-05,  9.73287E-05,  1.00594E-04,  1.01098E-04,  1.01605E-04,  
+    1.02115E-04,  1.03038E-04,  1.05646E-04,  1.10288E-04,  1.12854E-04,  1.15480E-04,  1.16524E-04,  1.17577E-04,  1.20554E-04,  1.26229E-04,  
+    1.32701E-04,  1.39504E-04,  1.46657E-04,  1.54176E-04,  1.63056E-04,  1.67519E-04,  1.75229E-04,  1.83294E-04,  1.84952E-04,  1.86251E-04,  
+    1.87559E-04,  1.88877E-04,  1.90204E-04,  1.93078E-04,  1.95996E-04,  2.00958E-04,  2.12108E-04,  2.24325E-04,  2.35590E-04,  2.41796E-04,  
+    2.56748E-04,  2.68297E-04,  2.76468E-04,  2.84888E-04,  2.88327E-04,  2.95922E-04,  3.19927E-04,  3.35323E-04,  3.53575E-04,  3.71703E-04,  
+    3.90760E-04,  4.19094E-04,  4.53999E-04,  5.01746E-04,  5.39204E-04,  5.77146E-04,  5.92941E-04,  6.00099E-04,  6.12834E-04,  6.46837E-04,  
+    6.77286E-04,  7.48517E-04,  8.32218E-04,  9.09681E-04,  9.82494E-04,  1.06432E-03,  1.13467E-03,  1.34358E-03,  1.58620E-03,  1.81183E-03,  
+    2.08410E-03,  2.39729E-03,  2.70024E-03,  2.99618E-03,  3.48107E-03,  4.09735E-03,  5.00451E-03,  6.11252E-03,  7.46585E-03,  9.11881E-03,  
+    1.11377E-02,  1.36037E-02,  1.48997E-02,  1.62005E-02,  1.85847E-02,  2.26994E-02,  2.49991E-02,  2.61001E-02,  2.73944E-02,  2.92810E-02,  
+    3.34596E-02,  3.69786E-02,  4.08677E-02,  4.99159E-02,  5.51656E-02,  6.73794E-02,  8.22974E-02,  9.46645E-02,  1.15623E-01,  1.22773E-01,  
+    1.40098E-01,  1.65065E-01,  1.95066E-01,  2.30060E-01,  2.67826E-01,  3.20646E-01,  3.83883E-01,  4.12501E-01,  4.56021E-01,  4.94002E-01,  
+    5.78442E-01,  7.06511E-01,  8.60006E-01,  9.51119E-01,  1.05115E+00,  1.16205E+00,  1.28696E+00,  1.33694E+00,  1.40577E+00,  1.63654E+00,  
+    1.90139E+00,  2.23130E+00,  2.72531E+00,  3.32871E+00,  4.06569E+00,  4.96585E+00,  6.06530E+00,  6.70319E+00,  7.40817E+00,  8.18730E+00,  
+    9.04836E+00,  9.99999E+00,  1.16183E+01,  1.38403E+01,  1.49182E+01,  1.96403E+01 
+] 
+
+# ── Supported energy mesh registry ──
+# Maps user-facing names to boundary lists so that detectors and energy
+# grids can be built by name without manually supplying boundaries.
+
+SUPPORTED_ENERGY_MESHES = {
+    "2g":   ene2g,
+    "26g":  ene26g,
+    "295g": ene295g,
+}
+
 # ── Reaction MT number mappings ──
 
 REACTION_TO_MT_NUMBER = {
-    'Total': 1,
-    'Elastic scattering': 2,
-    'Fission': 18,
+    'total': 1,
+    'elastic scattering': 2,
+    'fission': 18,
     'n,2n': 16,
     'n,3n': 17,
-    'n,np': 36,
+    'n,np': 28,
     'n,4n': 37,
     'n,gamma': 102,
     'n,proton': 103,
@@ -30,9 +91,9 @@ REACTION_TO_MT_NUMBER = {
 }
 
 DRAGON_REAC_TO_REACTION_NAME = {
-    'NTOT0': 'Total',
-    'SIGS00': 'Neutronic scattering',
-    'NFTOT': 'Fission',
+    'NTOT0': 'total',
+    'SIGS00': 'neutronic scattering',
+    'NFTOT': 'fission',
     'NP': 'n,proton',
     'ND': 'n,deuton',
     'NT': 'n,triton',
@@ -81,11 +142,6 @@ TEMPERATURE_TO_XS_SUFFIX = {
     900.0: '.09c',
     1200.0: '.12c',
     1500.0: '.15c',
-    # JEFF-3.1.1 style
-    559.0: '.81c',
-    579.0: '.81c',
-    750.0: '.82c',
-    # Generic fallback mapping by temperature range
 }
 
 def get_xs_suffix(temperature: float, suffix_map: dict = None) -> str:
@@ -115,7 +171,7 @@ def _reaction_name_to_mt(reaction: Union[str, int]) -> int:
     """Convert a reaction name to its MT number.
     
     Args:
-        reaction: Either a reaction name string (e.g., 'Fission', 'absorption')
+        reaction: Either a reaction name string (e.g., 'fission', 'absorption')
                  or an MT number (int). If already an int, returns it unchanged.
     
     Returns:
@@ -758,8 +814,8 @@ class S2_ChannelGeometry:
     @classmethod
     def from_assembly_model(cls, assembly_model, lattice_universe_name: str = "10",
                             channel_box_material: str = "zr4",
-                            inner_water_material: str = "cool",
-                            outer_water_material: str = "h2o_outer"):
+                            inner_water_material: str = "moderator",
+                            outer_water_material: str = "coolant"):
         """Create channel geometry from assembly model parameters.
         
         Handles:
@@ -769,9 +825,9 @@ class S2_ChannelGeometry:
         
         Expects assembly_model to have attributes like:
             - assembly_pitch
-            - channel_box_inner_side (or channel_box_inner_half_width)
-            - channel_box_thickness (or channel_box_outer_half_width)
-            - corner_inner_radius_of_curvature (or channel_box_corner_radius)
+            - channel_box_inner_side (derived: assembly_pitch - 2*channel_box_thickness - 2*gap_wide)
+            - channel_box_thickness
+            - corner_inner_radius_of_curvature
             - water_rods: list of CircularWaterRodModel / SquareWaterRodModel
             - lattice: 2D grid for center computation
         """
@@ -786,25 +842,30 @@ class S2_ChannelGeometry:
         cx = assembly_pitch / 2.0
         cy = assembly_pitch / 2.0
         
-        # Try to get channel box dimensions
-        inner_hw = getattr(am, 'channel_box_inner_half_width', None)
+        # ── Channel box dimensions ──────────────────────────────
+        # The DragonModel (CartesianAssemblyModel) defines:
+        #   - channel_box_thickness       (from YAML)
+        #   - corner_inner_radius_of_curvature  (from YAML)
+        #   - channel_box_inner_side      (derived: assembly_pitch - 2*cbt - 2*gap_wide)
+        # We derive the Serpent2 half-widths from these.
         thickness = getattr(am, 'channel_box_thickness', None)
-        outer_hw = getattr(am, 'channel_box_outer_half_width', None)
-        cr = getattr(am, 'channel_box_corner_radius', None)
-        if cr is None:
-            cr = getattr(am, 'corner_inner_radius_of_curvature', 0.0)
+        cr_inner = getattr(am, 'corner_inner_radius_of_curvature', 0.0) or 0.0
         
-        if inner_hw is None:
-            # Derive inner half-width from channel_box_inner_side if available
-            channel_box_inner_side = getattr(am, 'channel_box_inner_side', None)
-            if channel_box_inner_side is not None:
-                inner_hw = channel_box_inner_side / 2.0
-            else:
-                inner_hw = nx * pin_pitch / 2.0 + 0.05  # small gap estimate
-        if outer_hw is None and thickness is not None:
+        # Inner half-width from channel_box_inner_side
+        channel_box_inner_side = getattr(am, 'channel_box_inner_side', None)
+        if channel_box_inner_side is not None:
+            inner_hw = channel_box_inner_side / 2.0
+        else:
+            inner_hw = nx * pin_pitch / 2.0 + 0.05  # small gap estimate
+        
+        # Outer half-width = inner + thickness
+        if thickness is not None:
             outer_hw = inner_hw + thickness
-        elif outer_hw is None:
+        else:
             outer_hw = inner_hw + 0.2  # default 2mm thickness
+        
+        # Outer corner radius = inner corner radius + wall thickness
+        cr_outer = cr_inner + (thickness if thickness is not None else 0.0)
         
         assembly_hp = getattr(am, 'assembly_pitch', None)
         if assembly_hp is None:
@@ -833,7 +894,7 @@ class S2_ChannelGeometry:
         dragon_to_s2 = {
             "MODERATOR": inner_water_material,
             "CLAD": channel_box_material,
-            "COOLANT": inner_water_material,
+            "COOLANT": outer_water_material,
         }
         
         wr_list = []
@@ -883,8 +944,8 @@ class S2_ChannelGeometry:
             channel_inner_half_width=inner_hw,
             channel_outer_half_width=outer_hw,
             assembly_half_pitch=assembly_hp,
-            corner_radius_inner=cr if cr else 0.0,
-            corner_radius_outer=cr if cr else 0.0,
+            corner_radius_inner=cr_inner,
+            corner_radius_outer=cr_outer,
             lattice_universe_name=lattice_universe_name,
             channel_box_material=channel_box_material,
             inner_water_material=inner_water_material,
@@ -1044,9 +1105,58 @@ class S2_EnergyGrid:
             name: Energy grid name/identifier.
             boundaries: List of energy boundaries in MeV (ascending order).
                        For N energy groups, provide N+1 boundaries.
+        
+        Raises:
+            ValueError: If fewer than 2 boundaries are given (need N+1
+                       boundaries for N ≥ 1 energy groups) or if the
+                       boundaries are not strictly increasing.
         """
+        boundaries = sorted(boundaries)
+        if len(boundaries) < 2:
+            raise ValueError(
+                f"Energy grid '{name}': at least 2 boundaries are required "
+                f"(N+1 for N ≥ 1 groups), got {len(boundaries)}."
+            )
+        for i in range(len(boundaries) - 1):
+            if boundaries[i] >= boundaries[i + 1]:
+                raise ValueError(
+                    f"Energy grid '{name}': boundaries must be strictly "
+                    f"increasing, but boundary[{i}]={boundaries[i]} >= "
+                    f"boundary[{i+1}]={boundaries[i+1]}."
+                )
         self.name = name
-        self.boundaries = sorted(boundaries)
+        self.boundaries = boundaries
+    
+    @classmethod
+    def from_preset(cls, preset_name: str,
+                    name: str = None) -> 'S2_EnergyGrid':
+        """Create an energy grid from one of the supported preset meshes.
+        
+        Supported presets (see ``SUPPORTED_ENERGY_MESHES``):
+            - ``"2g"``  : 2-group mesh collapsed at 0.625 eV
+            - ``"26g"`` : 26-group mesh condensed from SHEM-295
+            - ``"295g"``: 295-group SHEM-295 mesh
+        
+        Args:
+            preset_name: Key in ``SUPPORTED_ENERGY_MESHES``.
+            name: Optional override for the grid name.  Defaults to
+                  *preset_name* (e.g. ``"26g"``).
+        
+        Returns:
+            S2_EnergyGrid instance.
+        
+        Raises:
+            ValueError: If *preset_name* is not a recognised preset.
+        """
+        if preset_name not in SUPPORTED_ENERGY_MESHES:
+            raise ValueError(
+                f"Unknown energy mesh preset: '{preset_name}'. "
+                f"Supported presets: {list(SUPPORTED_ENERGY_MESHES.keys())}. "
+                f"For a custom mesh, provide a list of N+1 energy "
+                f"boundaries (in MeV) instead."
+            )
+        grid_name = name if name is not None else preset_name
+        return cls(grid_name, list(SUPPORTED_ENERGY_MESHES[preset_name]))
     
     @classmethod
     def full_range(cls, name: str = "full",
@@ -1069,21 +1179,32 @@ class S2_EnergyGrid:
     
     @classmethod
     def two_group(cls, name: str = "2g",
-                  thermal_cutoff: float = 6.25E-7,
-                  e_min: float = 1.0E-11,
-                  e_max: float = 1.9640E+1):
+                  thermal_cutoff: float = None,
+                  e_min: float = None,
+                  e_max: float = None):
         """Create a standard 2-group energy grid.
+        
+        When called without arguments the boundaries are taken from the
+        ``"2g"`` preset in ``SUPPORTED_ENERGY_MESHES``.  Custom cutoff,
+        minimum and maximum values can still be passed to override the
+        preset.
         
         Args:
             name: Grid name.
-            thermal_cutoff: Thermal/fast boundary in MeV (default: 0.625 eV).
-            e_min: Minimum energy in MeV.
-            e_max: Maximum energy in MeV.
+            thermal_cutoff: Thermal/fast boundary in MeV (default from preset).
+            e_min: Minimum energy in MeV (default from preset).
+            e_max: Maximum energy in MeV (default from preset).
         
         Returns:
             S2_EnergyGrid instance.
         """
-        return cls(name, [e_min, thermal_cutoff, e_max])
+        if thermal_cutoff is None and e_min is None and e_max is None:
+            return cls.from_preset("2g", name=name)
+        # Fall back to explicit values when any override is given
+        _e_min = e_min if e_min is not None else ene2g[0]
+        _cutoff = thermal_cutoff if thermal_cutoff is not None else ene2g[1]
+        _e_max = e_max if e_max is not None else ene2g[2]
+        return cls(name, [_e_min, _cutoff, _e_max])
     
     @classmethod
     def from_dragon_energy_mesh(cls, name: str, energy_bounds_eV: list):
@@ -1239,7 +1360,7 @@ class S2_Detector:
             pin_universe: S2_PinUniverse whose fuel materials define the
                          scoring domain.
             reaction_isotope_map: Dict mapping reaction names to lists of isotopes.
-                         e.g., {'Fission': ['U235', 'U238'], 'absorption': ['U235', 'Gd155']}
+                         e.g., {'fission': ['U235', 'U238'], 'absorption': ['U235', 'Gd155']}
                          Reaction names are converted to MT numbers internally.
             energy_grid_name: Energy grid to use.
             detector_type: dt flag (default -4 to sum over all fuel zones).
@@ -1276,6 +1397,55 @@ class S2_Detector:
                 mt = _reaction_name_to_mt(reaction) if isinstance(reaction, str) else reaction
                 for iso in isotopes:
                     det.add_response(mt, iso)
+        
+        return det
+    
+    @classmethod
+    def for_assembly(cls, all_fuel_material_names: list,
+                     reaction_isotope_map: dict,
+                     energy_grid_name: str = None,
+                     detector_type: int = -4,
+                     name: str = None):
+        """Create a single detector integrated over all fuel materials.
+        
+        Produces one detector whose ``dm`` cards list every fuel material
+        in the assembly and whose ``dr`` lines cover every
+        (reaction, isotope) pair in *reaction_isotope_map*.  Combined
+        with ``dt -4`` this yields spatially-integrated, energy-resolved
+        reaction rates for the whole assembly.
+        
+        Serpent2 outputs a result array of shape
+        ``(n_responses × n_energy_bins)`` for this detector.
+        
+        Args:
+            all_fuel_material_names: Flat list of fuel material names
+                collected from every pin universe in the model.
+            reaction_isotope_map: Dict mapping reaction names to lists of
+                isotopes, e.g.
+                ``{'fission': ['U238'], 'n,gamma': ['U238']}``.
+            energy_grid_name: Name of the ``ene`` card to reference.
+            detector_type: ``dt`` flag (default ``-4``, cumulative over
+                ``dm`` materials).
+            name: Detector name.  Defaults to
+                ``"det_assembly_{energy_grid_name}"``.
+        
+        Returns:
+            S2_Detector instance.
+        """
+        if name is None:
+            name = f"det_assembly_{energy_grid_name}" if energy_grid_name else "det_assembly"
+        
+        det = cls(
+            name=name,
+            energy_grid_name=energy_grid_name,
+            domain_materials=list(all_fuel_material_names),
+            detector_type=detector_type,
+        )
+        
+        for reaction_name, isotope_list in reaction_isotope_map.items():
+            mt = _reaction_name_to_mt(reaction_name)
+            for iso in isotope_list:
+                det.add_response(mt, iso)
         
         return det
     
@@ -1878,13 +2048,19 @@ class Serpent2Model:
         
         Args:
             reaction_isotope_map: Dict mapping reaction names to lists of isotopes.
-                         e.g., {'Fission': ['U235', 'U238'], 'absorption': ['Gd155', 'Gd157']}
+                         e.g., {'fission': ['U235', 'U238'], 'absorption': ['Gd155', 'Gd157']}
                          Reaction names are converted to MT numbers internally.
                          Only isotopes with data for each reaction should be listed.
-            energy_bounds: Energy boundaries in MeV for binning.
-                          Default: full range (single bin, no energy resolution).
-                          Use [1e-11, 6.25e-7, 19.64] for 2-group.
-            energy_grid_name: Name for the energy grid (default: 'full').
+            energy_bounds: Energy boundaries in MeV for binning (N+1 values
+                          for N energy groups).  When *None* the grid is
+                          resolved from *energy_grid_name*: if it matches a
+                          supported preset (``"2g"``, ``"26g"``, ``"295g"``)
+                          the predefined boundaries are used automatically;
+                          otherwise a single full-range bin is created.
+            energy_grid_name: Name for the energy grid.  When it matches a
+                          key in ``SUPPORTED_ENERGY_MESHES`` and no explicit
+                          *energy_bounds* are given the preset is used.
+                          Default: ``"full"`` (single bin, no preset match).
             fuel_temperature: Temperature for response materials.
             xs_suffix: Override XS suffix for response materials.
             detector_type: dt flag for detectors (default: -4 to sum over
@@ -1895,9 +2071,10 @@ class Serpent2Model:
         Example:
             model.add_detector_config(
                 reaction_isotope_map={
-                    'Fission': ['U234', 'U235', 'U236', 'U238'],
+                    'fission': ['U234', 'U235', 'U236', 'U238'],
                     'absorption': ['U234', 'U235', 'U236', 'U238', 'Gd155', 'Gd157'],
                 },
+                energy_grid_name="26g",   # uses SHEM-295 condensed 26-group mesh
             )
         """
         # Handle deprecated API
@@ -1917,14 +2094,17 @@ class Serpent2Model:
         if reaction_isotope_map is None:
             raise ValueError(
                 "Must provide 'reaction_isotope_map' argument. "
-                "Example: {'Fission': ['U235', 'U238'], 'absorption': ['Gd155']}"
+                "Example: {'fission': ['U235', 'U238'], 'absorption': ['Gd155']}"
             )
         
         # Build energy grid
-        if energy_bounds is None:
-            eg = S2_EnergyGrid.full_range(name=energy_grid_name)
-        else:
+        # Priority: explicit bounds > preset by name > single full-range bin
+        if energy_bounds is not None:
             eg = S2_EnergyGrid(name=energy_grid_name, boundaries=energy_bounds)
+        elif energy_grid_name in SUPPORTED_ENERGY_MESHES:
+            eg = S2_EnergyGrid.from_preset(energy_grid_name)
+        else:
+            eg = S2_EnergyGrid.full_range(name=energy_grid_name)
         self.energy_grids.append(eg)
         
         # Collect all unique isotopes from the map
@@ -1957,6 +2137,116 @@ class Serpent2Model:
             )
             self.detectors.append(det)
     
+    def add_assembly_integrated_detector_config(
+            self,
+            reaction_isotope_map: dict,
+            energy_grid_name: str = "295g",
+            energy_bounds: list = None,
+            fuel_temperature: float = 900.0,
+            xs_suffix: str = None,
+            detector_type: int = -4,
+            name: str = None):
+        """Configure a single detector integrated over all fuel materials.
+        
+        Creates one ``S2_Detector`` whose ``dm`` cards list **every** fuel
+        material across all pin universes in the model.  All (reaction,
+        isotope) pairs from *reaction_isotope_map* are added as ``dr``
+        responses on that single detector.  Combined with ``dt -4`` this
+        yields spatially-integrated, energy-resolved reaction rates for
+        the whole assembly.
+        
+        Serpent2 outputs a result array of shape
+        ``(n_responses × n_energy_bins)`` for the detector, giving
+        energy-resolved rates for each response without spatial
+        pin-by-pin breakdown.
+        
+        This method complements :meth:`add_detector_config` (which
+        creates one detector **per pin**) and
+        :meth:`add_flux_detector` (global scalar flux).
+        
+        Args:
+            reaction_isotope_map: Dict mapping reaction names to lists of
+                isotopes, e.g.
+                ``{'fission': ['U238'], 'n,gamma': ['U238']}``.
+            energy_grid_name: Name for the energy grid.  When it matches a
+                key in ``SUPPORTED_ENERGY_MESHES`` and no explicit
+                *energy_bounds* are given the preset is used.
+            energy_bounds: Explicit energy boundaries (N+1 values in MeV).
+                Takes priority over presets.
+            fuel_temperature: Temperature for isotope response materials.
+            xs_suffix: Override XS suffix for response materials.
+            detector_type: ``dt`` flag (default ``-4``).
+            name: Detector name.  Defaults to
+                ``"det_assembly_{energy_grid_name}"``.
+        
+        Example::
+        
+            model.add_assembly_integrated_detector_config(
+                reaction_isotope_map={
+                    'fission':  ['U238'],
+                    'n,gamma':  ['U238'],
+                    'absorption': ['U238'],
+                },
+                energy_grid_name="295g",
+                fuel_temperature=900.0,
+            )
+        """
+        if reaction_isotope_map is None or len(reaction_isotope_map) == 0:
+            raise ValueError(
+                "Must provide a non-empty 'reaction_isotope_map' argument."
+            )
+        
+        # ── Energy grid (reuse if already present) ──
+        existing_grids = {eg.name for eg in self.energy_grids}
+        if energy_grid_name not in existing_grids:
+            if energy_bounds is not None:
+                eg = S2_EnergyGrid(name=energy_grid_name,
+                                   boundaries=energy_bounds)
+            elif energy_grid_name in SUPPORTED_ENERGY_MESHES:
+                eg = S2_EnergyGrid.from_preset(energy_grid_name)
+            else:
+                eg = S2_EnergyGrid.full_range(name=energy_grid_name)
+            self.energy_grids.append(eg)
+        
+        # ── Isotope response materials (dedup) ──
+        all_isotopes = set()
+        for isotope_list in reaction_isotope_map.values():
+            all_isotopes.update(isotope_list)
+        
+        existing_response_names = {
+            rm.isotope_name for rm in self.isotope_response_materials
+        }
+        for iso in all_isotopes:
+            if iso not in existing_response_names:
+                resp_mat = S2_IsotopeResponseMaterial(
+                    isotope_name=iso,
+                    temperature=fuel_temperature,
+                    xs_suffix=xs_suffix,
+                )
+                self.isotope_response_materials.append(resp_mat)
+        
+        # ── Collect all fuel materials across every pin ──
+        all_fuel_mats = []
+        for univ in self.pin_universes:
+            all_fuel_mats.extend(univ.get_fuel_material_names())
+        
+        if not all_fuel_mats:
+            warnings.warn(
+                "No fuel materials found in pin universes. "
+                "Assembly-integrated detector will have no domain materials.",
+                stacklevel=2,
+            )
+        
+        # ── Build a single detector with all responses ──
+        det = S2_Detector.for_assembly(
+            all_fuel_material_names=all_fuel_mats,
+            reaction_isotope_map=reaction_isotope_map,
+            energy_grid_name=energy_grid_name,
+            detector_type=detector_type,
+            name=name,
+        )
+        self.detectors.append(det)
+    
     def add_flux_detector(self, energy_grid_name: str = "2g",
                           name: str = "flux",
                           energy_bounds: list = None):
@@ -1966,20 +2256,26 @@ class Serpent2Model:
         binned by the specified energy grid.
         
         Args:
-            energy_grid_name: Energy grid to use.
+            energy_grid_name: Energy grid to use.  If it matches a key in
+                          ``SUPPORTED_ENERGY_MESHES`` (e.g. ``"2g"``,
+                          ``"26g"``, ``"295g"``) and no explicit
+                          *energy_bounds* are given, the preset boundaries
+                          are used automatically.
             name: Detector name.
-            energy_bounds: Optional energy boundaries.  If provided and
-                          no matching grid already exists, a new grid is
-                          created.
+            energy_bounds: Optional energy boundaries (N+1 values in MeV).
+                          If provided and no matching grid already exists,
+                          a new grid is created.
         """
         # Ensure an energy grid exists
         existing_grids = {eg.name for eg in self.energy_grids}
         if energy_grid_name not in existing_grids:
-            if energy_bounds is None:
-                eg = S2_EnergyGrid.two_group(name=energy_grid_name)
-            else:
+            if energy_bounds is not None:
                 eg = S2_EnergyGrid(name=energy_grid_name,
                                    boundaries=energy_bounds)
+            elif energy_grid_name in SUPPORTED_ENERGY_MESHES:
+                eg = S2_EnergyGrid.from_preset(energy_grid_name)
+            else:
+                eg = S2_EnergyGrid.two_group(name=energy_grid_name)
             self.energy_grids.append(eg)
         
         det = S2_Detector(name=name, energy_grid_name=energy_grid_name)

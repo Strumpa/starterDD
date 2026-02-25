@@ -830,7 +830,7 @@ class TestGE14Serpent2Model:
             gap_material_name="gap",
             clad_material_name="clad",
             coolant_material_name="cool",
-            outer_water_material_name="cool_outer",
+            outer_water_material_name="moderator",
             channel_box_material_name="zr4",
         )
         model.build_structural_materials_from_assembly(
