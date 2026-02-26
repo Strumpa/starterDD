@@ -631,13 +631,6 @@ class EDI:
         max_mix = self._get_max_mix_index()
         vector = [0] * max_mix  # default: excluded
 
-        # Collect non-fuel TDT indices into a set for fast lookup
-        non_fuel_indices = set()
-        if hasattr(self.assembly, 'non_fuel_material_mixture_indices'):
-            non_fuel_indices = set(
-                self.assembly.non_fuel_material_mixture_indices.values()
-            )
-
         if self.spatial_mode == "FUEL":
             for mix in self.assembly.fuel_material_mixtures:
                 vector[mix.material_mixture_index - 1] = 1
