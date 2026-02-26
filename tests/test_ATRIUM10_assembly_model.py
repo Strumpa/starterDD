@@ -33,13 +33,20 @@ from starterDD.InterfaceToDD.serpent2_cards import (
     REACTION_TO_MT_NUMBER, _reaction_name_to_mt,
 )
 
+from conftest import (
+    AT10_COMPOSITIONS_YAML,
+    AT10_GEOMETRY_YAML,
+    AT10_CALC_SCHEME_YAML,
+    OUTPUTS_DIR,
+)
+
 
 # ---------------------------------------------------------------------------
 # Test configuration constants
 # ---------------------------------------------------------------------------
-PATH_TO_YAML_COMPOSITIONS = "../data/ATRIUM10/inputs/material_compositions.yaml"
-PATH_TO_YAML_GEOMETRY = "../data/ATRIUM10/inputs/GEOM_ATRIUM10.yaml"
-PATH_TO_YAML_CALC_SCHEME = "../data/ATRIUM10/inputs/CALC_SCHEME_AT10.yaml"
+PATH_TO_YAML_COMPOSITIONS = AT10_COMPOSITIONS_YAML
+PATH_TO_YAML_GEOMETRY = AT10_GEOMETRY_YAML
+PATH_TO_YAML_CALC_SCHEME = AT10_CALC_SCHEME_YAML
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +352,7 @@ class TestAT10LIBCreation:
     def lib_output_path(self, at10_assembly_for_lib):
         """Generate LIB output file and return its path."""
         lib = LIB(at10_assembly_for_lib)
-        return lib.write_to_c2m("outputs", "ATRIUM10_LIB")
+        return lib.write_to_c2m(str(OUTPUTS_DIR), "ATRIUM10_LIB")
 
     @pytest.fixture
     def lib_content(self, lib_output_path):
@@ -434,7 +441,7 @@ class TestAT10EDICOMPOCreation:
             energy_bounds=[0.625],
         )
 
-        return edi_compo.write_to_c2m("outputs", "EDICPO_ATRIUM10")
+        return edi_compo.write_to_c2m(str(OUTPUTS_DIR), "EDICPO_ATRIUM10")
 
     @pytest.fixture
     def edi_compo_content(self, edi_compo_output_path):
@@ -577,7 +584,7 @@ class TestAT10Serpent2Model:
     def at10_serpent2_output_path(self, at10_serpent2_model):
         """Write Serpent2 model and return the file path."""
         model, _ = at10_serpent2_model
-        filepath = "outputs/ATRIUM10_assembly.serp"
+        filepath = f"{OUTPUTS_DIR}/ATRIUM10_assembly.serp"
         model.write(filepath)
         return filepath
 

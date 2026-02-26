@@ -22,15 +22,22 @@ from starterDD.InterfaceToDD.serpent2_cards import (
     S2_ChannelGeometry,
 )
 
+from conftest import (
+    GE14_COMPOSITIONS_YAML,
+    GE14_DOM_GEOMETRY_YAML,
+    GE14_TDT_DIR,
+    OUTPUTS_DIR,
+)
+
 
 # ---------------------------------------------------------------------------
 # Test configuration constants
 # ---------------------------------------------------------------------------
 FLUX_TRACKING_OPTION = "TISO"
 INCLUDE_MACROS = True
-PATH_TO_YAML_COMPOSITIONS = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
-PATH_TO_YAML_GEOMETRY = "../data/BWRProgressionProblems/GE14/inputs/GEOM_GE14_DOM.yaml"
-PATH_TO_TDT = "./reference_tdt_files/GE14"
+PATH_TO_YAML_COMPOSITIONS = GE14_COMPOSITIONS_YAML
+PATH_TO_YAML_GEOMETRY = GE14_DOM_GEOMETRY_YAML
+PATH_TO_TDT = GE14_TDT_DIR
 TDT_FILE_NAME = "GE14_DOM_SSH_IC"
 
 
@@ -435,7 +442,7 @@ class TestLIBCreation:
     def lib_output_path(self, ge14_assembly_for_lib):
         """Generate LIB output file and return its path."""
         lib = LIB(ge14_assembly_for_lib)
-        return lib.write_to_c2m("outputs", "GE14_DOM_LIB")
+        return lib.write_to_c2m(str(OUTPUTS_DIR), "GE14_DOM_LIB")
 
     @pytest.fixture
     def lib_content(self, lib_output_path):
@@ -701,7 +708,7 @@ class TestEDICOMPOCreation:
             energy_bounds=[0.625],
         )
 
-        return edi_compo.write_to_c2m("outputs", "EDICPO_GE14_DOM")
+        return edi_compo.write_to_c2m(str(OUTPUTS_DIR), "EDICPO_GE14_DOM")
 
     @pytest.fixture
     def edi_compo_content(self, edi_compo_output_path):
@@ -855,7 +862,7 @@ class TestGE14Serpent2Model:
     def ge14_serpent2_output_path(self, ge14_serpent2_model):
         """Write Serpent2 model and return the file path."""
         model, _ = ge14_serpent2_model
-        filepath = "outputs/GE14_DOM_assembly.serp"
+        filepath = f"{OUTPUTS_DIR}/GE14_DOM_assembly.serp"
         model.write(filepath)
         return filepath
 

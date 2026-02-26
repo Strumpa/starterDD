@@ -492,11 +492,6 @@ def build_assembly_box(assembly_model, center=None):
         corner_r_outer = corner_r_inner + cbt
     else:
         corner_r_outer = 0.0
-    print(f"Building assembly box with parameters:\n")
-    print(f"corner_r_inner: {corner_r_inner}")
-    print(f"corner_r_outer: {corner_r_outer}")
-    print(f"channel_box_inner_side: {channel_box_inner_side}")
-    print(f"channel_box_outer_side: {channel_box_outer_side}")
 
     if corner_r_inner > 0.0 and corner_r_outer > 0.0:
         print("Using rounded corners for assembly box boundaries.")
@@ -769,15 +764,6 @@ def subdivide_box_into_macros(assembly_box_cell, assembly_model):
     else:
         coolant_corners = None
         chanbox_corners = None
-        
-    print(f"Rebuilding reference boundaries for material classification with parameters:\n")
-    print(f"corner_r_inner: {corner_r_inner}")
-    print(f"corner_r_outer: {corner_r_outer}")
-    print(f"channel_box_inner_side: {channel_box_inner_side}")
-    print(f"channel_box_outer_side: {channel_box_outer_side}")
-    print(f"center: {center}")
-    print(f"coolant_corners: {coolant_corners}")
-    print(f"chanbox_corners: {chanbox_corners}")
 
     coolant_boundary = Rectangle(
         name="_coolant_ref",

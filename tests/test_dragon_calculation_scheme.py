@@ -22,16 +22,23 @@ from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.MaterialProperties.material_mixture import parse_all_compositions_from_yaml
 
+from conftest import (
+    GE14_COMPOSITIONS_YAML,
+    GE14_DOM_GEOMETRY_YAML,
+    GE14_SIMPLE_GEOMETRY_YAML,
+    GE14_CALC_SCHEME_YAML,
+)
+
 
 # =====================================================================
 #  Helpers
 # =====================================================================
 
-# Paths are relative to the tests/ directory (CWD when running pytest).
-_COMPOSITIONS_YAML = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
-_GEOMETRY_DOM_YAML = "../data/BWRProgressionProblems/GE14/inputs/GEOM_GE14_DOM.yaml"
-_GEOMETRY_SIMPLE_YAML = "../data/BWRProgressionProblems/GE14/inputs/simplified_geometry.yaml"
-_CALC_SCHEME_YAML = "../data/BWRProgressionProblems/GE14/inputs/CALC_SCHEME_GE14.yaml"
+# Paths anchored to the tests/ directory via conftest.py
+_COMPOSITIONS_YAML = GE14_COMPOSITIONS_YAML
+_GEOMETRY_DOM_YAML = GE14_DOM_GEOMETRY_YAML
+_GEOMETRY_SIMPLE_YAML = GE14_SIMPLE_GEOMETRY_YAML
+_CALC_SCHEME_YAML = GE14_CALC_SCHEME_YAML
 
 
 def _build_simple_assembly():

@@ -6,7 +6,9 @@ from starterDD.MaterialProperties.material_mixture import MaterialMixture, Compo
 from starterDD.InterfaceToDD.dragon_module_calls import MAC
 from starterDD.InterfaceToDD.dragon_module_calls import LIB
 from test_material_mix import test_material_mixture_instantiation
-
+from conftest import (
+    OUTPUTS_DIR,
+)
 
 def test_macro_library_creation():
     # instatiate a composition from BWRProgressionProblems benchmark GE-14 fuel assembly
@@ -49,7 +51,7 @@ def test_macro_library_creation():
     material_mixture.set_cross_sectional_data(xs_data_24UOX)
 
     # create MAC module .c2m file (here we just simulate the writing process)
-    path_to_procs = "./outputs/"
+    path_to_procs = OUTPUTS_DIR  # Using the outputs directory for test purposes
     proc_name = "test_macro_lib"
     macrolib.write_to_c2m(path_to_procs, proc_name)
 

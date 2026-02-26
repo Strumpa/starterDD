@@ -10,6 +10,8 @@
 import math
 import pytest
 
+from conftest import GE14_COMPOSITIONS_YAML
+
 from starterDD.MaterialProperties.material_mixture import (
     fractions_to_iso_densities,
     get_isotope_atomic_mass,
@@ -109,7 +111,7 @@ class TestMassDensityMode:
 #  parse_all_compositions_from_yaml — integration with GE-14 YAML
 # ---------------------------------------------------------------------------
 class TestYAMLParsing:
-    YAML_PATH = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
+    YAML_PATH = GE14_COMPOSITIONS_YAML
 
     def test_parse_direct_isotopic(self):
         """UOX fuels have 'isotopic_composition' => parse unchanged."""

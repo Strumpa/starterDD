@@ -9,6 +9,13 @@ from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.InterfaceToDD.dragon_module_calls import LIB
 from starterDD.InterfaceToDD.dragon_module_calls import EDI, COMPO, EDI_COMPO
 
+from conftest import (
+    GE14_COMPOSITIONS_YAML,
+    GE14_SIMPLE_GEOMETRY_YAML,
+    GE14_TDT_DIR,
+    OUTPUTS_DIR,
+)
+
 
 # write a test that checks that the assembly model is correctly created and that the lattice description is correctly analyzed.
 def test_assembly_model_creation():
@@ -17,9 +24,9 @@ def test_assembly_model_creation():
     flux_tracking_option = "TISO"  # Tracking type for the assembly model
     # import macros : true
     include_macros = True
-    path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
-    path_to_yaml_geometry = "../data/BWRProgressionProblems/GE14/inputs/simplified_geometry.yaml"
-    path_to_tdt = "./reference_tdt_files/GE14"
+    path_to_yaml_compositions = GE14_COMPOSITIONS_YAML
+    path_to_yaml_geometry = GE14_SIMPLE_GEOMETRY_YAML
+    path_to_tdt = GE14_TDT_DIR
     tdt_file_name = "GE14_simplified"
 
 
@@ -166,8 +173,8 @@ def test_number_fuel_material_mixtures_by_pin():
     bottom-right in physical space), so symmetric partner fuel pins should
     share the same pin_idx, reducing 92 fuel pins to 51 unique positions.
     """
-    path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
-    path_to_yaml_geometry = "../data/BWRProgressionProblems/GE14/inputs/simplified_geometry.yaml"
+    path_to_yaml_compositions = GE14_COMPOSITIONS_YAML
+    path_to_yaml_geometry = GE14_SIMPLE_GEOMETRY_YAML
 
     ROD_to_material = associate_material_to_rod_ID(path_to_yaml_compositions,
                                                    path_to_yaml_geometry)
@@ -313,7 +320,7 @@ def test_by_pin_diagonal_symmetry():
         geometry_yaml_path = f.name
 
     try:
-        path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
+        path_to_yaml_compositions = GE14_COMPOSITIONS_YAML
         ROD_to_material = associate_material_to_rod_ID(path_to_yaml_compositions,
                                                        geometry_yaml_path)
 
@@ -445,7 +452,7 @@ def test_by_pin_main_diagonal_symmetry():
         geometry_yaml_path = f.name
 
     try:
-        path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
+        path_to_yaml_compositions = GE14_COMPOSITIONS_YAML
         ROD_to_material = associate_material_to_rod_ID(path_to_yaml_compositions,
                                                        geometry_yaml_path)
 
@@ -520,8 +527,8 @@ def test_generating_and_daughter_mixes():
     Then test with by_pin numbering: 51 unique pin positions with 1 zone each.
     2 generating mixes (first UOX16 pin, first UOX40Gd8 pin) and 49 daughters.
     """
-    path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
-    path_to_yaml_geometry = "../data/BWRProgressionProblems/GE14/inputs/simplified_geometry.yaml"
+    path_to_yaml_compositions = GE14_COMPOSITIONS_YAML
+    path_to_yaml_geometry = GE14_SIMPLE_GEOMETRY_YAML
 
     ROD_to_material = associate_material_to_rod_ID(path_to_yaml_compositions,
                                                    path_to_yaml_geometry)
@@ -597,9 +604,9 @@ def test_lib_write_to_c2m():
     """
     import tempfile, shutil, os
 
-    path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
-    path_to_yaml_geometry = "../data/BWRProgressionProblems/GE14/inputs/simplified_geometry.yaml"
-    path_to_tdt = "./reference_tdt_files/GE14"
+    path_to_yaml_compositions = GE14_COMPOSITIONS_YAML
+    path_to_yaml_geometry = GE14_SIMPLE_GEOMETRY_YAML
+    path_to_tdt = GE14_TDT_DIR
     tdt_file_name = "GE14_simplified_pin_numbering"
     flux_tracking_option = "TISO"
 
@@ -783,7 +790,7 @@ def test_lib_write_to_c2m():
         print(f"     Generating UOX16 idx: {gen_uox16_idx}, UOX40Gd8 idx: {gen_gd_idx}")
 
         # Also write to the test outputs directory for inspection
-        outputs_path = lib.write_to_c2m("outputs", "MIX_LIB_simple_GE14_by_pin")
+        outputs_path = lib.write_to_c2m(str(OUTPUTS_DIR), "MIX_LIB_simple_GE14_by_pin")
         print(f"     Also saved to: {outputs_path}")
 
     finally:
@@ -797,9 +804,9 @@ def _build_by_pin_assembly_with_tdt():
     Build and return a GE14 simplified assembly with by_pin numbering and
     TDT-enforced indices.  Shared setup for several EDI/COMPO tests.
     """
-    path_to_yaml_compositions = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
-    path_to_yaml_geometry = "../data/BWRProgressionProblems/GE14/inputs/simplified_geometry.yaml"
-    path_to_tdt = "../../glow_data/tdt_data"
+    path_to_yaml_compositions = GE14_COMPOSITIONS_YAML
+    path_to_yaml_geometry = GE14_SIMPLE_GEOMETRY_YAML
+    path_to_tdt = GE14_TDT_DIR
     tdt_file_name = "GE14_simplified_pin_numbering"
     flux_tracking_option = "TISO"
 
@@ -1191,7 +1198,7 @@ def test_edi_compo_write_to_c2m():
         assert "MERG MIX" in content
 
         # Also write to outputs for inspection
-        filepath_out = edi_compo.write_to_c2m("outputs", "EDICPO_GE14_simple_by_pin")
+        filepath_out = edi_compo.write_to_c2m(str(OUTPUTS_DIR), "EDICPO_GE14_simple_by_pin")
 
         print(f"  -> test_edi_compo_write_to_c2m PASSED")
         print(f"     Generated: {filepath}")

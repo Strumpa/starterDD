@@ -1638,16 +1638,18 @@ mat zr4 sum tmp 600.0
     50122.05c 2.230730E-05
     50124.05c 2.789610E-05
 
-mat moderator sum tmp 600.0
+mat moderator sum tmp 600.0 moder lwtr 1001
     8016.05c 2.472980E-02
     1001.05c 4.945460E-02
 
-mat cool sum tmp 600.0
+mat cool sum tmp 600.0 moder lwtr 1001
     8016.05c 2.472980E-02
     1001.05c 4.945460E-02
 
 mat gap sum tmp 600.0
     2004.05c 1.504560E-04
+
+therm lwtr  lwtr.06t
 
 % ============================================================
 %  PIN UNIVERSE DEFINITIONS
