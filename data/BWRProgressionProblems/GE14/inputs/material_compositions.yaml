@@ -234,6 +234,7 @@ MIX_COMPOSITIONS:
       "8016": 3.333333333333333E-1
     depletable: false
     therm: true
+  
   - name: "COOLANT"
     atomic_density: 7.38974602E-2
     composition:

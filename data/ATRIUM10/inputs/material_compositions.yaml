@@ -158,11 +158,14 @@ MIX_COMPOSITIONS:
       "8016": 2.47298E-02
       "1001": 4.94546E-02
     depletable: false
+    therm: true
+  
   - name: "COOLANT"
     isotopic_composition:
       "8016": 2.47298E-02
       "1001": 4.94546E-02
     depletable: false
+    therm: true
 
   - name: "GAP"
     isotopic_composition:
