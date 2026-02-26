@@ -22,16 +22,23 @@ from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.MaterialProperties.material_mixture import parse_all_compositions_from_yaml
 
+from conftest import (
+    GE14_COMPOSITIONS_YAML,
+    GE14_DOM_GEOMETRY_YAML,
+    GE14_SIMPLE_GEOMETRY_YAML,
+    GE14_CALC_SCHEME_YAML,
+)
+
 
 # =====================================================================
 #  Helpers
 # =====================================================================
 
-# Paths are relative to the tests/ directory (CWD when running pytest).
-_COMPOSITIONS_YAML = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
-_GEOMETRY_DOM_YAML = "../data/BWRProgressionProblems/GE14/inputs/GEOM_GE14_DOM.yaml"
-_GEOMETRY_SIMPLE_YAML = "../data/BWRProgressionProblems/GE14/inputs/simplified_geometry.yaml"
-_CALC_SCHEME_YAML = "../data/BWRProgressionProblems/GE14/inputs/CALC_SCHEME_GE14.yaml"
+# Paths anchored to the tests/ directory via conftest.py
+_COMPOSITIONS_YAML = GE14_COMPOSITIONS_YAML
+_GEOMETRY_DOM_YAML = GE14_DOM_GEOMETRY_YAML
+_GEOMETRY_SIMPLE_YAML = GE14_SIMPLE_GEOMETRY_YAML
+_CALC_SCHEME_YAML = GE14_CALC_SCHEME_YAML
 
 
 def _build_simple_assembly():
@@ -78,6 +85,31 @@ class TestSectorConfig:
         r = repr(sc)
         assert "SectorConfig" in r
         assert "[4]" in r
+
+    def test_splits_default_is_none(self):
+        """SectorConfig.splits defaults to None when not provided."""
+        sc = SectorConfig()
+        assert sc.splits is None
+
+    def test_splits_stored_as_tuple(self):
+        """SectorConfig.splits should be stored as a tuple."""
+        sc = SectorConfig(splits=[3, 3])
+        assert sc.splits == (3, 3)
+        assert isinstance(sc.splits, tuple)
+
+    def test_splits_repr(self):
+        """repr should show splits when set."""
+        sc = SectorConfig(splits=[4, 5])
+        r = repr(sc)
+        assert "splits=(4, 5)" in r
+        # Should NOT show sectors/angles in the splits repr
+        assert "sectors=" not in r
+
+    def test_splits_with_sectors_both_stored(self):
+        """Both splits and sectors can be set simultaneously (warning at build time)."""
+        sc = SectorConfig(sectors=[1, 1, 8], angles=[0, 0, 22.5], splits=[3, 3])
+        assert sc.splits == (3, 3)
+        assert sc.sectors == [1, 1, 8]
 
 
 # =====================================================================
@@ -610,6 +642,95 @@ class TestFromYAML:
             assert moc_step.box_discretization.enabled is True
             assert moc_step.box_discretization.corner_splits == (3, 3)
             assert moc_step.box_discretization.side_x_splits == (10, 1)
+        finally:
+            os.unlink(tmp_path)
+
+    def test_from_yaml_water_rod_splits(self):
+        """Verify water_rods 'splits' is parsed into SectorConfig.splits."""
+        scheme_data = {
+            "DRAGON_CALCULATION_SCHEME": {
+                "name": "wr_splits_test",
+                "steps": [
+                    {
+                        "name": "FLUX",
+                        "step_type": "flux",
+                        "spatial_method": "IC",
+                        "tracking": "TISO",
+                        "radial_scheme": "Santamarina",
+                        "export_macros": True,
+                        "sectorization": {
+                            "enabled": True,
+                            "windmill": False,
+                            "fuel_pins": {
+                                "sectors": [1, 1, 1, 1, 1, 1, 8],
+                                "angles": [0, 0, 0, 0, 0, 0, 22.5],
+                            },
+                            "water_rods": {
+                                "splits": [3, 3],
+                            },
+                        },
+                    },
+                ],
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(scheme_data, f)
+            tmp_path = f.name
+
+        try:
+            scheme = DragonCalculationScheme.from_yaml(tmp_path)
+            flux = scheme.get_step("FLUX")
+            assert flux.water_rod_sectors is not None
+            assert flux.water_rod_sectors.splits == (3, 3)
+            # sectors/angles should be empty since only splits was specified
+            assert flux.water_rod_sectors.sectors == []
+            assert flux.water_rod_sectors.angles == []
+        finally:
+            os.unlink(tmp_path)
+
+    def test_from_yaml_water_rod_splits_and_sectors_warns(self):
+        """Warn when water_rods block has both splits and sectors/angles."""
+        import warnings
+        scheme_data = {
+            "DRAGON_CALCULATION_SCHEME": {
+                "name": "wr_mixed_test",
+                "steps": [
+                    {
+                        "name": "FLUX",
+                        "step_type": "flux",
+                        "spatial_method": "IC",
+                        "tracking": "TISO",
+                        "radial_scheme": "Santamarina",
+                        "sectorization": {
+                            "enabled": True,
+                            "water_rods": {
+                                "splits": [3, 3],
+                                "sectors": [1, 1, 8],
+                                "angles": [0, 0, 22.5],
+                            },
+                        },
+                    },
+                ],
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(scheme_data, f)
+            tmp_path = f.name
+
+        try:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                scheme = DragonCalculationScheme.from_yaml(tmp_path)
+                wr_warnings = [x for x in w if "splits" in str(x.message)
+                               and "sectors" in str(x.message)]
+                assert len(wr_warnings) >= 1, \
+                    "Expected a warning about both splits and sectors being set"
+            # Both should still be stored
+            flux = scheme.get_step("FLUX")
+            assert flux.water_rod_sectors.splits == (3, 3)
+            assert flux.water_rod_sectors.sectors == [1, 1, 8]
         finally:
             os.unlink(tmp_path)
 

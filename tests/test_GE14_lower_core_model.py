@@ -16,6 +16,18 @@ from starterDD.GeometryAnalysis.tdt_parser import read_material_mixture_indices_
 from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel, DummyPinModel
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.InterfaceToDD.dragon_module_calls import LIB
+from starterDD.InterfaceToDD.dragon_module_calls import EDI, COMPO, EDI_COMPO
+from starterDD.InterfaceToDD.serpent2_cards import (
+    Serpent2Model, S2_Settings, S2_Material, S2_PinUniverse, S2_Lattice,
+    S2_ChannelGeometry,
+)
+
+from conftest import (
+    GE14_COMPOSITIONS_YAML,
+    GE14_DOM_GEOMETRY_YAML,
+    GE14_TDT_DIR,
+    OUTPUTS_DIR,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -23,9 +35,9 @@ from starterDD.InterfaceToDD.dragon_module_calls import LIB
 # ---------------------------------------------------------------------------
 FLUX_TRACKING_OPTION = "TISO"
 INCLUDE_MACROS = True
-PATH_TO_YAML_COMPOSITIONS = "../data/BWRProgressionProblems/GE14/inputs/material_compositions.yaml"
-PATH_TO_YAML_GEOMETRY = "../data/BWRProgressionProblems/GE14/inputs/GEOM_GE14_DOM.yaml"
-PATH_TO_TDT = "./reference_tdt_files/GE14"
+PATH_TO_YAML_COMPOSITIONS = GE14_COMPOSITIONS_YAML
+PATH_TO_YAML_GEOMETRY = GE14_DOM_GEOMETRY_YAML
+PATH_TO_TDT = GE14_TDT_DIR
 TDT_FILE_NAME = "GE14_DOM_SSH_IC"
 
 
@@ -430,7 +442,7 @@ class TestLIBCreation:
     def lib_output_path(self, ge14_assembly_for_lib):
         """Generate LIB output file and return its path."""
         lib = LIB(ge14_assembly_for_lib)
-        return lib.write_to_c2m("outputs", "GE14_DOM_LIB")
+        return lib.write_to_c2m(str(OUTPUTS_DIR), "GE14_DOM_LIB")
 
     @pytest.fixture
     def lib_content(self, lib_output_path):
@@ -509,3 +521,423 @@ class TestLIBCreation:
         expected_max = max(all_indices)
         assert f"NMIX {expected_max}" in lib_content, \
             f"NMIX should be {expected_max}, not found in output."
+
+
+# ---------------------------------------------------------------------------
+# Tests: EDI MERG MIX vector and EDI_COMPO output generation
+# ---------------------------------------------------------------------------
+class TestEDIMergMix:
+    """Tests for EDI class MERG MIX vector construction on the GE14 DOM assembly."""
+
+    def test_merg_mix_fuel_mode(self, ge14_assembly_for_lib):
+        """FUEL mode: all fuel mixes → 1, non-fuel → 0."""
+        edi = EDI("test_fuel", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235", "U238"])
+        edi.set_spatial_homogenization("FUEL")
+
+        vector = edi.build_merg_mix_vector()
+        max_mix = edi._get_max_mix_index()
+
+        assert len(vector) == max_mix
+
+        for mix in ge14_assembly_for_lib.fuel_material_mixtures:
+            assert vector[mix.material_mixture_index - 1] == 1, \
+                f"Fuel mix {mix.unique_material_mixture_name} should be 1"
+
+        for nf_idx in ge14_assembly_for_lib.non_fuel_material_mixture_indices.values():
+            assert vector[nf_idx - 1] == 0, \
+                f"Non-fuel idx {nf_idx} should be 0"
+
+    def test_merg_mix_all_mode(self, ge14_assembly_for_lib):
+        """ALL mode: every position → 1."""
+        edi = EDI("test_all", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("ALL")
+
+        vector = edi.build_merg_mix_vector()
+        assert all(v == 1 for v in vector)
+
+    def test_merg_mix_by_pin_mode(self, ge14_assembly_for_lib):
+        """by_pin mode: each pin position gets its own output index."""
+        edi = EDI("test_by_pin", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("by_pin")
+
+        vector = edi.build_merg_mix_vector()
+
+        # Check that pin_idx from name matches the vector value
+        for mix in ge14_assembly_for_lib.fuel_material_mixtures:
+            expected_pin = int(mix.unique_material_mixture_name.rsplit("_pin", 1)[1])
+            actual = vector[mix.material_mixture_index - 1]
+            assert actual == expected_pin, \
+                f"Mix '{mix.unique_material_mixture_name}' should have pin_idx {expected_pin}, got {actual}"
+
+        # Non-fuel → 0
+        for nf_idx in ge14_assembly_for_lib.non_fuel_material_mixture_indices.values():
+            assert vector[nf_idx - 1] == 0
+
+    def test_merg_mix_by_material_mode(self, ge14_assembly_for_lib):
+        """by_material mode: same base composition → same output index."""
+        edi = EDI("test_by_mat", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("by_material")
+
+        vector = edi.build_merg_mix_vector()
+
+        # Mixes with same material_name must have same value
+        material_to_value = {}
+        for mix in ge14_assembly_for_lib.fuel_material_mixtures:
+            val = vector[mix.material_mixture_index - 1]
+            assert val > 0
+            if mix.material_name in material_to_value:
+                assert material_to_value[mix.material_name] == val
+            else:
+                material_to_value[mix.material_name] = val
+
+        # Different materials should have different values
+        values = list(material_to_value.values())
+        assert len(values) == len(set(values)), "Each material should have a unique family ID"
+
+    def test_merg_mix_by_mix_mode(self, ge14_assembly_for_lib):
+        """by_mix mode: each MaterialMixture gets a unique sequential rank."""
+        edi = EDI("test_by_mix", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("by_mix")
+
+        vector = edi.build_merg_mix_vector()
+        n_fuel = len(ge14_assembly_for_lib.fuel_material_mixtures)
+
+        for rank, mix in enumerate(ge14_assembly_for_lib.fuel_material_mixtures, start=1):
+            assert vector[mix.material_mixture_index - 1] == rank
+
+        # Check uniqueness of fuel output regions
+        fuel_values = [vector[mix.material_mixture_index - 1]
+                       for mix in ge14_assembly_for_lib.fuel_material_mixtures]
+        assert len(set(fuel_values)) == n_fuel
+
+    def test_merg_mix_custom_mode(self, ge14_assembly_for_lib):
+        """custom mode: user-supplied mapping."""
+        first_mix = ge14_assembly_for_lib.fuel_material_mixtures[0]
+        custom_map = {first_mix.material_mixture_index: 42}
+
+        edi = EDI("test_custom", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("custom", custom_map=custom_map)
+
+        vector = edi.build_merg_mix_vector()
+        assert vector[first_mix.material_mixture_index - 1] == 42
+
+        # All other positions should be 0
+        for i, v in enumerate(vector):
+            if i != first_mix.material_mixture_index - 1:
+                assert v == 0
+
+    def test_invalid_spatial_mode_raises(self, ge14_assembly_for_lib):
+        """Invalid spatial mode should raise ValueError."""
+        edi = EDI("test", ge14_assembly_for_lib)
+        with pytest.raises(ValueError, match="Invalid spatial mode"):
+            edi.set_spatial_homogenization("bogus")
+
+    def test_custom_without_map_raises(self, ge14_assembly_for_lib):
+        """custom mode without a map should raise ValueError."""
+        edi = EDI("test", ge14_assembly_for_lib)
+        with pytest.raises(ValueError, match="custom_map is required"):
+            edi.set_spatial_homogenization("custom")
+
+    def test_edi_call_structure(self, ge14_assembly_for_lib):
+        """Verify the full EDI call block has expected CLE-2000 structure."""
+        edi = EDI("EDIHOM_COND", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235", "U238", "Gd155"])
+        edi.set_spatial_homogenization("FUEL")
+        edi.set_energy_condensation([])
+
+        call = edi.build_edi_call()
+        assert "EDIRATES := EDI: FLUX LIBRARY2 TRACK ::" in call
+        assert "EDIT 1" in call
+        assert "MICR 3 U235 U238 Gd155" in call
+        assert "MERG MIX" in call
+        assert "COND" in call
+        assert "SAVE ON EDIHOM_COND" in call
+
+    def test_edi_call_no_condensation(self, ge14_assembly_for_lib):
+        """Verify no COND keyword when energy_bounds is None."""
+        edi = EDI("EDIHOM_295", ge14_assembly_for_lib)
+        edi.set_isotopes(["U235"])
+        edi.set_spatial_homogenization("ALL")
+        edi.set_energy_condensation(None)
+
+        call = edi.build_edi_call()
+        assert "COND" not in call
+        assert "SAVE ON EDIHOM_295" in call
+
+
+class TestEDICOMPOCreation:
+    """Tests for EDI_COMPO orchestrator .c2m file generation."""
+
+    @pytest.fixture
+    def edi_compo_output_path(self, ge14_assembly_for_lib):
+        """Generate EDI_COMPO output file and return its path."""
+        edi_compo = EDI_COMPO(ge14_assembly_for_lib)
+
+        edi_compo.add_edition(
+            name="EDIHOM_COND",
+            comment="Condensed, Homogenized over all fuel cells",
+            isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+            spatial_mode="FUEL",
+            energy_bounds=[],
+        )
+        edi_compo.add_edition(
+            name="EDIHOM_295",
+            comment="Homogenized, 295g",
+            isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+            spatial_mode="ALL",
+            energy_bounds=None,
+        )
+        edi_compo.add_edition(
+            name="H_EDI_REGI_1g",
+            comment="Condensed, per unique pin",
+            isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+            spatial_mode="by_pin",
+            energy_bounds=[],
+        )
+        edi_compo.add_edition(
+            name="H_EDI_REGI_2g",
+            comment="Condensed to 2 groups, per unique pin",
+            isotopes=["U235", "U238", "U234", "Gd155", "Gd157"],
+            spatial_mode="by_pin",
+            energy_bounds=[0.625],
+        )
+
+        return edi_compo.write_to_c2m(str(OUTPUTS_DIR), "EDICPO_GE14_DOM")
+
+    @pytest.fixture
+    def edi_compo_content(self, edi_compo_output_path):
+        """Read and return EDI_COMPO output file content."""
+        with open(edi_compo_output_path, 'r') as f:
+            return f.read()
+
+    def test_output_file_exists(self, edi_compo_output_path):
+        """Verify output file is created."""
+        assert os.path.isfile(edi_compo_output_path)
+
+    def test_output_not_empty(self, edi_compo_content):
+        """Verify output file is not empty."""
+        assert len(edi_compo_content) > 0
+
+    def test_procedure_header(self, edi_compo_content):
+        """Verify CLE-2000 procedure header."""
+        assert "PARAMETER COMPO FLUX LIBRARY2 TRACK" in edi_compo_content
+        assert "MODULE EDI: COMPO: DELETE: END:" in edi_compo_content
+        assert "LINKED_LIST EDIRATES" in edi_compo_content
+        assert "SEQ_ASCII _COMPO :: FILE <<name_cpo>>" in edi_compo_content
+
+    def test_compo_initialization(self, edi_compo_content):
+        """Verify COMPO: initialization with all directories."""
+        assert "COMPO := COMPO: ::" in edi_compo_content
+        assert "STEP UP 'EDIHOM_COND'" in edi_compo_content
+        assert "STEP UP 'EDIHOM_295'" in edi_compo_content
+        assert "STEP UP 'H_EDI_REGI_1g'" in edi_compo_content
+        assert "STEP UP 'H_EDI_REGI_2g'" in edi_compo_content
+        assert edi_compo_content.count("\n   INIT\n") == 4
+
+    def test_edi_calls_present(self, edi_compo_content):
+        """Verify all 4 EDI: calls are present."""
+        assert edi_compo_content.count("EDIRATES := EDI: FLUX LIBRARY2 TRACK") == 4
+        assert "SAVE ON EDIHOM_COND" in edi_compo_content
+        assert "SAVE ON EDIHOM_295" in edi_compo_content
+        assert "SAVE ON H_EDI_REGI_1g" in edi_compo_content
+        assert "SAVE ON H_EDI_REGI_2g" in edi_compo_content
+
+    def test_compo_store_calls(self, edi_compo_content):
+        """Verify all 4 COMPO: store calls are present."""
+        assert edi_compo_content.count("COMPO := COMPO: COMPO EDIRATES LIBRARY2") == 4
+
+    def test_edirates_cleanup(self, edi_compo_content):
+        """Verify EDIRATES cleanup after each edition."""
+        assert edi_compo_content.count("EDIRATES := DELETE: EDIRATES") == 4
+
+    def test_energy_condensation_keywords(self, edi_compo_content):
+        """Verify COND keywords for editions that specify condensation."""
+        # EDIHOM_295 has no condensation → no COND between its EDI and COMPO
+        # EDIHOM_COND has COND (1 group)
+        # H_EDI_REGI_2g has COND 0.625
+        assert "COND 0.625" in edi_compo_content
+
+    def test_save_and_end_footer(self, edi_compo_content):
+        """Verify footer with save conditional and END."""
+        assert "IF save_opt 'SAVE' = THEN" in edi_compo_content
+        assert "_COMPO := COMPO" in edi_compo_content
+        assert "END: ;" in edi_compo_content
+
+    def test_merg_mix_vectors_present(self, edi_compo_content):
+        """Verify MERG MIX keyword is present in EDI calls."""
+        assert edi_compo_content.count("MERG MIX") == 4
+
+    def test_micr_keyword(self, edi_compo_content):
+        """Verify MICR keyword with isotope lists."""
+        assert "MICR 5 U235 U238 U234 Gd155 Gd157" in edi_compo_content
+
+
+# ---------------------------------------------------------------------------
+# Tests: Serpent2 model generation
+# ---------------------------------------------------------------------------
+class TestGE14Serpent2Model:
+    """Tests for Serpent2 model generation from the GE14 DOM assembly."""
+
+    @pytest.fixture(scope="class")
+    def ge14_serpent2_model(self):
+        """Build and return a Serpent2Model from the GE14 DOM assembly."""
+        from starterDD.MaterialProperties.material_mixture import parse_all_compositions_from_yaml
+        from starterDD.GeometryAnalysis.tdt_parser import read_material_mixture_indices_from_tdt_file
+        from starterDD.DDModel.DragonModel import CartesianAssemblyModel
+        from starterDD.DDModel.helpers import associate_material_to_rod_ID
+
+        ROD_to_material = associate_material_to_rod_ID(
+            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_GEOMETRY
+        )
+        compositions = parse_all_compositions_from_yaml(PATH_TO_YAML_COMPOSITIONS)
+
+        assembly = CartesianAssemblyModel(
+            name="GE14_S2",
+            tdt_file=f"{PATH_TO_TDT}/{TDT_FILE_NAME}.tdt",
+            geometry_description_yaml=PATH_TO_YAML_GEOMETRY,
+        )
+        assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+        assembly.set_uniform_temperatures(
+            fuel_temperature=900.0,
+            gap_temperature=600.0,
+            coolant_temperature=600.0,
+            moderator_temperature=600.0,
+            structural_temperature=600.0,
+        )
+        assembly.analyze_lattice_description(build_pins=True, apply_self_shielding="from_yaml")
+        assembly.set_material_compositions(compositions)
+        assembly.number_fuel_material_mixtures_by_pin()
+
+        # Enforce TDT indices
+        tdt_indices = read_material_mixture_indices_from_tdt_file(
+            PATH_TO_TDT,
+            tdt_file_name=TDT_FILE_NAME,
+            tracking_option=FLUX_TRACKING_OPTION,
+            include_macros=INCLUDE_MACROS,
+            material_names=None,
+        )
+        assembly.enforce_material_mixture_indices_from_tdt(tdt_indices)
+        assembly.identify_generating_and_daughter_mixes()
+
+        settings = S2_Settings()
+        settings.title = "GE14 DOM lower core - starterDD generated"
+        settings.bc = 2
+        settings.neutrons_per_cycle = 10000
+        settings.active_cycles = 200
+        settings.inactive_cycles = 50
+
+        model = Serpent2Model(assembly_model=assembly, settings=settings)
+        model.build(
+            gap_material_name="gap",
+            clad_material_name="clad",
+            coolant_material_name="cool",
+            outer_water_material_name="moderator",
+            channel_box_material_name="zr4",
+        )
+        model.build_structural_materials_from_assembly(
+            name_map={
+                "COOLANT": "cool",
+                "CLAD": "clad",
+                "GAP": "gap",
+                "MODERATOR": "moderator",
+                "CHANNEL_BOX": "zr4",
+            },
+            temperature_map={
+                "COOLANT": 600.0,
+                "CLAD": 600.0,
+                "GAP": 600.0,
+                "MODERATOR": 600.0,
+                "CHANNEL_BOX": 600.0,
+            },
+        )
+        return model, assembly
+
+    @pytest.fixture(scope="class")
+    def ge14_serpent2_output_path(self, ge14_serpent2_model):
+        """Write Serpent2 model and return the file path."""
+        model, _ = ge14_serpent2_model
+        filepath = f"{OUTPUTS_DIR}/GE14_DOM_assembly.serp"
+        model.write(filepath)
+        return filepath
+
+    @pytest.fixture(scope="class")
+    def ge14_serpent2_content(self, ge14_serpent2_output_path):
+        """Read and return Serpent2 output file content."""
+        with open(ge14_serpent2_output_path, 'r') as f:
+            return f.read()
+
+    def test_output_file_exists(self, ge14_serpent2_output_path):
+        """Verify Serpent2 output file is created."""
+        assert os.path.isfile(ge14_serpent2_output_path)
+
+    def test_output_not_empty(self, ge14_serpent2_content):
+        """Verify output file is not empty."""
+        assert len(ge14_serpent2_content) > 0
+
+    def test_title_present(self, ge14_serpent2_content):
+        """Verify title is in the output."""
+        assert "GE14 DOM" in ge14_serpent2_content
+
+    def test_fuel_materials_present(self, ge14_serpent2_content, ge14_serpent2_model):
+        """Verify fuel material cards are present."""
+        _, assembly = ge14_serpent2_model
+        for mix in assembly.fuel_material_mixtures:
+            mat_name = mix.unique_material_mixture_name
+            assert f"mat {mat_name}" in ge14_serpent2_content, \
+                f"Fuel material '{mat_name}' not found in Serpent2 output"
+
+    def test_pin_universes_present(self, ge14_serpent2_content, ge14_serpent2_model):
+        """Verify pin universe cards are present."""
+        model, _ = ge14_serpent2_model
+        for pin_univ in model.pin_universes:
+            assert f"pin {pin_univ.universe_name}" in ge14_serpent2_content
+
+    def test_lattice_present(self, ge14_serpent2_content):
+        """Verify lattice card is present."""
+        assert "lat " in ge14_serpent2_content
+
+    def test_channel_geometry_present(self, ge14_serpent2_content):
+        """Verify channel box and assembly boundary surfaces."""
+        assert "surf" in ge14_serpent2_content
+        assert "cell" in ge14_serpent2_content
+
+    def test_circular_water_rod_surfaces(self, ge14_serpent2_content):
+        """Verify circular water rod surfaces are generated (GE14 uses circular WR)."""
+        assert "Water rod" in ge14_serpent2_content
+        assert "cyl" in ge14_serpent2_content
+
+    def test_boundary_conditions(self, ge14_serpent2_content):
+        """Verify reflective boundary conditions."""
+        assert "set bc 2" in ge14_serpent2_content
+
+    def test_materials_have_temperature(self, ge14_serpent2_content):
+        """Verify materials have temperature specification."""
+        assert "tmp 900.0" in ge14_serpent2_content
+        assert "tmp 600.0" in ge14_serpent2_content
+
+    def test_empty_universe_in_lattice(self, ge14_serpent2_content):
+        """Verify empty universe for water rod placeholders is defined."""
+        assert "pin empty" in ge14_serpent2_content
+
+    def test_number_of_unique_pin_universes(self, ge14_serpent2_model):
+        """Verify number of unique pin universes matches expectations."""
+        model, assembly = ge14_serpent2_model
+        n_unique_fuel = len(set(
+            pin.pin_idx for row in assembly.lattice for pin in row
+            if isinstance(pin, FuelPinModel)
+        ))
+        # model.pin_universes includes fuel pins + empty universe
+        assert len(model.pin_universes) == n_unique_fuel + 1
+
+    def test_model_summary(self, ge14_serpent2_model):
+        """Verify model summary is generated."""
+        model, _ = ge14_serpent2_model
+        summary = model.summary()
+        assert "Serpent2 Model Summary" in summary
+        assert "Materials" in summary

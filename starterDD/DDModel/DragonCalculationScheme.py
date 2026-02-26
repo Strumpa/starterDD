@@ -28,26 +28,45 @@ VALID_RADIAL_SCHEMES = ("Santamarina", "automatic", "user_defined")
 
 class SectorConfig:
     """
-    Container for azimuthal sectorization parameters used by glow's
-    ``RectCell.sectorize()`` method.
+    Container for discretization parameters for cell regions.
+
+    For **circular** water rods and fuel pins this stores azimuthal
+    sectorization parameters used by glow's ``RectCell.sectorize()``
+    method (``sectors``, ``angles``, ``windmill``).
+
+    For **square** water rods this stores a Cartesian grid subdivision
+    specification (``splits``) applied over the bounding box, analogous
+    to the assembly-box discretization.
 
     Attributes
     ----------
     sectors : list[int]
         Number of sectors per radial ring (from innermost to outermost
-        region, including coolant).
+        region, including coolant).  Used for circular geometries.
     angles : list[float]
-        Starting angle offset for each ring (degrees).
+        Starting angle offset for each ring (degrees).  Used for circular
+        geometries.
     windmill : bool
-        Whether to apply windmill sectorization.
+        Whether to apply windmill sectorization.  Used for circular
+        geometries.
+    splits : tuple[int, int] or None
+        ``(nx, ny)`` Cartesian grid subdivisions applied to the whole
+        bounding box of a square water rod.  Material assignment to each
+        resulting sub-face is performed by geometric containment.
+        ``None`` means no grid sub-meshing (the cell keeps its base
+        3-region technological geometry).
     """
 
-    def __init__(self, sectors=None, angles=None, windmill=False):
+    def __init__(self, sectors=None, angles=None, windmill=False,
+                 splits=None):
         self.sectors = sectors or []
         self.angles = angles or []
         self.windmill = windmill
+        self.splits = tuple(splits) if splits else None
 
     def __repr__(self):
+        if self.splits is not None:
+            return f"SectorConfig(splits={self.splits})"
         return (f"SectorConfig(sectors={self.sectors}, "
                 f"angles={self.angles}, windmill={self.windmill})")
 
@@ -556,8 +575,11 @@ class DragonCalculationScheme:
                       sectors: [(same as fuel_pins but for Gd-bearing pins, e.g. [1, 1, 1, 1, 1, 1, 1, 1, 8] for Santamarina sectorization on all rings and subdivided coolant)]
                       angles:  [(same as fuel_pins but for Gd-bearing pins, e.g. [0, 0, 0, 0, 0, 0, 0, 0, 22.5] for 22.5° offset on coolant only)]
                     water_rods:
+                      # For circular water rods (azimuthal sectorization):
                       sectors: [(list of sector counts per ring for water rods, e.g. [1, 1, 8] for 1 moderator, 1 clad, and subdivided coolant)]
                       angles:  [(list of angles for water rods, e.g. [0, 0, 22.5] for 22.5° offset on coolant only)]
+                      # For square water rods (Cartesian grid sub-meshing):
+                      splits: [nx, ny]  # grid subdivisions applied to the whole bounding box; material is reassigned by geometric containment
                 
                   box_discretization: 
                     enabled: boolean flag to enable sub-meshing of the assembly box peripheral regions into a grid of sub-faces (for MOC tracking)
@@ -617,10 +639,29 @@ class DragonCalculationScheme:
                 )
             wr = sect.get("water_rods", {})
             if wr:
+                wr_splits = wr.get("splits", None)
+                wr_sectors = wr.get("sectors", [])
+                wr_angles = wr.get("angles", [])
+
+                # Warn if both circular (sectors/angles) and square
+                # (splits) keys are present — user should use one or
+                # the other depending on the geometry type.
+                import warnings
+                if wr_splits and (wr_sectors or wr_angles):
+                    warnings.warn(
+                        "water_rods block contains both 'splits' and "
+                        "'sectors'/'angles'.  For circular water rods "
+                        "only sectors/angles are used; for square water "
+                        "rods only splits is used.  The unused keys will "
+                        "be ignored at geometry-build time.",
+                        stacklevel=2,
+                    )
+
                 water_rod_sectors = SectorConfig(
-                    sectors=wr.get("sectors", []),
-                    angles=wr.get("angles", []),
+                    sectors=wr_sectors,
+                    angles=wr_angles,
                     windmill=sect.get("windmill", False),
+                    splits=wr_splits,
                 )
 
         # --- Radial overrides ---

@@ -228,17 +228,20 @@ MIX_COMPOSITIONS:
     depletable: false
 
   - name: "MODERATOR"
-    density: 7.38974602E-2
+    atomic_density: 7.38974602E-2
     composition:
       "1001": 6.666666666666666E-1
       "8016": 3.333333333333333E-1
     depletable: false
+    therm: true
+  
   - name: "COOLANT"
-    density: 7.38974602E-2
+    atomic_density: 7.38974602E-2
     composition:
       "1001": 6.666666666666666E-1
       "8016": 3.333333333333333E-1
     depletable: false
+    therm: true
 
   - name: "GAP"
     isotopic_composition:

@@ -69,6 +69,7 @@ class CartesianAssemblyModel:
                 outer_radius : <value> (for circular water rods)
                 inner_side : <value> (for square water rods)
                 outer_side : <value> (for square water rods)
+                corner_radius : <value> (optional, for square water rods with rounded corners)
                 centers: [(x, y) coordinates for the centers of the water rods in the lattice, e.g. [(0.5, 0.5), (2.5, 0.5)] for two water rods centered in the middle of the first and third cells of the first row of the lattice)]
         """
         with open(geometry_description_yaml, 'r') as file:
@@ -100,6 +101,7 @@ class CartesianAssemblyModel:
         elif self.water_rod_type == "square": # ATRIUM-10 type lattice
             self.water_box_inner_side = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("inner_side", None)
             self.water_box_outer_side = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("outer_side", None)
+            self.water_box_corner_radius = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("corner_radius", None)
         self.water_rod_centers = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("centers", [])
         self.number_of_water_rods = len(self.water_rod_centers)
         self.channel_box_inner_side = self.assembly_pitch - 2 * self.channel_box_thickness - 2 * self.gap_wide if self.channel_box_thickness is not None and self.gap_wide is not None else None
@@ -142,6 +144,7 @@ class CartesianAssemblyModel:
         "outer_radius": False,
         "inner_side": False,
         "outer_side": False,
+        "corner_radius": False,
         "centers": True,
     }
 
@@ -335,7 +338,11 @@ class CartesianAssemblyModel:
                                                             inner_radius=self.water_rod_inner_radius, outer_radius=self.water_rod_outer_radius, 
                                                             center=center, rod_ID=f"WaterRod_{rod_nb+1}")
                 elif self.water_rod_type == "square":
-                    water_rod_model = SquareWaterRodModel(inner_side=self.water_box_inner_side, outer_side=self.water_box_outer_side, center=center, rod_ID=f"WaterRod_{rod_nb+1}")
+                    water_rod_model = SquareWaterRodModel(bounding_box_side_length=water_rod_bounding_box_side,
+                                                          moderator_box_outer_side=self.water_box_outer_side, 
+                                                          moderator_box_inner_side=self.water_box_inner_side,
+                                                          center=center, rod_ID=f"WaterRod_{rod_nb+1}",
+                                                          corner_radius=getattr(self, 'water_box_corner_radius', None))
                 else:
                     raise ValueError(f"Unsupported water rod geometry type: {self.water_rod_type}. Supported types are 'circular' and 'square'.")
                 water_rod_model.set_materials("MODERATOR", "CLAD", "COOLANT")
@@ -1132,24 +1139,44 @@ class SquareWaterRodModel:
     """
     Class representing a square water rod in a cartesian assembly for DRAGON calculations.
 
-    Minimal attributes:
+    The water rod is modelled as 3 concentric rectangular regions:
 
-    - bounding box side length: side length of the square water rod.
-    - moderator box outer side: outer side length of the moderator box.
-    - moderator box inner side: inner side length of the moderator box.
-    - center: center coordinates of the square water rod in the lattice.
+    1. Inner moderator (bounded by ``moderator_box_inner_side``)
+    2. Cladding (between ``moderator_box_inner_side`` and
+       ``moderator_box_outer_side``)
+    3. Coolant (between ``moderator_box_outer_side`` and the
+       ``bounding_box_side_length``)
 
-    Methods:
+    An optional ``corner_radius`` can be specified for the inner and
+    outer boundary rectangles (rounded-corner moderation boxes).  When
+    ``None``, sharp 90° corners are used.
 
-    - set_moderator_temperature: set the moderator temperature for the water rod.
-    - set_structural_temperature: set the structural temperature for the water rod.
+    Attributes
+    ----------
+    bounding_box_side_length : float
+        Side length of the square bounding box cell.
+    moderator_box_outer_side : float
+        Outer side length of the moderation box.
+    moderator_box_inner_side : float
+        Inner side length of the moderation box.
+    center : tuple
+        ``(x, y)`` centre coordinates in the lattice.
+    rod_ID : str
+        Identifier for this water rod.
+    corner_radius : float or None
+        Radius of curvature for the inner boundary corners.  The outer
+        boundary uses ``corner_radius + wall_thickness``.  ``None`` for
+        sharp corners.
     """
-    def __init__(self, bounding_box_side_length, moderator_box_outer_side, moderator_box_inner_side, center, rod_ID):
+    def __init__(self, bounding_box_side_length, moderator_box_outer_side,
+                 moderator_box_inner_side, center, rod_ID,
+                 corner_radius=None):
         self.bounding_box_side_length = bounding_box_side_length
         self.moderator_box_outer_side = moderator_box_outer_side
         self.moderator_box_inner_side = moderator_box_inner_side
         self.center = center
         self.rod_ID = rod_ID
+        self.corner_radius = corner_radius
 
 
     def set_moderator_temperature(self, moderator_temperature):

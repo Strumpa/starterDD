@@ -6,12 +6,14 @@ from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel
 from starterDD.DDModel.DonjonModel import CoreModel
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 
+from conftest import GE14_INPUTS_DIR_STR
+
 ## Test the DonjonModel with simplified axially varying geometry.
 # The GE14 assembly refered to in BWR Progression Problems.
 # The "DOM" power dominated zone is modeled form 0.0 to 222.0595 cm, and the "VAN" void dominated zone is modeled from 222.0595 to 347.1291 cm.
 
 def test_axial_variation_single_assembly_core_model():
-    path_to_configs = "../data/BWRProgressionProblems/GE14/inputs"
+    path_to_configs = GE14_INPUTS_DIR_STR
     GE14_core_description_yaml = "GEOM_single_assembly_CORE.yaml"
     single_assembly_core_model = CoreModel(name="GE14_single_assembly_core", path_to_yaml_configs=path_to_configs, core_description_yaml=GE14_core_description_yaml)
     assert single_assembly_core_model.geometry_type == "cartesian"
@@ -34,7 +36,7 @@ def test_axial_variation_single_assembly_core_model():
     assert single_assembly_core_model.assembly_models[((0, 0, "single_GE14_assembly"), "2D_slice_geometry_for_VAN_region_of_single_GE14_assembly")].count_number_of_pins() == 78
 
 def test_axial_variation_4x4_minicore():
-    path_to_configs = "../data/BWRProgressionProblems/GE14/inputs"
+    path_to_configs = GE14_INPUTS_DIR_STR
     GE14_core_description_yaml = "GEOM_4x4_mini_CORE.yaml"
     minicore_model = CoreModel(name="GE14_4x4_minicore", path_to_yaml_configs=path_to_configs, core_description_yaml=GE14_core_description_yaml)
     assert minicore_model.geometry_type == "cartesian"
