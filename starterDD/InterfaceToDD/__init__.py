@@ -7,8 +7,12 @@ from .serpent2_cards import (
     DRAGON_REAC_TO_REACTION_NAME,
     ELEMENT_TO_Z,
     Z_TO_ELEMENT,
+    EVALUATION_XS_SUFFIX_MAPS,
+    EVALUATION_THERM_SUFFIX_MAPS,
     TEMPERATURE_TO_XS_SUFFIX,
     get_xs_suffix,
+    get_therm_suffix,
+    get_therm_interpolation_suffixes,
     parse_isotope_name,
     isotope_name_to_zaid_str,
     # Core classes

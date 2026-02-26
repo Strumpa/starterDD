@@ -129,31 +129,83 @@ ELEMENT_TO_Z = {
 # Reverse mapping for ZAID to element symbol
 Z_TO_ELEMENT = {v: k for k, v in ELEMENT_TO_Z.items()}
 
-# ── Temperature to cross-section suffix mapping ──
-# These correspond to common ENDF/B and JEFF library temperature points.
-# Format: temperature_K -> suffix string
-# The suffix convention is .XXc where XX encodes the temperature.
-# This mapping should be adapted to the specific nuclear data library used.
+# ── Evaluation-dependent cross-section suffix maps ──
+# Each key is a nuclear-data evaluation identifier (lower-cased).  The
+# value is a temperature-to-suffix dict suitable for ``get_xs_suffix``.
 
-TEMPERATURE_TO_XS_SUFFIX = {
-    293.6: '.03c',
-    300.0: '.03c',
-    600.0: '.05c',
-    900.0: '.09c',
-    1200.0: '.12c',
-    1500.0: '.15c',
+EVALUATION_XS_SUFFIX_MAPS = {
+    "endfb8r1": {
+        293.0: '.02c',
+        550.0: '.05c',
+        900.0: '.09c',
+        1200.0: '.12c',
+        1999.0: '.20c',
+    },
+    "jeff311": {
+        293.0: '.02c',
+        550.0: '.05c',
+        900.0: '.09c',
+        1200.0: '.12c',
+        1999.0: '.20c',
+    },
 }
 
+# Default (evaluation-independent) flat temperature-to-XS-suffix map.
+# Used when no specific evaluation is selected.
+TEMPERATURE_TO_XS_SUFFIX = {
+    293.0: '.02c',
+    550.0: '.05c',
+    900.0: '.09c',
+    1200.0: '.12c',
+    1999.0: '.20c',
+}
+
+# ── Evaluation-dependent thermal-scattering (S(α,β)) suffix maps ──
+# Maps tabulated ACE thermal-scattering library temperature points to
+# the corresponding file suffix used in ``therm`` cards.
+
+EVALUATION_THERM_SUFFIX_MAPS = {
+    "endfb8r1": {
+        294.0:  '.00t',
+        350.0:  '.01t',
+        400.0:  '.02t',
+        450.0:  '.03t',
+        500.0:  '.04t',
+        550.0:  '.05t',
+        600.0:  '.06t',
+        650.0:  '.07t',
+        800.0:  '.08t',
+        1000.0: '.09t',
+    },
+    "jeff311": {
+        294.0:  '.00t',
+        324.0:  '.01t',
+        374.0:  '.02t',
+        424.0:  '.03t',
+        474.0:  '.04t',
+        524.0:  '.05t',
+        574.0:  '.06t',
+        647.0:  '.07t',
+        800.0:  '.08t',
+    },
+}
+
+
 def get_xs_suffix(temperature: float, suffix_map: dict = None) -> str:
-    """Get the closest cross-section suffix for a given temperature.
+    """Get the cross-section suffix for a given temperature.
+
+    The suffix returned corresponds to the closest **inferior** (or equal)
+    tabulated temperature.  If the requested temperature is below all
+    tabulated points the lowest available suffix is returned with a
+    warning.
     
     Args:
         temperature: Temperature in Kelvin.
         suffix_map: Optional custom mapping of temperature -> suffix.
-                   If None, uses TEMPERATURE_TO_XS_SUFFIX.
+                   If None, uses EVALUATION_XS_SUFFIX_MAPS.
     
     Returns:
-        Cross-section suffix string (e.g., '.81c').
+        Cross-section suffix string (e.g., '.06c').
     """
     if suffix_map is None:
         suffix_map = TEMPERATURE_TO_XS_SUFFIX
@@ -162,9 +214,82 @@ def get_xs_suffix(temperature: float, suffix_map: dict = None) -> str:
     if temperature in suffix_map:
         return suffix_map[temperature]
     
-    # Find closest temperature
-    closest_temp = min(suffix_map.keys(), key=lambda t: abs(t - temperature))
+    # Find closest inferior temperature
+    inferior_temps = [t for t in suffix_map.keys() if t <= temperature]
+    if inferior_temps:
+        closest_temp = max(inferior_temps)
+    else:
+        # Temperature below all tabulated points – use lowest available
+        import warnings
+        closest_temp = min(suffix_map.keys())
+        warnings.warn(
+            f"Requested temperature {temperature} K is below all tabulated "
+            f"points. Using lowest available: {closest_temp} K "
+            f"(suffix {suffix_map[closest_temp]}).",
+            stacklevel=2,
+        )
     return suffix_map[closest_temp]
+
+
+def get_therm_suffix(temperature: float, therm_suffix_map: dict = None,
+                     evaluation: str = None) -> str:
+    """Get the thermal scattering library suffix for a given temperature.
+
+    Follows the same *closest-inferior* logic as :func:`get_xs_suffix`.
+
+    Args:
+        temperature: Temperature in Kelvin.
+        therm_suffix_map: Optional explicit map.  If ``None``, resolved
+            from *evaluation* via :data:`EVALUATION_THERM_SUFFIX_MAPS`.
+        evaluation: Nuclear-data evaluation name (e.g. ``"endfb8r1"``).
+
+    Returns:
+        Suffix string (e.g. ``'.06t'``).
+    """
+    if therm_suffix_map is None:
+        if evaluation and evaluation.lower() in EVALUATION_THERM_SUFFIX_MAPS:
+            therm_suffix_map = EVALUATION_THERM_SUFFIX_MAPS[evaluation.lower()]
+        else:
+            # Fallback: first available evaluation or a minimal default
+            therm_suffix_map = next(iter(EVALUATION_THERM_SUFFIX_MAPS.values()),
+                                   {294.0: '.01t'})
+    return get_xs_suffix(temperature, suffix_map=therm_suffix_map)
+
+
+def get_therm_interpolation_suffixes(temperature: float,
+                                     therm_suffix_map: dict = None,
+                                     evaluation: str = None):
+    """Return the pair of bounding thermal-scattering library suffixes.
+
+    When the temperature falls exactly on a tabulated point, a single
+    suffix is returned (no interpolation needed).  Otherwise the two
+    bounding suffixes are returned for Serpent2 ``therm`` interpolation.
+
+    Args:
+        temperature: Temperature in Kelvin.
+        therm_suffix_map: Optional explicit map.
+        evaluation: Nuclear-data evaluation name.
+
+    Returns:
+        Tuple ``(lo_suffix, hi_suffix)`` or ``(exact_suffix, None)``.
+    """
+    if therm_suffix_map is None:
+        if evaluation and evaluation.lower() in EVALUATION_THERM_SUFFIX_MAPS:
+            therm_suffix_map = EVALUATION_THERM_SUFFIX_MAPS[evaluation.lower()]
+        else:
+            therm_suffix_map = next(iter(EVALUATION_THERM_SUFFIX_MAPS.values()),
+                                   {294.0: '.01t'})
+
+    sorted_temps = sorted(therm_suffix_map.keys())
+    if temperature in therm_suffix_map:
+        return (therm_suffix_map[temperature], None)
+
+    lo_temps = [t for t in sorted_temps if t <= temperature]
+    hi_temps = [t for t in sorted_temps if t > temperature]
+
+    lo_suffix = therm_suffix_map[max(lo_temps)] if lo_temps else therm_suffix_map[sorted_temps[0]]
+    hi_suffix = therm_suffix_map[min(hi_temps)] if hi_temps else None
+    return (lo_suffix, hi_suffix)
 
 
 def _reaction_name_to_mt(reaction: Union[str, int]) -> int:
@@ -1514,21 +1639,92 @@ class S2_IsotopeResponseMaterial:
 # ═══════════════════════════════════════════════════════════════
 
 class S2_ThermalScattering:
-    """Represents a Serpent2 `therm` card for thermal scattering laws."""
+    """Represents a Serpent2 ``therm`` card for thermal scattering laws.
+
+    Supports two formats:
+
+    * **Single library** (exact tabulated point)::
+
+        therm lwtr lwtr.16t
+
+    * **Temperature interpolation** between two tabulated libraries::
+
+        therm lwtr 559.0 lwtr.06t lwtr.07t
+
+    Use :meth:`from_temperature` for automatic resolution.
+    """
     
-    def __init__(self, name: str, library_name: str):
+    def __init__(self, name: str, library_name: str,
+                 interpolation_temperature: float = None,
+                 lo_library: str = None, hi_library: str = None):
         """
         Args:
             name: Thermal scattering law identifier (e.g., 'lwtr').
-            library_name: Library file name (e.g., 'lwtr.16t').
+            library_name: Library file name for exact-match mode
+                          (e.g., 'lwtr.16t').  Ignored when *lo_library*
+                          and *hi_library* are set.
+            interpolation_temperature: Temperature in K for interpolation
+                          mode.  When set together with *lo_library* and
+                          *hi_library*, the card is emitted in
+                          interpolation format.
+            lo_library: Lower-bound library for interpolation.
+            hi_library: Upper-bound library for interpolation.
         """
         self.name = name
         self.library_name = library_name
+        self.interpolation_temperature = interpolation_temperature
+        self.lo_library = lo_library
+        self.hi_library = hi_library
+
+    @classmethod
+    def from_temperature(cls, therm_name: str, temperature: float,
+                         evaluation: str = None,
+                         therm_suffix_map: dict = None):
+        """Build an ``S2_ThermalScattering`` card for the given temperature.
+
+        If the temperature matches a tabulated point exactly, a single-
+        library card is produced.  Otherwise an interpolation card with
+        the two bounding libraries is generated.
+
+        Args:
+            therm_name: Identifier (e.g. ``'lwtr'``).
+            temperature: Material temperature in K.
+            evaluation: Nuclear-data evaluation (e.g. ``'endfb8r1'``).
+            therm_suffix_map: Optional explicit suffix map.
+
+        Returns:
+            :class:`S2_ThermalScattering`
+        """
+        lo_suffix, hi_suffix = get_therm_interpolation_suffixes(
+            temperature,
+            therm_suffix_map=therm_suffix_map,
+            evaluation=evaluation,
+        )
+        if hi_suffix is None:
+            # Exact match or below all points – single library
+            return cls(name=therm_name,
+                       library_name=f"{therm_name}{lo_suffix}")
+        else:
+            return cls(
+                name=therm_name,
+                library_name=None,
+                interpolation_temperature=temperature,
+                lo_library=f"{therm_name}{lo_suffix}",
+                hi_library=f"{therm_name}{hi_suffix}",
+            )
     
     def format_card(self) -> str:
+        if (self.interpolation_temperature is not None
+                and self.lo_library and self.hi_library):
+            return (f"therm {self.name} {self.interpolation_temperature:.1f} "
+                    f"{self.lo_library} {self.hi_library}")
         return f"therm {self.name}  {self.library_name}"
     
     def __repr__(self):
+        if self.interpolation_temperature is not None:
+            return (f"S2_ThermalScattering('{self.name}', "
+                    f"T={self.interpolation_temperature}, "
+                    f"lo='{self.lo_library}', hi='{self.hi_library}')")
         return f"S2_ThermalScattering('{self.name}', '{self.library_name}')"
 
 
@@ -1586,6 +1782,41 @@ class S2_Settings:
         
         # Mesh plotting
         self.mesh_commands = []
+
+        # Nuclear data evaluation identifier for suffix resolution
+        # (e.g. "endfb8r1", "jeff311").  When set, ``get_xs_suffix``
+        # and ``get_therm_suffix`` will use the corresponding maps
+        # from ``EVALUATION_XS_SUFFIX_MAPS`` and
+        # ``EVALUATION_THERM_SUFFIX_MAPS``.
+        self.nuclear_data_evaluation = None
+
+    def set_nuclear_data_evaluation(self, evaluation: str):
+        """Select the nuclear-data evaluation for suffix resolution.
+
+        This controls which temperature-to-suffix maps are used for
+        cross-section and thermal-scattering library lookups.
+
+        Args:
+            evaluation: Evaluation identifier, e.g. ``"endfb8r1"``,
+                        ``"jeff311"``.
+        """
+        key = evaluation.lower()
+        if key not in EVALUATION_XS_SUFFIX_MAPS:
+            import warnings
+            warnings.warn(
+                f"Evaluation '{evaluation}' not found in "
+                f"EVALUATION_XS_SUFFIX_MAPS. Suffix resolution will "
+                f"fall back to the default map.",
+                stacklevel=2,
+            )
+        self.nuclear_data_evaluation = key
+
+    def get_xs_suffix_map(self) -> dict:
+        """Return the XS suffix map for the selected evaluation."""
+        if self.nuclear_data_evaluation:
+            return EVALUATION_XS_SUFFIX_MAPS.get(
+                self.nuclear_data_evaluation, TEMPERATURE_TO_XS_SUFFIX)
+        return TEMPERATURE_TO_XS_SUFFIX
     
     def set_endfb8r1_libraries(self, base_path: str):
         """Set ENDF/B-VIII.0r1 library paths.
@@ -1878,6 +2109,24 @@ class Serpent2Model:
             iso_dict = composition.get_isotope_name_composition()
             if not iso_dict:
                 continue
+
+            # --- Auto-detect thermal scattering from Composition.therm ---
+            moder_tuple = None
+            if getattr(composition, 'therm', False):
+                for td in getattr(composition, 'therm_data', []):
+                    therm_name = td.get("serpent2_therm_name")
+                    therm_zaid = td.get("serpent2_zaid")
+                    if therm_name and therm_zaid:
+                        moder_tuple = (therm_name, therm_zaid)
+                        # Register the corresponding therm card (dedup)
+                        eval_name = getattr(self.settings,
+                                            'nuclear_data_evaluation', None)
+                        self.add_thermal_scattering(
+                            name=therm_name,
+                            temperature=temp,
+                            evaluation=eval_name,
+                        )
+                        break  # one moder per material card
             
             mat = S2_Material.from_raw(
                 name=s2_name,
@@ -1885,20 +2134,52 @@ class Serpent2Model:
                 temperature=temp,
                 is_burnable=False,
                 xs_suffix=xs_suffix,
+                moder=moder_tuple,
             )
             self.materials.append(mat)
             existing_names.add(s2_name)
     
-    def add_thermal_scattering(self, name: str, library_name: str):
+    def add_thermal_scattering(self, name: str, library_name: str = None,
+                                temperature: float = None,
+                                evaluation: str = None):
         """Add a thermal scattering law.
-        
+
+        Three modes are supported:
+
+        1. **Explicit library**: provide *library_name* directly (e.g.
+           ``'lwtr.16t'``).
+        2. **Temperature-resolved**: provide *temperature* and optionally
+           *evaluation*.  The correct library suffix (and interpolation)
+           is resolved automatically.
+        3. **Interpolation**: handled internally by mode 2 when the
+           temperature falls between tabulated points.
+
         Args:
-            name: Thermal law name (e.g., 'lwtr').
-            library_name: Library file (e.g., 'lwtr.16t').
+            name: Thermal law name (e.g., ``'lwtr'``).
+            library_name: Explicit library file (mode 1).
+            temperature: Material temperature in K (mode 2).
+            evaluation: Nuclear-data evaluation name (e.g.
+                        ``'endfb8r1'``).  Defaults to
+                        ``self.settings.nuclear_data_evaluation``.
         """
-        self.thermal_scattering_laws.append(
-            S2_ThermalScattering(name, library_name)
-        )
+        if library_name is not None and temperature is None:
+            # Mode 1: explicit library
+            self.thermal_scattering_laws.append(
+                S2_ThermalScattering(name, library_name)
+            )
+        else:
+            # Mode 2/3: temperature-resolved
+            eval_name = evaluation or getattr(self.settings,
+                                              'nuclear_data_evaluation', None)
+            therm = S2_ThermalScattering.from_temperature(
+                therm_name=name,
+                temperature=temperature,
+                evaluation=eval_name,
+            )
+            # Dedup: only add if not already present
+            existing_names = {t.name for t in self.thermal_scattering_laws}
+            if name not in existing_names:
+                self.thermal_scattering_laws.append(therm)
     
     def _build_pin_universes(self, gap_material_name: str,
                              clad_material_name: str,

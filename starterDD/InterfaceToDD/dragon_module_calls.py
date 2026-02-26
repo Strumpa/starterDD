@@ -35,8 +35,9 @@ class LIB:
         assembly.identify_generating_and_daughter_mixes()
 
         lib = LIB(assembly)
-        lib.set_isotope_alias("MODERATOR", "H1", "H1_H2O")
-        lib.set_isotope_alias("COOLANT",   "H1", "H1_H2O")
+        # Aliases are auto-populated from the YAML ``therm`` flag.
+        # Manual overrides remain available as a fallback:
+        #   lib.set_isotope_alias("MODERATOR", "H1", "H1_H2O")
         lib.write_to_c2m("./procs", "MIX_LIB")
     """
 
@@ -93,6 +94,9 @@ class LIB:
         # Manually supplied non-fuel mixes (when TDT enforcement is skipped)
         self._extra_non_fuel_mixes = []
 
+        # --- Auto-populate aliases from the Composition.therm flag --------
+        self._auto_populate_therm_aliases()
+
     # ------------------------------------------------------------------
     #  Configuration helpers
     # ------------------------------------------------------------------
@@ -146,6 +150,11 @@ class LIB:
         Set a library evaluation-name override for an isotope in a specific
         material (e.g. bound scattering kernels: ``H1 → H1_H2O`` in water).
 
+        This is a **manual fallback** — aliases are auto-populated from the
+        ``therm`` flag in the YAML composition file.  Calling this method
+        will override the auto-detected alias for the given
+        ``(material_name, isotope_name)`` pair.
+
         Parameters
         ----------
         material_name : str
@@ -156,6 +165,28 @@ class LIB:
             Library evaluation name in the DRAGLIB (e.g. ``"H1_H2O"``).
         """
         self.isotope_aliases[(material_name, isotope_name)] = library_name
+
+    # ------------------------------------------------------------------
+    #  Thermal-scattering auto-detection
+    # ------------------------------------------------------------------
+
+    def _auto_populate_therm_aliases(self):
+        """Inspect the assembly's ``composition_lookup`` and register Dragon
+        isotope aliases for every composition whose ``therm`` flag is set.
+
+        Only entries **not** already present in ``self.isotope_aliases`` are
+        added, so manual ``set_isotope_alias`` calls always take priority.
+        """
+        comp_lookup = getattr(self.assembly, 'composition_lookup', None)
+        if comp_lookup is None:
+            return
+        for mat_name, composition in comp_lookup.items():
+            if not getattr(composition, 'therm', False):
+                continue
+            for entry in getattr(composition, 'therm_data', []):
+                key = (mat_name, entry["isotope"])
+                if key not in self.isotope_aliases:
+                    self.isotope_aliases[key] = entry["dragon_alias"]
 
     def add_non_fuel_mix(self, material_name, mix_index, composition,
                          temperature_variable="TCOOL"):
@@ -355,7 +386,7 @@ class LIB:
         Returns
         -------
         str
-            Absolute path of the written file.
+            Relative path of the written file.
         """
         header = (
             f"*PROCEDURE {proc_name}.c2m\n"
@@ -898,7 +929,7 @@ class EDI_COMPO:
         Returns
         -------
         str
-            Absolute path of the written file.
+            Relative path of the written file.
         """
         header = (
             f"* PROCEDURE {proc_name}.c2m : calls to EDI: and COMPO: modules\n"
