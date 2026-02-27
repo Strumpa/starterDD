@@ -254,7 +254,7 @@ MIX_COMPOSITIONS:
       "6000": 1.910689203898420E-2
     depletable: true
   
-  - name: "Sheath_SS304"
+  - name: "SHEATH_SS304"
     isotopic_composition: 
       "6000": 3.208965159714260E-4
       "14028": 1.582098347194923E-3

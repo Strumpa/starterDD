@@ -18,4 +18,5 @@ __all__ = [
     "CalculationStep",
     "SectorConfig",
     "BoxDiscretizationConfig",
+    "ControlCrossModel",
 ]
