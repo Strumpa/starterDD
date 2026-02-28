@@ -955,6 +955,113 @@ class CartesianAssemblyModel:
             print(f"[enforce_tdt] Updated {len(ctrl_cross_names_set)} "
                   f"control cross absorber tube indices from TDT file.")
 
+    def get_postprocessing_lattice_info(self):
+        """
+        Return a dictionary summarising the lattice for post-processing
+        (Dragon5 vs Serpent2 comparison).
+
+        Prerequisites
+        -------------
+        * ``analyze_lattice_description(build_pins=True)`` must have been
+          called.
+        * ``number_fuel_material_mixtures_by_pin()`` must have been called
+          so that each ``FuelPinModel`` carries a ``pin_idx``.
+
+        Returns
+        -------
+        dict with keys:
+
+        ``"n_fuel_pins"``
+            Total number of fuel pin cells in the lattice (for rate
+            normalisation).
+        ``"n_unique_pins"``
+            Number of unique pin positions (size of output rate arrays).
+        ``"symmetry_type"``
+            ``"anti-diagonal"``, ``"main-diagonal"``, or ``None``.
+        ``"pin_idx_on_symmetry_axis"``
+            ``set[int]`` — ``pin_idx`` values on the symmetry axis
+            (symmetry factor = 1).  All other fuel ``pin_idx`` values
+            have symmetry factor = 2.  Empty when there is no symmetry.
+        ``"pin_idx_to_material_name"``
+            ``dict[int, str]`` — ``pin_idx → base fuel material name``.
+        ``"pin_idx_to_composition"``
+            ``dict[int, dict]`` — ``pin_idx → {iso_name: number_density}``.
+            Obtained from the ``Composition`` object attached to the
+            first ``MaterialMixture`` of each pin.
+        ``"fuel_radius"``
+            Fuel pellet radius (for computing ``π r²`` volume).
+        ``"ordered_pin_indices"``
+            ``list[int]`` — unique ``pin_idx`` values in lattice-traversal
+            order (row-major).  This defines the canonical ordering of
+            the output arrays and matches the COMPO ``MIXTURES`` dimension
+            when the ``EDI`` spatial mode ``"by_pin"`` is used.
+        """
+        if self.lattice is None:
+            raise RuntimeError(
+                "Lattice has not been built. "
+                "Call analyze_lattice_description(build_pins=True) first."
+            )
+
+        symmetry_type = getattr(self, 'lattice_has_diagonal_symmetry', None)
+        # If symmetry hasn't been detected yet (e.g. number_by_pin wasn't
+        # called), detect now.
+        if symmetry_type is None:
+            symmetry_type = self.check_diagonal_symmetry()
+
+        n_rows = len(self.lattice)
+        n_fuel_pins = 0
+        pin_idx_on_axis = set()
+        pin_idx_to_material = {}
+        pin_idx_to_composition = {}
+        ordered_pin_indices = []
+        seen_pin_idx = set()
+
+        for i in range(n_rows):
+            for j in range(len(self.lattice[i])):
+                pin = self.lattice[i][j]
+                if isinstance(pin, FuelPinModel):
+                    n_fuel_pins += 1
+                    pidx = pin.pin_idx
+
+                    if pidx not in seen_pin_idx:
+                        seen_pin_idx.add(pidx)
+                        ordered_pin_indices.append(pidx)
+                        pin_idx_to_material[pidx] = pin.fuel_material_name
+
+                        # Composition from first zone's MaterialMixture
+                        if (hasattr(pin, 'fuel_material_mixtures')
+                                and pin.fuel_material_mixtures):
+                            comp = pin.fuel_material_mixtures[0].composition
+                            pin_idx_to_composition[pidx] = (
+                                comp.get_isotope_name_composition()
+                            )
+                        else:
+                            pin_idx_to_composition[pidx] = {}
+
+                    # Determine if the pin sits on the symmetry axis
+                    if symmetry_type == "anti-diagonal":
+                        mirror = (n_rows - 1 - j, n_rows - 1 - i)
+                    elif symmetry_type == "main-diagonal":
+                        mirror = (j, i)
+                    else:
+                        mirror = None
+
+                    if mirror is not None and mirror == (i, j):
+                        pin_idx_on_axis.add(pidx)
+
+        fuel_radius = self.pin_geometry_dict.get("fuel_radius", None)
+
+        return {
+            "n_fuel_pins": n_fuel_pins,
+            "n_unique_pins": len(ordered_pin_indices),
+            "symmetry_type": symmetry_type,
+            "pin_idx_on_symmetry_axis": pin_idx_on_axis,
+            "pin_idx_to_material_name": pin_idx_to_material,
+            "pin_idx_to_composition": pin_idx_to_composition,
+            "fuel_radius": fuel_radius,
+            "ordered_pin_indices": ordered_pin_indices,
+        }
+
     def count_number_of_pins(self):
         """
         count the number of pins in the assembly based on the lattice description, which can be used for example to define the number of material mixtures needed for a pin-wise numbering strategy.
