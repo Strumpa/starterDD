@@ -125,8 +125,11 @@ class CartesianAssemblyModel:
                 absorber_tube_inner_radius=ctrl_data["absorber_tube_inner_radius"],
                 absorber_material=ctrl_data.get("absorber_material", "ABS"),
                 sheath_material=ctrl_data.get("sheath_material", "SHEATH"),
+                tube_spacing=ctrl_data.get("tube_spacing", None),
+                first_tube_offset=ctrl_data.get("first_tube_offset", None),
             )
             self.has_control_cross = True
+            self.validate_control_cross_symmetry()
         else:
             self.control_cross = None
             self.has_control_cross = False
@@ -181,6 +184,8 @@ class CartesianAssemblyModel:
         "absorber_tube_inner_radius": True,
         "absorber_material": False,
         "sheath_material": False,
+        "tube_spacing": False,
+        "first_tube_offset": False,
     }
 
     @classmethod
@@ -526,6 +531,51 @@ class CartesianAssemblyModel:
 
         print(f"[by_material] Created {len(self.fuel_material_mixtures)} fuel material mixtures "
                 f"for {len(materials_iterated_through)} unique fuel materials.")
+
+    def validate_control_cross_symmetry(self):
+        """
+        Check whether the control cross corner is compatible with the
+        lattice's diagonal symmetry and emit a warning if it breaks it.
+
+        Compatibility rules:
+
+        - **Anti-diagonal** lattice symmetry (axis from top-left to
+          bottom-right): preserved by control crosses at ``"north-west"``
+          or ``"south-east"`` corners (the cross sits on the symmetry
+          axis).  ``"north-east"`` or ``"south-west"`` would break it.
+        - **Main-diagonal** (transpose) lattice symmetry: preserved by
+          ``"south-west"`` or ``"north-east"`` corners.
+          ``"north-west"`` or ``"south-east"`` would break it.
+        - **No diagonal symmetry**: all corners are acceptable.
+
+        This method is called automatically at the end of
+        ``parse_geometry_description`` when a control cross is present.
+        """
+        import warnings
+
+        if not self.has_control_cross:
+            return
+
+        sym = self.check_diagonal_symmetry()
+        if sym is None:
+            return  # no symmetry to break
+
+        corner = self.control_cross.center
+
+        compatible = {
+            "anti-diagonal": {"north-west", "south-east"},
+            "main-diagonal": {"south-west", "north-east"},
+        }
+
+        if corner not in compatible.get(sym, set()):
+            warnings.warn(
+                f"[control cross symmetry] The lattice has "
+                f"{sym} symmetry, but the control cross is placed at "
+                f"'{corner}'. Compatible corners for {sym} symmetry "
+                f"are {sorted(compatible[sym])}. The control cross "
+                f"placement will break the lattice symmetry.",
+                stacklevel=2,
+            )
 
     def check_diagonal_symmetry(self):
         """
@@ -1614,7 +1664,8 @@ class ControlCrossModel:
                  blade_thickness, tip_radius, central_structure_half_span,
                  sheath_thickness, absorber_tube_outer_radius,
                  absorber_tube_inner_radius,
-                 absorber_material="ABS", sheath_material="SHEATH"):
+                 absorber_material="ABS", sheath_material="SHEATH",
+                 tube_spacing=None, first_tube_offset=None):
         if center not in self.VALID_CENTERS:
             raise ValueError(
                 f"Invalid control cross center '{center}'. "
@@ -1635,6 +1686,24 @@ class ControlCrossModel:
         # Derived dimensions
         self.inner_sheath_width = blade_thickness - 2 * sheath_thickness
         self.wing_length = blade_half_span - central_structure_half_span
+
+        # Tube spacing: compute automatically if not provided.
+        # The tubes are distributed evenly inside the inner sheath
+        # region of the wing (from central structure edge + sheath
+        # thickness to wing tip - sheath thickness).
+        inner_wing_length = self.wing_length - sheath_thickness
+        if tube_spacing is not None:
+            self.tube_spacing = tube_spacing
+        else:
+            self.tube_spacing = inner_wing_length / (number_tubes_per_wing + 0.5)
+
+        if first_tube_offset is not None:
+            self.first_tube_offset = first_tube_offset
+        else:
+            self.first_tube_offset = (
+                central_structure_half_span + sheath_thickness
+                + self.tube_spacing / 2.0
+            )
 
         # Per-tube material names — populated by
         # CartesianAssemblyModel.number_control_cross_absorber_tubes()
