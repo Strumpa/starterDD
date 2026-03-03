@@ -6,6 +6,7 @@ from .DragonCalculationScheme import (
     CalculationStep,
     SectorConfig,
     BoxDiscretizationConfig,
+    CrossDiscretizationConfig,
 )
 from .helpers import associate_material_to_rod_ID
 
@@ -18,5 +19,6 @@ __all__ = [
     "CalculationStep",
     "SectorConfig",
     "BoxDiscretizationConfig",
+    "CrossDiscretizationConfig",
     "ControlCrossModel",
 ]
