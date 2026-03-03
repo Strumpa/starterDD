@@ -121,39 +121,48 @@ class TestBoxDiscretizationConfig:
         bdc = BoxDiscretizationConfig()
         assert bdc.enabled is False
         assert bdc.corner_splits == (4, 4)
-        assert bdc.side_x_splits is None
-        assert bdc.side_y_splits is None
+        assert bdc.gap_splits is None
 
     def test_custom(self):
         bdc = BoxDiscretizationConfig(
             enabled=True,
             corner_splits=[3, 3],
-            side_x_splits=[10, 1],
-            side_y_splits=[1, 10],
+            gap_splits=[10, 1],
         )
         assert bdc.enabled is True
         assert bdc.corner_splits == (3, 3)
-        assert bdc.side_x_splits == (10, 1)
-        assert bdc.side_y_splits == (1, 10)
+        assert bdc.gap_splits == (10, 1)
 
     def test_resolve_splits_defaults(self):
         bdc = BoxDiscretizationConfig(enabled=True)
-        corner, side_x, side_y = bdc.resolve_splits(n_cols=10, n_rows=10)
+        corner, side_h, side_v = bdc.resolve_splits(n_cols=10, n_rows=10)
         assert corner == (4, 4)
-        assert side_x == (10, 1)
-        assert side_y == (1, 10)
+        assert side_h == (10, 1)
+        assert side_v == (1, 10)
 
     def test_resolve_splits_explicit(self):
         bdc = BoxDiscretizationConfig(
             enabled=True,
             corner_splits=[2, 2],
-            side_x_splits=[5, 2],
-            side_y_splits=[2, 5],
+            gap_splits=[5, 2],
         )
-        corner, side_x, side_y = bdc.resolve_splits(n_cols=10, n_rows=10)
+        corner, side_h, side_v = bdc.resolve_splits(n_cols=10, n_rows=10)
         assert corner == (2, 2)
-        assert side_x == (5, 2)
-        assert side_y == (2, 5)
+        assert side_h == (5, 2)
+        assert side_v == (2, 5)
+
+    def test_deprecated_side_x_splits(self):
+        """side_x_splits should be accepted as deprecated alias."""
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            bdc = BoxDiscretizationConfig(
+                enabled=True,
+                corner_splits=[3, 3],
+                side_x_splits=[10, 1],
+            )
+        assert bdc.gap_splits == (10, 1)
+        assert any(issubclass(warning.category, DeprecationWarning) for warning in w)
 
 
 # =====================================================================
@@ -612,7 +621,7 @@ class TestFromYAML:
                         "box_discretization": {
                             "enabled": True,
                             "corner_splits": [3, 3],
-                            "side_x_splits": [10, 1],
+                            "gap_splits": [10, 1],
                         },
                     },
                 ],
@@ -641,7 +650,7 @@ class TestFromYAML:
             assert moc_step.box_discretization is not None
             assert moc_step.box_discretization.enabled is True
             assert moc_step.box_discretization.corner_splits == (3, 3)
-            assert moc_step.box_discretization.side_x_splits == (10, 1)
+            assert moc_step.box_discretization.gap_splits == (10, 1)
         finally:
             os.unlink(tmp_path)
 

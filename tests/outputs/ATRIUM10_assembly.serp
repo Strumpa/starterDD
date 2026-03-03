@@ -1649,7 +1649,29 @@ mat cool sum tmp 600.0 moder lwtr 1001
 mat gap sum tmp 600.0
     2004.05c 1.504560E-04
 
-therm lwtr  lwtr.06t
+mat ctrl_rod sum tmp 600.0
+    5010.05c 1.517940E-02
+    5011.05c 6.160720E-02
+    6012.05c 1.918300E-02
+
+mat ctrl_cross sum tmp 600.0
+    14028.05c 7.928600E-04
+    24050.05c 3.182600E-04
+    24052.05c 6.139480E-03
+    24053.05c 6.962460E-04
+    24054.05c 1.732980E-04
+    25055.05c 1.740400E-03
+    26054.05c 3.806580E-03
+    26056.05c 5.976200E-02
+    26057.05c 1.380040E-03
+    26058.05c 1.836640E-04
+    28058.05c 5.284440E-03
+    28060.05c 2.035740E-03
+    28061.05c 8.848320E-05
+    28062.05c 2.821520E-04
+    28064.05c 7.186400E-05
+
+therm lwtr  lwtr.05t
 
 % ============================================================
 %  PIN UNIVERSE DEFINITIONS
@@ -2139,7 +2161,7 @@ empty     empty     empty     empty     empty     empty     empty     empty     
 
 % --- Channel box and assembly boundary surfaces ---
 surf 1000  sqc  7.620000  7.620000  6.700000
-surf 1001  sqc  7.620000  7.620000  6.870000  0.170000
+surf 1001  sqc  7.620000  7.620000  6.870000
 surf 1002  sqc  7.620000  7.620000  7.620000
 
 % --- Moderator box WaterRod_1 ---

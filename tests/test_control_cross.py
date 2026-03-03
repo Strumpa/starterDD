@@ -31,6 +31,8 @@ from starterDD.InterfaceToDD.dragon_module_calls import LIB
 from conftest import (
     GE14_COMPOSITIONS_YAML,
     GE14_DOM_C_GEOMETRY_YAML,
+    AT10_COMPOSITIONS_YAML,
+    AT10_GEOMETRY_CTRL_YAML,
     OUTPUTS_DIR,
 )
 
@@ -624,3 +626,362 @@ class TestEnforceTDTWithControlCross:
 
         for mix in assembly_with_by_tube.control_cross_absorber_mixtures:
             assert mix.material_mixture_index == expected_ctrl_indices[mix.unique_material_mixture_name]
+
+
+# ===========================================================================
+# SOLID CROSS (AT10-style) TESTS
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+PATH_TO_AT10_COMPOSITIONS = AT10_COMPOSITIONS_YAML
+PATH_TO_AT10_GEOMETRY_CTRL = AT10_GEOMETRY_CTRL_YAML
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def at10_ctrl_assembly():
+    """
+    Create an AT10 assembly model from the ATRIUM-10 CTRL YAML that
+    contains a solid-blade CONTROL_CROSS_GEOMETRY section.
+    """
+    ROD_to_material = associate_material_to_rod_ID(
+        PATH_TO_AT10_COMPOSITIONS, PATH_TO_AT10_GEOMETRY_CTRL
+    )
+    assembly = CartesianAssemblyModel(
+        name="AT10_ctrl",
+        tdt_file="dummy.tdt",
+        geometry_description_yaml=PATH_TO_AT10_GEOMETRY_CTRL,
+    )
+    assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+    assembly.set_uniform_temperatures(
+        fuel_temperature=900.0,
+        gap_temperature=600.0,
+        coolant_temperature=600.0,
+        moderator_temperature=600.0,
+        structural_temperature=600.0,
+    )
+    assembly.analyze_lattice_description(build_pins=True, apply_self_shielding="from_yaml")
+
+    compositions = parse_all_compositions_from_yaml(PATH_TO_AT10_COMPOSITIONS)
+    assembly.set_material_compositions(compositions)
+    return assembly
+
+
+# ---------------------------------------------------------------------------
+# Tests: Solid cross parsing and ControlCrossModel creation
+# ---------------------------------------------------------------------------
+class TestSolidCrossParsing:
+    """Tests for parsing a solid-blade CONTROL_CROSS_GEOMETRY section (AT10)."""
+
+    def test_has_control_cross_flag(self, at10_ctrl_assembly):
+        """Assembly parsed from AT10 CTRL YAML should have has_control_cross = True."""
+        assert at10_ctrl_assembly.has_control_cross is True
+
+    def test_control_cross_object_created(self, at10_ctrl_assembly):
+        """A ControlCrossModel instance should be stored on the assembly."""
+        assert at10_ctrl_assembly.control_cross is not None
+        assert isinstance(at10_ctrl_assembly.control_cross, ControlCrossModel)
+
+    def test_control_cross_center(self, at10_ctrl_assembly):
+        """The cross should sit at the south-west corner."""
+        assert at10_ctrl_assembly.control_cross.center == "south-west"
+
+    def test_control_cross_dimensions(self, at10_ctrl_assembly):
+        """Verify geometric parameters are parsed correctly from YAML."""
+        ctrl = at10_ctrl_assembly.control_cross
+        assert ctrl.number_tubes_per_wing == 18
+        assert ctrl.blade_half_span == pytest.approx(12.41654)
+        assert ctrl.blade_thickness == pytest.approx(0.70432)
+        assert ctrl.tip_radius == pytest.approx(0.0)
+        assert ctrl.central_structure_half_span == pytest.approx(2.0066)
+        assert ctrl.sheath_thickness == pytest.approx(0.0)
+        assert ctrl.absorber_tube_outer_radius == pytest.approx(0.21082)
+        assert ctrl.absorber_tube_inner_radius == pytest.approx(0.21082)
+
+    def test_control_cross_material_names(self, at10_ctrl_assembly):
+        """Verify custom material names from YAML are stored."""
+        ctrl = at10_ctrl_assembly.control_cross
+        assert ctrl.absorber_material == "CTRL_ROD"
+        assert ctrl.sheath_material == "CTRL_CROSS"
+
+    def test_is_solid_flag(self, at10_ctrl_assembly):
+        """A solid cross (sheath_thickness == 0) should have is_solid == True."""
+        assert at10_ctrl_assembly.control_cross.is_solid is True
+
+    def test_ge14_is_not_solid(self, ge14_ctrl_assembly):
+        """The GE-14 sheathed cross should have is_solid == False."""
+        assert ge14_ctrl_assembly.control_cross.is_solid is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: Solid cross derived dimensions
+# ---------------------------------------------------------------------------
+class TestSolidCrossDerivedDimensions:
+    """Tests for derived dimensions on a solid-blade ControlCrossModel."""
+
+    def test_inner_sheath_width_equals_blade_thickness(self, at10_ctrl_assembly):
+        """For sheath_thickness=0, inner_sheath_width should equal blade_thickness."""
+        ctrl = at10_ctrl_assembly.control_cross
+        assert ctrl.inner_sheath_width == pytest.approx(ctrl.blade_thickness)
+
+    def test_wing_length(self, at10_ctrl_assembly):
+        """wing_length = blade_half_span - central_structure_half_span."""
+        ctrl = at10_ctrl_assembly.control_cross
+        expected = ctrl.blade_half_span - ctrl.central_structure_half_span
+        assert ctrl.wing_length == pytest.approx(expected)
+
+    def test_tube_spacing_override(self, at10_ctrl_assembly):
+        """tube_spacing should be the explicit YAML override, not auto-computed."""
+        ctrl = at10_ctrl_assembly.control_cross
+        assert ctrl.tube_spacing == pytest.approx(0.57833)
+
+    def test_first_tube_offset_auto(self, at10_ctrl_assembly):
+        """first_tube_offset should be auto-computed as
+        central_structure_half_span + 0 + tube_spacing/2."""
+        ctrl = at10_ctrl_assembly.control_cross
+        expected = ctrl.central_structure_half_span + ctrl.tube_spacing / 2.0
+        assert ctrl.first_tube_offset == pytest.approx(expected)
+
+    def test_tube_array_fits_in_wing(self, at10_ctrl_assembly):
+        """The last tube center + half-spacing should not exceed blade_half_span."""
+        ctrl = at10_ctrl_assembly.control_cross
+        last_tube_center = ctrl.first_tube_offset + (ctrl.number_tubes_per_wing - 1) * ctrl.tube_spacing
+        last_boundary = last_tube_center + ctrl.tube_spacing / 2.0
+        assert last_boundary <= ctrl.blade_half_span + 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Tests: ControlCrossModel standalone — solid configuration
+# ---------------------------------------------------------------------------
+class TestSolidControlCrossModelStandalone:
+    """Unit tests for ControlCrossModel with solid-blade parameters."""
+
+    def _make_solid(self, **overrides):
+        """Helper to create a solid-blade ControlCrossModel."""
+        defaults = dict(
+            center="south-west",
+            number_tubes_per_wing=18,
+            blade_half_span=12.0,
+            blade_thickness=0.7,
+            tip_radius=0.0,
+            central_structure_half_span=2.0,
+            sheath_thickness=0.0,
+            absorber_tube_outer_radius=0.21,
+            absorber_tube_inner_radius=0.21,
+        )
+        defaults.update(overrides)
+        return ControlCrossModel(**defaults)
+
+    def test_is_solid_true(self):
+        """is_solid should be True when sheath_thickness == 0."""
+        model = self._make_solid()
+        assert model.is_solid is True
+
+    def test_is_solid_false_with_sheath(self):
+        """is_solid should be False when sheath_thickness > 0."""
+        model = self._make_solid(sheath_thickness=0.1,
+                                 absorber_tube_inner_radius=0.15)
+        assert model.is_solid is False
+
+    def test_solid_inner_sheath_width(self):
+        """inner_sheath_width should equal blade_thickness when sheath=0."""
+        model = self._make_solid()
+        assert model.inner_sheath_width == pytest.approx(model.blade_thickness)
+
+    def test_solid_auto_tube_spacing(self):
+        """Without explicit tube_spacing, a solid cross auto-computes from
+        wing_length / (n + 0.5)."""
+        model = self._make_solid()
+        expected = model.wing_length / (model.number_tubes_per_wing + 0.5)
+        assert model.tube_spacing == pytest.approx(expected)
+
+    def test_solid_explicit_tube_spacing(self):
+        """Explicit tube_spacing should override the auto formula."""
+        model = self._make_solid(tube_spacing=0.55)
+        assert model.tube_spacing == pytest.approx(0.55)
+
+    def test_solid_auto_first_offset(self):
+        """Without explicit first_tube_offset, a solid cross auto-computes
+        from central_structure_half_span + tube_spacing/2 (sheath=0)."""
+        model = self._make_solid()
+        expected = model.central_structure_half_span + model.tube_spacing / 2.0
+        assert model.first_tube_offset == pytest.approx(expected)
+
+    def test_solid_explicit_first_offset(self):
+        """Explicit first_tube_offset should override auto computation."""
+        model = self._make_solid(first_tube_offset=2.5)
+        assert model.first_tube_offset == pytest.approx(2.5)
+
+    def test_solid_equal_radii(self):
+        """absorber_tube_inner_radius == absorber_tube_outer_radius for solid rods."""
+        model = self._make_solid()
+        assert model.absorber_tube_inner_radius == model.absorber_tube_outer_radius
+
+    def test_solid_default_materials(self):
+        """Default material names should be 'ABS' and 'SHEATH'."""
+        model = self._make_solid()
+        assert model.absorber_material == "ABS"
+        assert model.sheath_material == "SHEATH"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Solid cross lumped numbering
+# ---------------------------------------------------------------------------
+class TestSolidCrossLumpedNumbering:
+    """Tests for number_control_cross_absorber_tubes(strategy='lumped') on AT10."""
+
+    def test_lumped_sets_no_tube_names(self, at10_ctrl_assembly):
+        """Lumped strategy should leave tube_material_names as None."""
+        at10_ctrl_assembly.number_control_cross_absorber_tubes(strategy="lumped")
+        assert at10_ctrl_assembly.control_cross.tube_material_names is None
+
+    def test_lumped_creates_no_mixtures(self, at10_ctrl_assembly):
+        """Lumped strategy should not create any MaterialMixture objects."""
+        at10_ctrl_assembly.number_control_cross_absorber_tubes(strategy="lumped")
+        assert at10_ctrl_assembly.control_cross_absorber_mixtures == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: Solid cross by-tube numbering
+# ---------------------------------------------------------------------------
+class TestSolidCrossByTubeNumbering:
+    """Tests for number_control_cross_absorber_tubes(strategy='by_tube') on AT10."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_by_tube(self, at10_ctrl_assembly):
+        """Number tubes by_tube before each test in this class."""
+        at10_ctrl_assembly.number_control_cross_absorber_tubes(strategy="by_tube")
+        self.assembly = at10_ctrl_assembly
+
+    def test_unique_tube_names_created(self):
+        """by_tube should create one unique name per tube in a wing."""
+        ctrl = self.assembly.control_cross
+        n = ctrl.number_tubes_per_wing
+        assert ctrl.tube_material_names is not None
+        assert len(ctrl.tube_material_names["wing_1"]) == n
+        assert len(ctrl.tube_material_names["wing_2"]) == n
+
+    def test_tube_naming_convention(self):
+        """Unique names should follow <absorber_material>_tube_<k> pattern."""
+        ctrl = self.assembly.control_cross
+        base = ctrl.absorber_material  # "CTRL_ROD"
+        for k in range(1, ctrl.number_tubes_per_wing + 1):
+            expected_name = f"{base}_tube_{k}"
+            assert expected_name in ctrl.tube_material_names["wing_1"]
+
+    def test_wing2_is_reversed_wing1(self):
+        """Wing 2 tube names should be wing 1 in reversed order (symmetry)."""
+        ctrl = self.assembly.control_cross
+        assert ctrl.tube_material_names["wing_2"] == list(
+            reversed(ctrl.tube_material_names["wing_1"])
+        )
+
+    def test_material_mixture_objects_created(self):
+        """by_tube should create MaterialMixture objects for each unique tube."""
+        n = self.assembly.control_cross.number_tubes_per_wing
+        mixtures = self.assembly.control_cross_absorber_mixtures
+        assert len(mixtures) == n
+
+    def test_mixture_base_material_name(self):
+        """All tube MaterialMixture.material_name should be the base absorber material."""
+        base = self.assembly.control_cross.absorber_material
+        for mix in self.assembly.control_cross_absorber_mixtures:
+            assert mix.material_name == base
+
+
+# ---------------------------------------------------------------------------
+# Tests: Solid cross generating / daughter identification
+# ---------------------------------------------------------------------------
+class TestSolidCrossGeneratingDaughterMixes:
+    """Tests for identify_generating_and_daughter_control_cross_mixes on AT10."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, at10_ctrl_assembly):
+        """Number tubes by_tube and identify generating/daughter mixes."""
+        at10_ctrl_assembly.number_control_cross_absorber_tubes(strategy="by_tube")
+        at10_ctrl_assembly.identify_generating_and_daughter_control_cross_mixes()
+        self.assembly = at10_ctrl_assembly
+
+    def test_one_generating_mix(self):
+        """There should be exactly one generating control cross absorber mix."""
+        assert len(self.assembly.control_cross_generating_mixes) == 1
+
+    def test_daughters_count(self):
+        """Number of daughters = total tubes - 1."""
+        n = self.assembly.control_cross.number_tubes_per_wing
+        assert len(self.assembly.control_cross_daughter_mixes) == n - 1
+
+    def test_generating_is_first_tube(self):
+        """The generating mix should be the first tube (tube_1)."""
+        gen = self.assembly.control_cross_generating_mixes[0]
+        assert gen.is_generating is True
+        base = self.assembly.control_cross.absorber_material
+        assert gen.unique_material_mixture_name == f"{base}_tube_1"
+
+    def test_all_tubes_accounted_for(self):
+        """Total generating + daughter should equal number_tubes_per_wing."""
+        n = self.assembly.control_cross.number_tubes_per_wing
+        total = (len(self.assembly.control_cross_generating_mixes) +
+                 len(self.assembly.control_cross_daughter_mixes))
+        assert total == n
+
+
+# ---------------------------------------------------------------------------
+# Tests: Cross type comparison (sheathed vs solid)
+# ---------------------------------------------------------------------------
+class TestCrossTypeComparison:
+    """Tests that both cross types coexist properly and differ as expected."""
+
+    def test_ge14_has_sheath(self, ge14_ctrl_assembly):
+        """GE-14 cross should have sheath_thickness > 0."""
+        ctrl = ge14_ctrl_assembly.control_cross
+        assert ctrl.sheath_thickness > 0
+        assert ctrl.is_solid is False
+
+    def test_at10_has_no_sheath(self, at10_ctrl_assembly):
+        """AT10 cross should have sheath_thickness == 0."""
+        ctrl = at10_ctrl_assembly.control_cross
+        assert ctrl.sheath_thickness == 0.0
+        assert ctrl.is_solid is True
+
+    def test_ge14_has_hollow_tubes(self, ge14_ctrl_assembly):
+        """GE-14 should have inner_radius < outer_radius (hollow tubes)."""
+        ctrl = ge14_ctrl_assembly.control_cross
+        assert ctrl.absorber_tube_inner_radius < ctrl.absorber_tube_outer_radius
+
+    def test_at10_has_solid_rods(self, at10_ctrl_assembly):
+        """AT10 should have inner_radius == outer_radius (solid rods)."""
+        ctrl = at10_ctrl_assembly.control_cross
+        assert ctrl.absorber_tube_inner_radius == ctrl.absorber_tube_outer_radius
+
+    def test_ge14_has_rounded_tip(self, ge14_ctrl_assembly):
+        """GE-14 should have a non-zero tip_radius."""
+        assert ge14_ctrl_assembly.control_cross.tip_radius > 0
+
+    def test_at10_has_flat_tip(self, at10_ctrl_assembly):
+        """AT10 should have tip_radius == 0 (flat blade end)."""
+        assert at10_ctrl_assembly.control_cross.tip_radius == 0.0
+
+    def test_ge14_inner_sheath_width_smaller(self, ge14_ctrl_assembly):
+        """GE-14 inner_sheath_width should be < blade_thickness (2*st removed)."""
+        ctrl = ge14_ctrl_assembly.control_cross
+        assert ctrl.inner_sheath_width < ctrl.blade_thickness
+
+    def test_at10_inner_sheath_width_equals_blade(self, at10_ctrl_assembly):
+        """AT10 inner_sheath_width should equal blade_thickness (st=0)."""
+        ctrl = at10_ctrl_assembly.control_cross
+        assert ctrl.inner_sheath_width == pytest.approx(ctrl.blade_thickness)
+
+    def test_different_number_of_tubes(self, ge14_ctrl_assembly, at10_ctrl_assembly):
+        """GE-14 and AT10 have different tube counts."""
+        assert ge14_ctrl_assembly.control_cross.number_tubes_per_wing == 21
+        assert at10_ctrl_assembly.control_cross.number_tubes_per_wing == 18
+
+    def test_different_corners(self, ge14_ctrl_assembly, at10_ctrl_assembly):
+        """GE-14 is NW corner, AT10 is SW corner."""
+        assert ge14_ctrl_assembly.control_cross.center == "north-west"
+        assert at10_ctrl_assembly.control_cross.center == "south-west"

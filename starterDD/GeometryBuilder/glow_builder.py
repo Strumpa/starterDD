@@ -619,7 +619,10 @@ def _build_control_cross_shapes(ctrl, ap):
     wing_len = bhs - cshs
     cx, cy = ct(wing_len / 2.0 + cshs, ap)
     # In canonical NW, tip rounded corner is at index 1
-    rc_wing_h = _remap_rounded_corner_indices([(1, tr)], corner)
+    if tr > 0.0:
+        rc_wing_h = _remap_rounded_corner_indices([(1, tr)], corner)
+    else:
+        rc_wing_h = None
     sheath_rects.append(Rectangle(
         name="CTRL_CROSS_WING_H",
         height=bt, width=wing_len,
@@ -629,7 +632,10 @@ def _build_control_cross_shapes(ctrl, ap):
 
     # Bottom wing half (vertical arm) — with tip radius
     cx, cy = ct(0.0, ap - wing_len / 2.0 - cshs)
-    rc_wing_v = _remap_rounded_corner_indices([(1, tr)], corner)
+    if tr > 0.0:
+        rc_wing_v = _remap_rounded_corner_indices([(1, tr)], corner)
+    else:
+        rc_wing_v = None
     sheath_rects.append(Rectangle(
         name="CTRL_CROSS_WING_V",
         height=wing_len, width=bt,
@@ -639,27 +645,37 @@ def _build_control_cross_shapes(ctrl, ap):
 
     # ------------------------------------------------------------------
     # 2. Inner sheath rectangles (absorber cavity boundary)
+    #    Skipped for solid crosses (st == 0): there is no hollow
+    #    cavity inside the blade — the blade material fills
+    #    everything between absorber rods.
     # ------------------------------------------------------------------
     inner_rects = []
 
-    inner_wing_w = wing_len - st  # inner wing length
-    cx, cy = ct(inner_wing_w / 2.0 + cshs, ap)
-    rc_inner_h = _remap_rounded_corner_indices([(1, tr - st)], corner)
-    inner_rects.append(Rectangle(
-        name="CTRL_CROSS_WING_H_INNER",
-        height=inner_w, width=inner_wing_w,
-        center=(cx, cy, 0.0),
-        rounded_corners=rc_inner_h,
-    ))
+    if st > 0:
+        inner_wing_w = wing_len - st  # inner wing length
+        cx, cy = ct(inner_wing_w / 2.0 + cshs, ap)
+        if tr > 0.0:
+            rc_inner_h = _remap_rounded_corner_indices([(1, tr - st)], corner)
+        else:
+            rc_inner_h = None
+        inner_rects.append(Rectangle(
+            name="CTRL_CROSS_WING_H_INNER",
+            height=inner_w, width=inner_wing_w,
+            center=(cx, cy, 0.0),
+            rounded_corners=rc_inner_h,
+        ))
 
-    cx, cy = ct(0.0, ap - inner_wing_w / 2.0 - cshs)
-    rc_inner_v = _remap_rounded_corner_indices([(1, tr - st)], corner)
-    inner_rects.append(Rectangle(
-        name="CTRL_CROSS_WING_V_INNER",
-        height=inner_wing_w, width=inner_w,
-        center=(cx, cy, 0.0),
-        rounded_corners=rc_inner_v,
-    ))
+        cx, cy = ct(0.0, ap - inner_wing_w / 2.0 - cshs)
+        if tr > 0.0:
+            rc_inner_v = _remap_rounded_corner_indices([(1, tr - st)], corner)
+        else:
+            rc_inner_v = None
+        inner_rects.append(Rectangle(
+            name="CTRL_CROSS_WING_V_INNER",
+            height=inner_wing_w, width=inner_w,
+            center=(cx, cy, 0.0),
+            rounded_corners=rc_inner_v,
+        ))
 
     # ------------------------------------------------------------------
     # 3. Absorber tubes
@@ -675,8 +691,13 @@ def _build_control_cross_shapes(ctrl, ap):
             height_x_width=(inner_w, delta),
             center=(tx, ty, 0.0),
         )
-        tube_h.add_circle(r_inner)
-        tube_h.add_circle(r_outer)
+        if r_inner < r_outer:
+            # Hollow tube (GE-14 style): inner absorber + outer cladding
+            tube_h.add_circle(r_inner)
+            tube_h.add_circle(r_outer)
+        else:
+            # Solid rod (AT10 style): single absorber circle
+            tube_h.add_circle(r_outer)
         tubes.append(tube_h)
 
         # Vertical wing tube (along y)
@@ -686,8 +707,11 @@ def _build_control_cross_shapes(ctrl, ap):
             height_x_width=(delta, inner_w),
             center=(tx, ty, 0.0),
         )
-        tube_v.add_circle(r_inner)
-        tube_v.add_circle(r_outer)
+        if r_inner < r_outer:
+            tube_v.add_circle(r_inner)
+            tube_v.add_circle(r_outer)
+        else:
+            tube_v.add_circle(r_outer)
         tubes.append(tube_v)
 
     # ------------------------------------------------------------------
@@ -703,39 +727,45 @@ def _build_control_cross_shapes(ctrl, ap):
 
     # Left part of north arm (covers tubes region)
     lw = last_boundary
-    cx, cy = ct(lw / 2.0, ap - bt / 4.0)
-    split_rects.append(Rectangle(
-        name="CTRL_SPLIT_H_LEFT",
-        height=bt / 2.0, width=lw,
-        center=(cx, cy, 0.0),
-    ))
+    if lw > 1e-6:
+        cx, cy = ct(lw / 2.0, ap - bt / 4.0)
+        split_rects.append(Rectangle(
+            name="CTRL_SPLIT_H_LEFT",
+            height=bt / 2.0, width=lw,
+            center=(cx, cy, 0.0),
+        ))
 
     # Right part of north arm (tip region beyond last tube)
     rw = bhs - last_boundary
     cx, cy = ct(last_boundary + rw / 2.0, ap - bt / 4.0)
-    split_rects.append(Rectangle(
-        name="CTRL_SPLIT_H_RIGHT",
-        height=bt / 2.0, width=rw,
-        center=(cx, cy, 0.0),
-    ))
+    print(f"building rect at cx={cx}, cy={cy} with rw={rw}, bt={bt}")
+    if rw>1e-6:
+        split_rects.append(Rectangle(
+            name="CTRL_SPLIT_H_RIGHT",
+            height=bt / 2.0, width=rw,
+            center=(cx, cy, 0.0),
+        ))
 
     # Bottom part of west arm (covers tubes region)
     bh = last_boundary
     cx, cy = ct(bt / 4.0, ap - lw / 2.0)
-    split_rects.append(Rectangle(
-        name="CTRL_SPLIT_V_BOT",
-        height=bh, width=bt / 2.0,
-        center=(cx, cy, 0.0),
-    ))
+    print(f"building rect at cx={cx}, cy={cy} with bh={bh}, bt={bt}")
+    if bh>1e-6:
+        split_rects.append(Rectangle(
+            name="CTRL_SPLIT_V_BOT",
+            height=bh, width=bt / 2.0,
+            center=(cx, cy, 0.0),
+        ))
 
     # Top part of west arm (tip region beyond last tube)
     th = bhs - last_boundary
     cx, cy = ct(bt / 4.0, ap - last_boundary - th / 2.0)
-    split_rects.append(Rectangle(
-        name="CTRL_SPLIT_V_TOP",
-        height=th, width=bt / 2.0,
-        center=(cx, cy, 0.0),
-    ))
+    if th>1e-6:
+        split_rects.append(Rectangle(
+            name="CTRL_SPLIT_V_TOP",
+            height=th, width=bt / 2.0,
+            center=(cx, cy, 0.0),
+        ))
 
     # ------------------------------------------------------------------
     # 5. Wing footprints (tight AABBs in assembly coordinates)
@@ -950,16 +980,21 @@ def _assign_materials_with_control_cross(
     inner_rects = ctrl_shapes["inner_sheath_rectangles"]
     sheath_rects = ctrl_shapes["sheath_rectangles"]
 
-    # Pre-extract absorber tube inner/outer circle faces for containment
-    # Each tube RectCell has inner_circles list with 2 circles
-    # (inner radius first, outer radius second).
-    tube_inner_faces = []
-    tube_outer_faces = []
-    for t in tube_cells:
-        # inner_circles[0] is the smaller (absorber inner) circle
-        # inner_circles[1] is the larger (absorber outer) circle
-        tube_inner_faces.append(t.inner_circles[0].face)
-        tube_outer_faces.append(t.inner_circles[1].face)
+    solid = ctrl.is_solid  # AT10-style (no sheath cavity)
+
+    # Pre-extract absorber tube circle faces for containment.
+    # Hollow tubes (GE-14): 2 circles per tube (inner absorber, outer cladding).
+    # Solid rods  (AT10):   1 circle per tube (absorber only).
+    if solid:
+        tube_circle_faces = [t.inner_circles[0].face for t in tube_cells]
+    else:
+        tube_inner_faces = []
+        tube_outer_faces = []
+        for t in tube_cells:
+            # inner_circles[0] is the smaller (absorber inner) circle
+            # inner_circles[1] is the larger (absorber outer) circle
+            tube_inner_faces.append(t.inner_circles[0].face)
+            tube_outer_faces.append(t.inner_circles[1].face)
 
     inner_rect_faces = [r.face for r in inner_rects]
     sheath_rect_faces = [r.face for r in sheath_rects]
@@ -972,19 +1007,30 @@ def _assign_materials_with_control_cross(
 
         # 1–2. Absorber tubes
         found_tube = False
-        for j in range(len(tube_cells)):
-            if is_point_inside_shape(pt, tube_inner_faces[j]):
-                materials[i] = absorber_mat
-                found_tube = True
-                break
-            if is_point_inside_shape(pt, tube_outer_faces[j]):
-                materials[i] = sheath_mat
-                found_tube = True
-                break
+        if solid:
+            # Solid rod: single circle → absorber material
+            for j, cf in enumerate(tube_circle_faces):
+                if is_point_inside_shape(pt, cf):
+                    materials[i] = absorber_mat
+                    found_tube = True
+                    break
+        else:
+            # Hollow tube: inner circle → absorber, outer annulus → sheath
+            for j in range(len(tube_cells)):
+                if is_point_inside_shape(pt, tube_inner_faces[j]):
+                    materials[i] = absorber_mat
+                    found_tube = True
+                    break
+                if is_point_inside_shape(pt, tube_outer_faces[j]):
+                    materials[i] = sheath_mat
+                    found_tube = True
+                    break
         if found_tube:
             continue
 
         # 3. Inner sheath cavity (inter-tube moderator)
+        #    Only applies to sheathed crosses — for solid crosses the
+        #    inner_rects list is empty and this block is skipped.
         in_inner = False
         for irf in inner_rect_faces:
             if is_point_inside_shape(pt, irf):
@@ -1708,9 +1754,12 @@ def subdivide_box_into_macros(assembly_box_cell, assembly_model):
             ctrl_shapes_ref = _build_control_cross_shapes(ctrl, ap)
         ctrl_absorber_mat = ctrl.absorber_material
         ctrl_sheath_mat = ctrl.sheath_material
+        solid = ctrl.is_solid  # AT10-style (no sheath cavity)
+
         for t in ctrl_shapes_ref["absorber_tubes"]:
             ctrl_tube_inner_faces.append(t.inner_circles[0].face)
-            ctrl_tube_outer_faces.append(t.inner_circles[1].face)
+            if not solid:
+                ctrl_tube_outer_faces.append(t.inner_circles[1].face)
         ctrl_inner_rect_faces = [r.face for r in ctrl_shapes_ref["inner_sheath_rectangles"]]
         ctrl_sheath_rect_faces = [r.face for r in ctrl_shapes_ref["sheath_rectangles"]]
 
@@ -1736,17 +1785,23 @@ def subdivide_box_into_macros(assembly_box_cell, assembly_model):
                     materials_list[i] = ctrl_absorber_mat
                     mat_assigned = True
                     break
-                if is_point_inside_shape(pt, ctrl_tube_outer_faces[j]):
-                    materials_list[i] = ctrl_sheath_mat
-                    mat_assigned = True
-                    break
+                if not solid:
+                    if is_point_inside_shape(pt, ctrl_tube_outer_faces[j]):
+                        materials_list[i] = ctrl_sheath_mat
+                        mat_assigned = True
+                        break
             if not mat_assigned:
                 # 3. Inner sheath cavity
                 for irf in ctrl_inner_rect_faces:
                     if is_point_inside_shape(pt, irf):
-                        materials_list[i] = "MODERATOR"
-                        mat_assigned = True
-                        break
+                        if solid:
+                            materials_list[i] = ctrl_sheath_mat
+                            mat_assigned = True
+                            break
+                        else:
+                            materials_list[i] = "MODERATOR"
+                            mat_assigned = True
+                            break
             if not mat_assigned:
                 # 4. Outer sheath / structural rectangles
                 for srf in ctrl_sheath_rect_faces:
@@ -1802,31 +1857,367 @@ def subdivide_box_into_macros(assembly_box_cell, assembly_model):
     return assembly_box_cell
 
 
+def _build_cross_aware_discretization_rects(
+    ap, x0, y0, x1, y1, lattice_pitch_x, lattice_pitch_y,
+    n_cols, n_rows, cross_corner, ctrl,
+    unaffected_side_h,
+    unaffected_side_v,
+    unaffected_corner,
+    narrow_gap_splits_h,
+    narrow_gap_splits_v,
+    cross_corner_splits,
+    stub_splits_h,
+    stub_splits_v,
+):
+    """
+    Build the discretization rectangles for the peripheral strips around
+    the pin lattice when a control cross is present, with user-configurable
+    split counts for each region type.
+
+    The geometric decomposition follows the same logic as
+    ``_build_cross_aware_splitting_rects`` (used for IC MACRO assignment):
+    cross-affected corners are shrunk, affected side strips are split into
+    a narrow gap and blade-width stubs, and unaffected sides/corners remain
+    unchanged.  The difference is that split counts are configurable rather
+    than hard-coded.
+
+    Split tuples must be pre-permuted by the caller:
+
+    - ``_h`` variants are ``(nx, ny)`` for horizontal strips/stubs.
+    - ``_v`` variants are ``(nx, ny)`` for vertical strips/stubs.
+
+    Parameters
+    ----------
+    ap : float
+        Assembly pitch.
+    x0, y0, x1, y1 : float
+        Pin-lattice footprint corners.
+    lattice_pitch_x, lattice_pitch_y : float
+        Pin-lattice extents.
+    n_cols, n_rows : int
+        Number of pin columns / rows.
+    cross_corner : str
+        Cross centre corner (``"north-west"``, etc.).
+    ctrl : ControlCrossModel
+        Control cross geometry.
+    unaffected_side_h : tuple[int, int]
+        ``(nx, ny)`` for unaffected horizontal side strips.
+    unaffected_side_v : tuple[int, int]
+        ``(nx, ny)`` for unaffected vertical side strips.
+    unaffected_corner : tuple[int, int]
+        ``(nx, ny)`` for unaffected corner rectangles.
+    narrow_gap_splits_h : tuple[int, int]
+        ``(nx, ny)`` for horizontal narrow gap strips.
+    narrow_gap_splits_v : tuple[int, int]
+        ``(nx, ny)`` for vertical narrow gap strips.
+    cross_corner_splits : tuple[int, int]
+        ``(nx, ny)`` for the cross corner gap rectangle.
+    stub_splits_h : tuple[int, int]
+        ``(nx, ny)`` for horizontal stub regions.
+    stub_splits_v : tuple[int, int]
+        ``(nx, ny)`` for vertical stub regions.
+
+    Returns
+    -------
+    list of (Rectangle, (nx, ny))
+        Splitting rectangles with their grid split counts.
+    """
+    bt = ctrl.blade_thickness
+    bhs = ctrl.blade_half_span
+    bt2 = bt / 2.0
+
+    eps = 1e-8
+
+    # ------------------------------------------------------------------
+    # Compute blade and arm extents in assembly coordinates
+    # ------------------------------------------------------------------
+    xv0, _ = _corner_transform(cross_corner, 0.0, 0.0, ap)
+    xv1, _ = _corner_transform(cross_corner, bt2, 0.0, ap)
+    x_blade_lo = min(xv0, xv1)
+    x_blade_hi = max(xv0, xv1)
+
+    _, yh0 = _corner_transform(cross_corner, 0.0, ap - bt2, ap)
+    _, yh1 = _corner_transform(cross_corner, 0.0, ap, ap)
+    y_blade_lo = min(yh0, yh1)
+    y_blade_hi = max(yh0, yh1)
+
+    _, yv_tip = _corner_transform(cross_corner, 0.0, ap - bhs, ap)
+    _, yv_ctr = _corner_transform(cross_corner, 0.0, ap, ap)
+    y_arm_lo = min(yv_tip, yv_ctr)
+    y_arm_hi = max(yv_tip, yv_ctr)
+
+    xh_ctr, _ = _corner_transform(cross_corner, 0.0, 0.0, ap)
+    xh_tip, _ = _corner_transform(cross_corner, bhs, 0.0, ap)
+    x_arm_lo = min(xh_ctr, xh_tip)
+    x_arm_hi = max(xh_ctr, xh_tip)
+
+    cross_on_left = cross_corner in ("north-west", "south-west")
+    cross_on_right = cross_corner in ("north-east", "south-east")
+    cross_on_top = cross_corner in ("north-west", "north-east")
+    cross_on_bottom = cross_corner in ("south-west", "south-east")
+
+    rects = []
+
+    # ==================================================================
+    # CORNERS
+    # ==================================================================
+
+    # ---- Bottom-left corner ----
+    if cross_corner == "south-west":
+        gw = x0 - x_blade_hi
+        gh = y0 - y_blade_hi
+        if gw > eps and gh > eps:
+            rects.append((
+                Rectangle(height=gh, width=gw,
+                          center=(x_blade_hi + gw / 2.0,
+                                  y_blade_hi + gh / 2.0, 0.0)),
+                cross_corner_splits,
+            ))
+    else:
+        rects.append((
+            Rectangle(height=y0, width=x0,
+                      center=(x0 / 2.0, y0 / 2.0, 0.0)),
+            unaffected_corner,
+        ))
+
+    # ---- Bottom-right corner ----
+    if cross_corner == "south-east":
+        gw = x_blade_lo - x1
+        gh = y0 - y_blade_hi
+        if gw > eps and gh > eps:
+            rects.append((
+                Rectangle(height=gh, width=gw,
+                          center=(x1 + gw / 2.0,
+                                  y_blade_hi + gh / 2.0, 0.0)),
+                cross_corner_splits,
+            ))
+    else:
+        rects.append((
+            Rectangle(height=y0, width=(ap - x1),
+                      center=((x1 + ap) / 2.0, y0 / 2.0, 0.0)),
+            unaffected_corner,
+        ))
+
+    # ---- Top-left corner ----
+    if cross_corner == "north-west":
+        gw = x0 - x_blade_hi
+        gh = y_blade_lo - y1
+        if gw > eps and gh > eps:
+            rects.append((
+                Rectangle(height=gh, width=gw,
+                          center=(x_blade_hi + gw / 2.0,
+                                  y1 + gh / 2.0, 0.0)),
+                cross_corner_splits,
+            ))
+    else:
+        rects.append((
+            Rectangle(height=(ap - y1), width=x0,
+                      center=(x0 / 2.0, (y1 + ap) / 2.0, 0.0)),
+            unaffected_corner,
+        ))
+
+    # ---- Top-right corner ----
+    if cross_corner == "north-east":
+        gw = x_blade_lo - x1
+        gh = y_blade_lo - y1
+        if gw > eps and gh > eps:
+            rects.append((
+                Rectangle(height=gh, width=gw,
+                          center=(x1 + gw / 2.0,
+                                  y1 + gh / 2.0, 0.0)),
+                cross_corner_splits,
+            ))
+    else:
+        rects.append((
+            Rectangle(height=(ap - y1), width=(ap - x1),
+                      center=((x1 + ap) / 2.0, (y1 + ap) / 2.0, 0.0)),
+            unaffected_corner,
+        ))
+
+    # ==================================================================
+    # SIDE STRIPS
+    # ==================================================================
+
+    # ---- Bottom-middle strip ----
+    if cross_on_bottom:
+        gap_h = y0 - y_blade_hi
+        if gap_h > eps:
+            rects.append((
+                Rectangle(height=gap_h, width=lattice_pitch_x,
+                          center=((x0 + x1) / 2.0,
+                                  y_blade_hi + gap_h / 2.0, 0.0)),
+                narrow_gap_splits_h,
+            ))
+        # Stubs in the blade region
+        blade_h = y_blade_hi
+        arm_lo_c = max(x_arm_lo, x0)
+        arm_hi_c = min(x_arm_hi, x1)
+        stub_w = arm_lo_c - x0
+        if stub_w > eps and blade_h > eps:
+            rects.append((
+                Rectangle(height=blade_h, width=stub_w,
+                          center=(x0 + stub_w / 2.0,
+                                  blade_h / 2.0, 0.0)),
+                stub_splits_h,
+            ))
+        stub_w = x1 - arm_hi_c
+        if stub_w > eps and blade_h > eps:
+            rects.append((
+                Rectangle(height=blade_h, width=stub_w,
+                          center=(arm_hi_c + stub_w / 2.0,
+                                  blade_h / 2.0, 0.0)),
+                stub_splits_h,
+            ))
+    else:
+        rects.append((
+            Rectangle(height=y0, width=lattice_pitch_x,
+                      center=((x0 + x1) / 2.0, y0 / 2.0, 0.0)),
+            unaffected_side_h,
+        ))
+
+    # ---- Top-middle strip ----
+    if cross_on_top:
+        gap_h = y_blade_lo - y1
+        if gap_h > eps:
+            rects.append((
+                Rectangle(height=gap_h, width=lattice_pitch_x,
+                          center=((x0 + x1) / 2.0,
+                                  y1 + gap_h / 2.0, 0.0)),
+                narrow_gap_splits_h,
+            ))
+        blade_h = ap - y_blade_lo
+        arm_lo_c = max(x_arm_lo, x0)
+        arm_hi_c = min(x_arm_hi, x1)
+        stub_w = arm_lo_c - x0
+        if stub_w > eps and blade_h > eps:
+            rects.append((
+                Rectangle(height=blade_h, width=stub_w,
+                          center=(x0 + stub_w / 2.0,
+                                  y_blade_lo + blade_h / 2.0, 0.0)),
+                stub_splits_h,
+            ))
+        stub_w = x1 - arm_hi_c
+        if stub_w > eps and blade_h > eps:
+            rects.append((
+                Rectangle(height=blade_h, width=stub_w,
+                          center=(arm_hi_c + stub_w / 2.0,
+                                  y_blade_lo + blade_h / 2.0, 0.0)),
+                stub_splits_h,
+            ))
+    else:
+        rects.append((
+            Rectangle(height=(ap - y1), width=lattice_pitch_x,
+                      center=((x0 + x1) / 2.0, (y1 + ap) / 2.0, 0.0)),
+            unaffected_side_h,
+        ))
+
+    # ---- Middle-left strip ----
+    if cross_on_left:
+        gap_w = x0 - x_blade_hi
+        if gap_w > eps:
+            rects.append((
+                Rectangle(height=lattice_pitch_y, width=gap_w,
+                          center=(x_blade_hi + gap_w / 2.0,
+                                  (y0 + y1) / 2.0, 0.0)),
+                narrow_gap_splits_v,
+            ))
+        blade_w = x_blade_hi - x_blade_lo
+        arm_lo_c = max(y_arm_lo, y0)
+        arm_hi_c = min(y_arm_hi, y1)
+        stub_h = arm_lo_c - y0
+        if stub_h > eps and blade_w > eps:
+            rects.append((
+                Rectangle(height=stub_h, width=blade_w,
+                          center=(x_blade_lo + blade_w / 2.0,
+                                  y0 + stub_h / 2.0, 0.0)),
+                stub_splits_v,
+            ))
+        stub_h = y1 - arm_hi_c
+        if stub_h > eps and blade_w > eps:
+            rects.append((
+                Rectangle(height=stub_h, width=blade_w,
+                          center=(x_blade_lo + blade_w / 2.0,
+                                  arm_hi_c + stub_h / 2.0, 0.0)),
+                stub_splits_v,
+            ))
+    else:
+        rects.append((
+            Rectangle(height=lattice_pitch_y, width=x0,
+                      center=(x0 / 2.0, (y0 + y1) / 2.0, 0.0)),
+            unaffected_side_v,
+        ))
+
+    # ---- Middle-right strip ----
+    if cross_on_right:
+        gap_w = x_blade_lo - x1
+        if gap_w > eps:
+            rects.append((
+                Rectangle(height=lattice_pitch_y, width=gap_w,
+                          center=(x1 + gap_w / 2.0,
+                                  (y0 + y1) / 2.0, 0.0)),
+                narrow_gap_splits_v,
+            ))
+        blade_w = x_blade_hi - x_blade_lo
+        arm_lo_c = max(y_arm_lo, y0)
+        arm_hi_c = min(y_arm_hi, y1)
+        stub_h = arm_lo_c - y0
+        if stub_h > eps and blade_w > eps:
+            rects.append((
+                Rectangle(height=stub_h, width=blade_w,
+                          center=(x_blade_lo + blade_w / 2.0,
+                                  y0 + stub_h / 2.0, 0.0)),
+                stub_splits_v,
+            ))
+        stub_h = y1 - arm_hi_c
+        if stub_h > eps and blade_w > eps:
+            rects.append((
+                Rectangle(height=stub_h, width=blade_w,
+                          center=(x_blade_lo + blade_w / 2.0,
+                                  arm_hi_c + stub_h / 2.0, 0.0)),
+                stub_splits_v,
+            ))
+    else:
+        rects.append((
+            Rectangle(height=lattice_pitch_y, width=(ap - x1),
+                      center=((x1 + ap) / 2.0, (y0 + y1) / 2.0, 0.0)),
+            unaffected_side_v,
+        ))
+
+    return rects
+
+
 def discretize_box(assembly_box_cell, assembly_model, box_discretization_config):
     """
     Subdivide the assembly-box peripheral regions into a grid of
     sub-faces for MOC tracking.
 
     The pin-lattice footprint is computed from the assembly dimensions.
-    The surrounding area is split into 8 rectangular strips (4 corners
-    + 4 sides) and each strip is further gridded into sub-faces using
-    ``make_grid_faces``.
+    The surrounding area is split into rectangular strips and each strip
+    is further gridded into sub-faces using ``make_grid_faces``.
+
+    When no control cross is present, the standard 8-strip layout is
+    used (4 corners + 4 sides).
+
+    When a control cross is present, the affected sides are decomposed
+    into narrow gap strips, blade-width stubs, and a cross corner
+    rectangle, each with independently configurable split counts
+    (resolved from ``box_discretization_config.cross_discretization``).
 
     Unlike ``subdivide_box_into_macros`` (used for the IC method), this
-    function does **not** assign MACRO properties by default.  Material
-    properties are inherited from the 3-region box cell via
+    function does **not** assign MACRO properties.  Material properties
+    are inherited from the already-partitioned box cell via
     ``update_geometry_from_face``.
 
     Parameters
     ----------
     assembly_box_cell : RectCell
-        The 3-region assembly box cell (as returned by
-        ``build_assembly_box``).
+        The assembly box cell as returned by ``build_assembly_box``
+        (3-region for uncontrolled, multi-region for controlled).
     assembly_model : CartesianAssemblyModel
         Assembly model providing dimensional information.
     box_discretization_config : BoxDiscretizationConfig
-        Configuration specifying the grid splits for corner and side
-        strips.
+        Configuration specifying the grid splits for corner, side,
+        and (optionally) cross-affected strips.
 
     Returns
     -------
@@ -1848,47 +2239,126 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
     y1 = y0 + lattice_pitch_y
 
     # Resolve split counts (uses lattice dims as defaults for sides)
-    corner, side_x, side_y = box_discretization_config.resolve_splits(
+    corner, side_h, side_v = box_discretization_config.resolve_splits(
         n_cols, n_rows
     )
 
-    # ------------------------------------------------------------------
-    # 8 peripheral rectangles (same layout as subdivide_box_into_macros)
-    # ------------------------------------------------------------------
-    rectangles_and_splits = [
-        # Bottom-left corner
-        (Rectangle(height=y0, width=x0,
-                   center=(x0 / 2.0, y0 / 2.0, 0.0)),
-         corner),
-        # Bottom-middle strip
-        (Rectangle(height=y0, width=lattice_pitch_x,
-                   center=((x0 + x1) / 2.0, y0 / 2.0, 0.0)),
-         side_x),
-        # Bottom-right corner
-        (Rectangle(height=y0, width=(ap - x1),
-                   center=((x1 + ap) / 2.0, y0 / 2.0, 0.0)),
-         corner),
-        # Middle-left strip
-        (Rectangle(height=lattice_pitch_y, width=x0,
-                   center=(x0 / 2.0, (y0 + y1) / 2.0, 0.0)),
-         side_y),
-        # Middle-right strip
-        (Rectangle(height=lattice_pitch_y, width=(ap - x1),
-                   center=((x1 + ap) / 2.0, (y0 + y1) / 2.0, 0.0)),
-         side_y),
-        # Top-left corner
-        (Rectangle(height=(ap - y1), width=x0,
-                   center=(x0 / 2.0, (y1 + ap) / 2.0, 0.0)),
-         corner),
-        # Top-middle strip
-        (Rectangle(height=(ap - y1), width=lattice_pitch_x,
-                   center=((x0 + x1) / 2.0, (y1 + ap) / 2.0, 0.0)),
-         side_x),
-        # Top-right corner
-        (Rectangle(height=(ap - y1), width=(ap - x1),
-                   center=((x1 + ap) / 2.0, (y1 + ap) / 2.0, 0.0)),
-         corner),
-    ]
+    has_cross = getattr(assembly_model, "has_control_cross", False)
+
+    if has_cross:
+        # --------------------------------------------------------------
+        # Cross-aware discretization
+        # --------------------------------------------------------------
+        ctrl = assembly_model.control_cross
+        bt2 = ctrl.blade_thickness / 2.0
+
+        # Wide gap width (unaffected side: lattice edge to assembly edge)
+        wide_gap_width = x0  # symmetric assembly → x0 == y0
+
+        # Narrow gap width (blade edge to lattice edge)
+        narrow_gap_width = x0 - bt2
+
+        # Cross corner gap rectangle dimensions
+        cross_corner_dims = (narrow_gap_width, narrow_gap_width)
+
+        # Typical stub dimensions:
+        #   parallel = extent of lattice edge minus arm span within it
+        #   perpendicular = blade half-thickness
+        bhs = ctrl.blade_half_span
+        # Horizontal stubs sit beside the horizontal arm
+        stub_par_h = max(0.0, lattice_pitch_x - (bhs - x0))
+        # Vertical stubs sit below/above the vertical arm
+        stub_par_v = max(0.0, lattice_pitch_y - (bhs - y0))
+        stub_perp = bt2
+
+        # Resolve cross splits from density or explicit config
+        cross_disc = box_discretization_config.cross_discretization
+        gap_ref = box_discretization_config.gap_splits or (n_cols, 1)
+
+        if cross_disc is not None:
+            narrow_gap, cc_splits, stub = cross_disc.resolve(
+                gap_splits=gap_ref,
+                lattice_pitch=lattice_pitch_x,
+                wide_gap_width=wide_gap_width,
+                narrow_gap_width=narrow_gap_width,
+                cross_corner_dims=cross_corner_dims,
+                stub_dims=(stub_par_h, stub_perp),
+            )
+        else:
+            # Auto-compute from gap density
+            from ..DDModel.DragonCalculationScheme import CrossDiscretizationConfig
+            _auto = CrossDiscretizationConfig()
+            narrow_gap, cc_splits, stub = _auto.resolve(
+                gap_splits=gap_ref,
+                lattice_pitch=lattice_pitch_x,
+                wide_gap_width=wide_gap_width,
+                narrow_gap_width=narrow_gap_width,
+                cross_corner_dims=cross_corner_dims,
+                stub_dims=(stub_par_h, stub_perp),
+            )
+
+        # Permute for horizontal vs vertical orientation
+        narrow_gap_splits_h = narrow_gap                     # (n_par, n_perp)
+        narrow_gap_splits_v = (narrow_gap[1], narrow_gap[0]) # permuted
+        stub_splits_h = stub
+        stub_splits_v = (stub[1], stub[0])
+
+        rectangles_and_splits = _build_cross_aware_discretization_rects(
+            ap, x0, y0, x1, y1,
+            lattice_pitch_x, lattice_pitch_y,
+            n_cols, n_rows,
+            ctrl.center, ctrl,
+            unaffected_side_h=side_h,
+            unaffected_side_v=side_v,
+            unaffected_corner=corner,
+            narrow_gap_splits_h=narrow_gap_splits_h,
+            narrow_gap_splits_v=narrow_gap_splits_v,
+            cross_corner_splits=cc_splits,
+            stub_splits_h=stub_splits_h,
+            stub_splits_v=stub_splits_v,
+        )
+
+        print(f"discretize_box [cross-aware]: narrow_gap={narrow_gap}, "
+              f"cross_corner={cc_splits}, stub={stub}, "
+              f"unaffected_side_h={side_h}, corner={corner}")
+    else:
+        # --------------------------------------------------------------
+        # Standard 8 peripheral rectangles (no control cross)
+        # --------------------------------------------------------------
+        rectangles_and_splits = [
+            # Bottom-left corner
+            (Rectangle(height=y0, width=x0,
+                       center=(x0 / 2.0, y0 / 2.0, 0.0)),
+             corner),
+            # Bottom-middle strip
+            (Rectangle(height=y0, width=lattice_pitch_x,
+                       center=((x0 + x1) / 2.0, y0 / 2.0, 0.0)),
+             side_h),
+            # Bottom-right corner
+            (Rectangle(height=y0, width=(ap - x1),
+                       center=((x1 + ap) / 2.0, y0 / 2.0, 0.0)),
+             corner),
+            # Middle-left strip
+            (Rectangle(height=lattice_pitch_y, width=x0,
+                       center=(x0 / 2.0, (y0 + y1) / 2.0, 0.0)),
+             side_v),
+            # Middle-right strip
+            (Rectangle(height=lattice_pitch_y, width=(ap - x1),
+                       center=((x1 + ap) / 2.0, (y0 + y1) / 2.0, 0.0)),
+             side_v),
+            # Top-left corner
+            (Rectangle(height=(ap - y1), width=x0,
+                       center=(x0 / 2.0, (y1 + ap) / 2.0, 0.0)),
+             corner),
+            # Top-middle strip
+            (Rectangle(height=(ap - y1), width=lattice_pitch_x,
+                       center=((x0 + x1) / 2.0, (y1 + ap) / 2.0, 0.0)),
+             side_h),
+            # Top-right corner
+            (Rectangle(height=(ap - y1), width=(ap - x1),
+                       center=((x1 + ap) / 2.0, (y1 + ap) / 2.0, 0.0)),
+             corner),
+        ]
 
     splitting_faces = []
     for rect, (nx, ny) in rectangles_and_splits:
@@ -1907,9 +2377,13 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
     )
 
     n_subfaces = len(assembly_box_cell.extract_subfaces())
-    print(f"discretize_box: split assembly box into "
-          f"{n_subfaces} sub-regions (corner={corner}, "
-          f"side_x={side_x}, side_y={side_y}).")
+    if not has_cross:
+        print(f"discretize_box: split assembly box into "
+              f"{n_subfaces} sub-regions (corner={corner}, "
+              f"side_h={side_h}, side_v={side_v}).")
+    else:
+        print(f"discretize_box: split assembly box into "
+              f"{n_subfaces} sub-regions (cross-aware).")
 
     return assembly_box_cell
 

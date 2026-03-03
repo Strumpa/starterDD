@@ -1711,6 +1711,17 @@ class ControlCrossModel:
         # material name for all tubes).
         self.tube_material_names = None
 
+    @property
+    def is_solid(self):
+        """``True`` for solid-blade crosses (e.g. AT10).
+
+        A solid cross has no distinct sheath cavity: the structural
+        blade material fills the space between absorber rods directly
+        (no moderator between tubes, no inner/outer sheath walls).
+        Detected automatically when ``sheath_thickness == 0``.
+        """
+        return self.sheath_thickness == 0.0
+
     def set_temperatures(self, absorber_temperature, sheath_temperature):
         """Set temperatures for absorber and sheath materials."""
         self.absorber_temperature = absorber_temperature
