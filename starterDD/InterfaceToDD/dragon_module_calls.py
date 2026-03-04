@@ -50,7 +50,9 @@ class LIB:
     
     DEFAULT_NON_FUEL_SELF_SHIELDED_ISOTOPES = [
         "Zr90", "Zr91", "Zr92", "Zr94", "Zr96",
-        "Fe56"
+        "Fe56",
+        "Cr52",
+        "Hf174", "Hf176", "Hf177", "Hf178", "Hf179", "Hf180",
     ]
 
     # CLE-2000 temperature variable used for each non-fuel material
@@ -87,7 +89,8 @@ class LIB:
         self.fuel_inrs = 1  # INRS value for fuel self-shielding group
 
         # Non-fuel self-shielding: {material_name: {isotope_name: inrs_value}}
-        self.non_fuel_inrs = 2 # Default INRS value for non-fuel materials (can be overridden per isotope)
+        self.default_non_fuel_inrs = {isotope: 2 for isotope in self.DEFAULT_NON_FUEL_SELF_SHIELDED_ISOTOPES}
+        self.non_fuel_inrs = {}
 
         # CLE-2000 temperature variable per non-fuel material
         self.non_fuel_temperature_map = dict(self.DEFAULT_TEMPERATURE_MAP)
@@ -322,9 +325,6 @@ class LIB:
                 line = f"    {isotope} = {lib_name} {density:.5E}"
                 if isotope in inrs_map:
                     line += f" {inrs_map[isotope]}"
-                # by default assign INRS=2 to all non-fuel isotopes in the default list, unless overridden by user config
-                elif isotope in self.DEFAULT_NON_FUEL_SELF_SHIELDED_ISOTOPES:
-                    line += f" {self.non_fuel_inrs if isinstance(self.non_fuel_inrs, int) else self.non_fuel_inrs.get(isotope, 2)}"
                 lines += line + "\n"
             lines += "\n"
 
@@ -353,7 +353,10 @@ class LIB:
             idx = mix.material_mixture_index
             lines += f"    MIX {idx} <<{temp_var}>>\n"
             iso_comp = mix.composition.get_isotope_name_composition()
-            inrs_map = self.non_fuel_inrs.get(mix.material_name, {})
+            if self.non_fuel_inrs:
+                inrs_map = self.non_fuel_inrs.get(mix.material_name, {})
+            else:
+                inrs_map = self.default_non_fuel_inrs
             for isotope, density in iso_comp.items():
                 lib_name = self.isotope_aliases.get(
                     (mix.material_name, isotope), isotope
