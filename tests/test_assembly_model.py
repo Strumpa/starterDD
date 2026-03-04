@@ -764,7 +764,6 @@ def test_lib_write_to_c2m():
         # Structure checks
         assert "*PROCEDURE MIX_LIB_GE14.c2m" in content
         assert "PARAMETER LIBRARY ::" in content
-        assert "REAL TFUEL := DTFUEL D_TO_R" in content
         assert "MODULE  LIB:" in content
         assert "LIBRARY := LIB: ::" in content
         assert "END: ;" in content

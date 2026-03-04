@@ -15,18 +15,10 @@ INTEGER anis_level ;
 :: >>anis_level<< ; ! Anisotropy level
 STRING tran_correc ;
 :: >>tran_correc<< ; ! Transport correction option
-DOUBLE DTFUEL DTBOX DTCLAD DTCOOL DTMODE ;
-:: >>DTFUEL<< >>DTBOX<< >>DTCLAD<< >>DTCOOL<< >>DTMODE<< ; ! Temperatures
+REAL TFUEL TBOX TCLAD TCOOL TMODE TCTRL ;
+:: >>TFUEL<< >>TBOX<< >>TCLAD<< >>TCOOL<< >>TMODE<< >>TCTRL<< ;
 
-* --------------------------------------------
-*  CONVERT DOUBLE TO REALS for TEMPERATURES
-* --------------------------------------------
-REAL TFUEL := DTFUEL D_TO_R ;
-REAL TBOX := DTBOX D_TO_R ;
-REAL TCLAD := DTCLAD D_TO_R ;
-REAL TCOOL := DTCOOL D_TO_R ;
-REAL TMODE := DTMODE D_TO_R ;
-
+* -------------------------------
 *    STRUCTURES AND MODULES
 * -------------------------------
 MODULE  LIB: UTL: DELETE: END: ABORT: ;

@@ -18,7 +18,7 @@ from starterDD.MaterialProperties.material_mixture import (
     DEFAULT_THERMAL_SCATTERING,
 )
 
-from starterDD.InterfaceToDD.serpent2_cards import (
+from starterDD.InterfaceToDD.Serpent2_exports import (
     get_xs_suffix,
     get_therm_suffix,
     get_therm_interpolation_suffixes,

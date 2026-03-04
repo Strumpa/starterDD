@@ -1,7 +1,7 @@
 """InterfaceToDD module - Dragon module call generation."""
 
 from .dragon_module_calls import LIB, MAC, EDI, COMPO, EDI_COMPO
-from .serpent2_cards import (
+from .Serpent2_exports import (
     # Constants and utilities
     REACTION_TO_MT_NUMBER,
     DRAGON_REAC_TO_REACTION_NAME,

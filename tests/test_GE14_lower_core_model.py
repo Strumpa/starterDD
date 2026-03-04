@@ -17,7 +17,7 @@ from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel, 
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.InterfaceToDD.dragon_module_calls import LIB
 from starterDD.InterfaceToDD.dragon_module_calls import EDI, COMPO, EDI_COMPO
-from starterDD.InterfaceToDD.serpent2_cards import (
+from starterDD.InterfaceToDD.Serpent2_exports import (
     Serpent2Model, S2_Settings, S2_Material, S2_PinUniverse, S2_Lattice,
     S2_ChannelGeometry,
 )
@@ -474,7 +474,7 @@ class TestLIBCreation:
         assert "<<ssh_method>>" in lib_content, "Missing ssh_method placeholder."
         assert "<<anis_level>>" in lib_content, "Missing anis_level placeholder."
         assert "<<tran_correc>>" in lib_content, "Missing tran_correc placeholder."
-        assert "DTFUEL" in lib_content, "Missing DTFUEL temperature parameter."
+        assert "TFUEL" in lib_content, "Missing TFUEL temperature parameter."
 
     def test_generating_mix_lines(self, lib_content, ge14_assembly_for_lib):
         """Verify generating mixes have full isotopic composition."""

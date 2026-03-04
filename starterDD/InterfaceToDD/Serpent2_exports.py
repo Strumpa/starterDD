@@ -1928,7 +1928,7 @@ class S2_Settings:
         Args:
             base_path: Base directory for the nuclear data files.
         """
-        self.acelib = f"{base_path}/endfb8r1_pynjoy2012_KERMA.xsdata"
+        self.acelib = f"{base_path}/endfb8r1.xsdata"
         self.declib = f"{base_path}/endfb8r1.dec"
         self.nfylib = f"{base_path}/endfb8r1.nfy"
     
@@ -1938,7 +1938,7 @@ class S2_Settings:
         Args:
             base_path: Base directory for the nuclear data files.
         """
-        self.acelib = f"{base_path}/JEFF-311_pynjoy2016.xsdata"
+        self.acelib = f"{base_path}/JEFF-311.xsdata"
         self.declib = f"{base_path}/sss_jeff311.dec"
         self.nfylib = f"{base_path}/sss_jeff311.nfy"
     

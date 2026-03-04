@@ -45,7 +45,12 @@ class LIB:
     DEFAULT_SELF_SHIELDED_FUEL_ISOTOPES = [
         "U234", "U235", "U236", "U238",
         "Pu239", "Pu240", "Pu241", "Pu242",
-        "Gd154", "Gd155", "Gd156", "Gd157", "Gd158", "Gd160",
+        "Gd152", "Gd154", "Gd155", "Gd156", "Gd157", "Gd158", "Gd160",
+    ]
+    
+    DEFAULT_NON_FUEL_SELF_SHIELDED_ISOTOPES = [
+        "Zr90", "Zr91", "Zr92", "Zr94", "Zr96",
+        "Fe56"
     ]
 
     # CLE-2000 temperature variable used for each non-fuel material
@@ -82,7 +87,7 @@ class LIB:
         self.fuel_inrs = 1  # INRS value for fuel self-shielding group
 
         # Non-fuel self-shielding: {material_name: {isotope_name: inrs_value}}
-        self.non_fuel_inrs = {}
+        self.non_fuel_inrs = 2 # Default INRS value for non-fuel materials (can be overridden per isotope)
 
         # CLE-2000 temperature variable per non-fuel material
         self.non_fuel_temperature_map = dict(self.DEFAULT_TEMPERATURE_MAP)
@@ -317,6 +322,9 @@ class LIB:
                 line = f"    {isotope} = {lib_name} {density:.5E}"
                 if isotope in inrs_map:
                     line += f" {inrs_map[isotope]}"
+                # by default assign INRS=2 to all non-fuel isotopes in the default list, unless overridden by user config
+                elif isotope in self.DEFAULT_NON_FUEL_SELF_SHIELDED_ISOTOPES:
+                    line += f" {self.non_fuel_inrs if isinstance(self.non_fuel_inrs, int) else self.non_fuel_inrs.get(isotope, 2)}"
                 lines += line + "\n"
             lines += "\n"
 
@@ -499,19 +507,10 @@ class LIB:
             ":: >>anis_level<< ; ! Anisotropy level\n"
             "STRING tran_correc ;\n"
             ":: >>tran_correc<< ; ! Transport correction option\n"
-            "DOUBLE DTFUEL DTBOX DTCLAD DTCOOL DTMODE ;\n"
-            ":: >>DTFUEL<< >>DTBOX<< >>DTCLAD<< >>DTCOOL<< "
-            ">>DTMODE<< ; ! Temperatures\n"
+            "REAL TFUEL TBOX TCLAD TCOOL TMODE TCTRL ;\n"
+            ":: >>TFUEL<< >>TBOX<< >>TCLAD<< >>TCOOL<< >>TMODE<< >>TCTRL<< ;\n"
             "\n"
-            "* --------------------------------------------\n"
-            "*  CONVERT DOUBLE TO REALS for TEMPERATURES\n"
-            "* --------------------------------------------\n"
-            "REAL TFUEL := DTFUEL D_TO_R ;\n"
-            "REAL TBOX := DTBOX D_TO_R ;\n"
-            "REAL TCLAD := DTCLAD D_TO_R ;\n"
-            "REAL TCOOL := DTCOOL D_TO_R ;\n"
-            "REAL TMODE := DTMODE D_TO_R ;\n"
-            "\n"
+            "* -------------------------------\n"
             "*    STRUCTURES AND MODULES\n"
             "* -------------------------------\n"
             "MODULE  LIB: UTL: DELETE: END: ABORT: ;\n"
@@ -1031,14 +1030,12 @@ class EDI_COMPO:
             "* --------------------------------\n"
             "*    INPUT & OUTPUT PARAMETERS\n"
             "* --------------------------------\n"
-            "PARAMETER COMPO FLUX LIBRARY2 TRACK ::\n"
-            "::: LINKED_LIST COMPO ;\n"
+            "PARAMETER FLUX LIBRARY2 TRACK ::\n"
             "::: LINKED_LIST FLUX ;\n"
             "::: LINKED_LIST LIBRARY2 ;\n"
             "::: LINKED_LIST TRACK ; ;\n"
-            "STRING name_cpo save_opt ;\n"
-            ":: >>name_cpo<< >>save_opt<< ; "
-            "! save option for COMPO: module, e.g. 'SAVE' or 'NOSAVE'\n"
+            "STRING name_cpo ;\n"
+            ":: >>name_cpo<< ; "
             "* --------------------------------\n"
             "*    MODULES DEFINITION\n"
             "* --------------------------------\n"
@@ -1046,7 +1043,7 @@ class EDI_COMPO:
             "* --------------------------------\n"
             "*    LOCAL VARIABLES DEFINITION\n"
             "* --------------------------------\n"
-            "LINKED_LIST EDIRATES ;\n"
+            "LINKED_LIST EDIRATES COMPO ;\n"
             "* --------------------------------\n"
             "*    COMPO FILE NAME FOR EXPORT\n"
             "* --------------------------------\n"
@@ -1057,9 +1054,9 @@ class EDI_COMPO:
 
         footer = (
             "* --------------------------------\n"
-            "IF save_opt 'SAVE' = THEN\n"
-            "   _COMPO := COMPO ;\n"
-            "ENDIF ;\n"
+            "*    EXPORT COMPO TO ASCII FILE\n"
+            "* --------------------------------\n"
+            "_COMPO := COMPO ;\n"
             "END: ;\n"
         )
 

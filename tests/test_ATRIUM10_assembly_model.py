@@ -27,7 +27,7 @@ from starterDD.DDModel.DragonCalculationScheme import (
 )
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.InterfaceToDD.dragon_module_calls import LIB, EDI, COMPO, EDI_COMPO
-from starterDD.InterfaceToDD.serpent2_cards import (
+from starterDD.InterfaceToDD.Serpent2_exports import (
     Serpent2Model, S2_Settings, S2_Material, S2_PinUniverse, S2_Lattice,
     S2_ChannelGeometry, S2_EnergyGrid, S2_Detector,
     REACTION_TO_MT_NUMBER, _reaction_name_to_mt,

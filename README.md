@@ -10,10 +10,12 @@ a python package aiming to help get a more user friendly experience with using D
     - The Donjon model allows to build 3D cartesian core geometries from a 2D core layout and associated axial layout descriptors provided in YAML format.
     - The DragonCalculationScheme model allows to create CalculationSteps and associate a SECTORIZED geometry to the DragonModel's TECHNOLOGICAL geometry based on selected discretization options.
 - GeometryBuilder : uses the GLOW application developed by newcleo, available at https://github.com/newcleo-dev-team/glow for surface element geometry definition of complex lattice geometries.
+    - Support for rounded corner BWR assemblies.
+    - Support for control crosses.
 
 
-## To be implemented [23/02/2026] : 
+## To be implemented [03/03/2026] : 
 - full "abstract" reactor model to support multi-physics.
-- Calls to EDI: and COMPO: modules to assist with post treatment. Equivalent Serpent2 detector creation.
-- adapting the meshing of neutronics calculation geometries to assembly geometries with control crosses.
+- full reactor database creation with DRAGON to support DONJON full core calculations.
+- Support for colorsets / minicore 2D geometries for Dragon.
 - python to CLE-2000 generator : create a full Dragon&Donjon case from the python model and generate equivalent CLE-2000 instructions to run. 
