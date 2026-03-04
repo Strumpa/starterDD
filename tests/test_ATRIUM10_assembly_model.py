@@ -459,7 +459,7 @@ class TestAT10EDICOMPOCreation:
 
     def test_procedure_header(self, edi_compo_content):
         """Verify CLE-2000 procedure header."""
-        assert "PARAMETER COMPO FLUX LIBRARY2 TRACK" in edi_compo_content
+        assert "PARAMETER FLUX LIBRARY2 TRACK" in edi_compo_content
         assert "MODULE EDI: COMPO: DELETE: END:" in edi_compo_content
 
     def test_compo_initialization(self, edi_compo_content):
@@ -492,7 +492,7 @@ class TestAT10EDICOMPOCreation:
 
     def test_save_and_end_footer(self, edi_compo_content):
         """Verify footer with save conditional and END."""
-        assert "IF save_opt 'SAVE' = THEN" in edi_compo_content
+        assert "_COMPO := COMPO ;" in edi_compo_content
         assert "END: ;" in edi_compo_content
 
     def test_merg_mix_vectors_present(self, edi_compo_content):

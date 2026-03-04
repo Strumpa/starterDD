@@ -5,21 +5,19 @@
 * --------------------------------
 *    INPUT & OUTPUT PARAMETERS
 * --------------------------------
-PARAMETER COMPO FLUX LIBRARY2 TRACK ::
-::: LINKED_LIST COMPO ;
+PARAMETER FLUX LIBRARY2 TRACK ::
 ::: LINKED_LIST FLUX ;
 ::: LINKED_LIST LIBRARY2 ;
 ::: LINKED_LIST TRACK ; ;
-STRING name_cpo save_opt ;
-:: >>name_cpo<< >>save_opt<< ; ! save option for COMPO: module, e.g. 'SAVE' or 'NOSAVE'
-* --------------------------------
+STRING name_cpo ;
+:: >>name_cpo<< ; * --------------------------------
 *    MODULES DEFINITION
 * --------------------------------
 MODULE EDI: COMPO: DELETE: END: ;
 * --------------------------------
 *    LOCAL VARIABLES DEFINITION
 * --------------------------------
-LINKED_LIST EDIRATES ;
+LINKED_LIST EDIRATES COMPO ;
 * --------------------------------
 *    COMPO FILE NAME FOR EXPORT
 * --------------------------------
@@ -205,7 +203,7 @@ COMPO := COMPO: COMPO EDIRATES LIBRARY2 ::
 ;
 EDIRATES := DELETE: EDIRATES ;
 * --------------------------------
-IF save_opt 'SAVE' = THEN
-   _COMPO := COMPO ;
-ENDIF ;
+*    EXPORT COMPO TO ASCII FILE
+* --------------------------------
+_COMPO := COMPO ;
 END: ;
