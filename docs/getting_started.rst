@@ -19,7 +19,7 @@ To enable GLOW geometry generation features:
 Quick Example
 -------------
 
-Here is a minimal example of defining a material composition and a material mixture:
+Here is a minimal example of defining a CartesianAssemblyModel, numbering fuel mixtures and creating a DRAGON LIB: call :
 
 .. code-block:: python
 
@@ -74,8 +74,8 @@ To rebuild this documentation locally:
    cd docs/
    make html
 
-Then open ``_build/html/index.html`` in your browser or use the following command:
+Then open ``_build/html/index.html`` in your browser or use one of the following commands:
 
 .. code-block:: bash
-
+   python -m _build/html/http.server
    sphinx-autobuild . ./_build/html

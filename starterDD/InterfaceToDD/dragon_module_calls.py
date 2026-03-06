@@ -1077,6 +1077,39 @@ class EDI_COMPO:
 
 
 class MAC:
+    """Generate DRAGON5 ``MAC:`` module calls for macroscopic cross-section libraries.
+
+    Creates a macrolib from a collection of :class:`MaterialMixture` objects
+    whose ``xs_data`` attribute carries the cross-section values (total,
+    absorption, nu·fission, scattering matrix, etc.).
+
+    The module supports two modes:
+
+    * ``create_new=True`` (default): emit ``MACLIB := MAC: :: …``
+      which creates a new macroscopic library.
+    * ``create_new=False``: emit ``MACLIB := MAC: MACLIB :: …`` which
+      updates an existing macrolib.
+
+    Parameters
+    ----------
+    macro_lib_name : str
+        CLE-2000 identifier for the macrolib object.
+    create_new : bool
+        If ``True`` (default), a fresh macrolib is created.  If
+        ``False``, an existing one is updated.
+
+    Attributes
+    ----------
+    material_mixtures : list of MaterialMixture
+        Mixtures added via :meth:`add_material_mixture`.
+    iprint : int
+        DRAGON print level (default 1).
+    ngroup : int
+        Number of energy groups (default 1).
+    anisotropy_level : int
+        Legendre expansion order for scattering (default 0).
+    """
+
     def __init__(self, macro_lib_name: str, create_new: bool = True):
         """
         MAC: module initialization.

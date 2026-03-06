@@ -55,20 +55,242 @@ class SectorConfig:
         resulting sub-face is performed by geometric containment.
         ``None`` means no grid sub-meshing (the cell keeps its base
         3-region technological geometry).
+    additional_radial_splits_in_moderator : int or list[float]
+        Controls radial subdivision of the innermost moderator region
+        of a **circular** water rod (the region with ``r < inner_radius``).
+
+        * ``int`` **N** (default ``1``): N = 1 means no extra splits.
+          N ≥ 2 produces N − 1 equally-spaced intermediate radii at
+          ``inner_radius × k / N`` for ``k = 1 … N − 1``.
+        * ``list[float]``: explicit radii (must all be > 0 and
+          < ``inner_radius``; validated at geometry-build time).
+
+        When extra rings are added, ``sectors[0]`` and ``angles[0]``
+        are automatically replicated for every new sub-ring so that
+        the user only needs to specify sectors/angles for the **base**
+        regions (moderator, clad, coolant).
     """
 
     def __init__(self, sectors=None, angles=None, windmill=False,
-                 splits=None):
+                 splits=None, additional_radial_splits_in_moderator=1):
         self.sectors = sectors or []
         self.angles = angles or []
         self.windmill = windmill
         self.splits = tuple(splits) if splits else None
+        self.additional_radial_splits_in_moderator = (
+            additional_radial_splits_in_moderator
+        )
+
+    # ------------------------------------------------------------------
+    # Radial-split helpers (circular water rods)
+    # ------------------------------------------------------------------
+
+    def resolve_water_rod_radii(self, inner_radius):
+        """
+        Compute intermediate radii for moderator sub-division.
+
+        Parameters
+        ----------
+        inner_radius : float
+            The base inner radius of the circular water rod (boundary
+            between moderator and cladding).
+
+        Returns
+        -------
+        list[float]
+            Sorted list of intermediate radii (all < ``inner_radius``).
+            Empty list when no additional splits are requested.
+
+        Raises
+        ------
+        ValueError
+            If user-supplied radii are outside ``(0, inner_radius)``.
+        """
+        spec = self.additional_radial_splits_in_moderator
+
+        if spec is None:
+            return []
+
+        # Integer mode
+        if isinstance(spec, int):
+            if spec <= 1:
+                return []
+            return [inner_radius * k / spec for k in range(1, spec)]
+
+        # List-of-radii mode
+        if isinstance(spec, (list, tuple)):
+            if len(spec) == 0:
+                return []
+            radii = sorted(float(r) for r in spec)
+            for r in radii:
+                if r <= 0.0 or r >= inner_radius:
+                    raise ValueError(
+                        f"additional_radial_splits_in_moderator: radius "
+                        f"{r} is out of range (0, {inner_radius})."
+                    )
+            return radii
+
+        raise TypeError(
+            f"additional_radial_splits_in_moderator must be int or "
+            f"list[float], got {type(spec).__name__}"
+        )
+
+    def expanded_sectors_and_angles(self, inner_radius):
+        """
+        Return ``(sectors, angles)`` lists expanded to account for
+        additional moderator sub-rings.
+
+        The first entry in ``self.sectors`` / ``self.angles`` corresponds
+        to the original moderator region.  For each extra sub-ring the
+        same value is prepended so that the resulting lists match the
+        total number of radial regions in the geometry.
+
+        Parameters
+        ----------
+        inner_radius : float
+            Base inner radius (used to compute the number of extra rings).
+
+        Returns
+        -------
+        (list[int], list[float])
+            Expanded sectors and angles lists.
+        """
+        extra_radii = self.resolve_water_rod_radii(inner_radius)
+        n_extra = len(extra_radii)
+
+        if n_extra == 0 or len(self.sectors) == 0:
+            return list(self.sectors), list(self.angles)
+
+        base_sector = self.sectors[0]
+        base_angle = self.angles[0] if self.angles else 0.0
+
+        expanded_s = [base_sector] * n_extra + list(self.sectors)
+        expanded_a = [base_angle] * n_extra + list(self.angles)
+
+        return expanded_s, expanded_a
 
     def __repr__(self):
         if self.splits is not None:
             return f"SectorConfig(splits={self.splits})"
+        extra = ""
+        spec = self.additional_radial_splits_in_moderator
+        if spec is not None and spec != 1:
+            extra = f", additional_radial_splits={spec}"
         return (f"SectorConfig(sectors={self.sectors}, "
-                f"angles={self.angles}, windmill={self.windmill})")
+                f"angles={self.angles}, windmill={self.windmill}{extra})")
+
+
+# ---------------------------------------------------------------------------
+# WingSubmeshConfig – sub-meshing options for the control cross wings
+# ---------------------------------------------------------------------------
+
+class WingSubmeshConfig:
+    """
+    Configuration for sub-meshing the control cross wing regions.
+
+    Each wing arm is decomposed into three axial zones (perpendicular to
+    the arm axis):
+
+    1. **Corner zone** — the ``bt/2 × bt/2`` square where both arms
+       overlap at the cross centre.
+    2. **Central-structure-to-absorber zone** — the span from the corner
+       zone edge to the first absorber tube boundary.
+    3. **Absorber-pin zone** — the span containing the absorber tubes
+       up to the wing tip.
+
+    Additional options control whether tube bounding surfaces are
+    extended to the sheath border and whether tubes are bisected along
+    the arm axis.
+
+    Attributes
+    ----------
+    enabled : bool
+        Whether wing sub-meshing is active.
+    corner_splits : tuple[int, int] or None
+        ``(n_along_arm, n_across_arm)`` grid for the corner zone.
+        ``None`` → ``(1, 1)`` (no sub-division).
+    central_structure_splits : tuple[int, int] or None
+        ``(n_along_arm, n_across_arm)`` grid for the CS-to-absorber zone.
+        ``None`` → ``(1, 1)``.
+    extend_splits_at_tube_boundaries : bool
+        When ``True``, generate ``bt``-wide splitting faces at each
+        absorber tube centre so that tube bounding surfaces extend to
+        the sheath border.  Default ``True``.
+    split_tubes_in_half : bool
+        When ``True``, add a bisecting split at each tube centre along
+        the arm axis.  Default ``False``.
+    """
+
+    # Default values used when ``wing_submesh: true`` (bool shorthand)
+    _DEFAULTS = dict(
+        enabled=True,
+        corner_splits=None,
+        central_structure_splits=None,
+        extend_splits_at_tube_boundaries=True,
+        split_tubes_in_half=False,
+    )
+
+    def __init__(self, enabled=True, corner_splits=None,
+                 central_structure_splits=None,
+                 extend_splits_at_tube_boundaries=True,
+                 split_tubes_in_half=False):
+        self.enabled = enabled
+        self.corner_splits = (
+            tuple(corner_splits) if corner_splits else None
+        )
+        self.central_structure_splits = (
+            tuple(central_structure_splits)
+            if central_structure_splits else None
+        )
+        self.extend_splits_at_tube_boundaries = extend_splits_at_tube_boundaries
+        self.split_tubes_in_half = split_tubes_in_half
+
+    @classmethod
+    def from_yaml(cls, raw):
+        """
+        Parse a ``wing_submesh`` YAML value.
+
+        Accepts:
+
+        - ``bool``: ``True`` → default config, ``False`` → disabled.
+        - ``dict``: explicit configuration keys.
+
+        Parameters
+        ----------
+        raw : bool or dict
+            The raw YAML value.
+
+        Returns
+        -------
+        WingSubmeshConfig or None
+            ``None`` when disabled.
+        """
+        if isinstance(raw, bool):
+            return cls(**cls._DEFAULTS) if raw else None
+        if isinstance(raw, dict):
+            return cls(
+                enabled=raw.get("enabled", True),
+                corner_splits=raw.get("corner_splits", None),
+                central_structure_splits=raw.get(
+                    "central_structure_splits", None
+                ),
+                extend_splits_at_tube_boundaries=raw.get(
+                    "extend_splits_at_tube_boundaries", True
+                ),
+                split_tubes_in_half=raw.get("split_tubes_in_half", False),
+            )
+        raise TypeError(
+            f"wing_submesh must be a bool or dict, got {type(raw).__name__}"
+        )
+
+    def __repr__(self):
+        return (
+            f"WingSubmeshConfig(enabled={self.enabled}, "
+            f"corner_splits={self.corner_splits}, "
+            f"central_structure_splits={self.central_structure_splits}, "
+            f"extend_tube_boundaries={self.extend_splits_at_tube_boundaries}, "
+            f"split_tubes_in_half={self.split_tubes_in_half})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +322,10 @@ class CrossDiscretizationConfig:
         ``(n_parallel, n_perpendicular)`` grid for the moderator stubs
         that sit in the blade-thickness zone beyond the arm tip extent.
         Auto-permuted for horizontal vs vertical stubs.
-    wing_submesh : bool
-        Whether to further sub-mesh the control cross wing regions
-        (sheath / absorber cavity).  ``False`` by default.
+    wing_submesh : WingSubmeshConfig or None
+        Configuration for sub-meshing the control cross wing regions.
+        ``None`` means no wing sub-meshing.  Accepts ``bool`` or
+        ``WingSubmeshConfig`` in the constructor for convenience.
     """
 
     def __init__(self, narrow_gap_splits=None, cross_corner_splits=None,
@@ -116,7 +339,13 @@ class CrossDiscretizationConfig:
         self.stub_splits = (
             tuple(stub_splits) if stub_splits else None
         )
-        self.wing_submesh = wing_submesh
+        # Normalise wing_submesh: accept bool, dict, WingSubmeshConfig or None
+        if isinstance(wing_submesh, WingSubmeshConfig):
+            self.wing_submesh = wing_submesh if wing_submesh.enabled else None
+        elif isinstance(wing_submesh, (bool, dict)):
+            self.wing_submesh = WingSubmeshConfig.from_yaml(wing_submesh)
+        else:
+            self.wing_submesh = wing_submesh  # None passthrough
 
     def resolve(self, gap_splits, lattice_pitch, wide_gap_width,
                 narrow_gap_width, cross_corner_dims, stub_dims):
@@ -196,7 +425,7 @@ class CrossDiscretizationConfig:
             f"narrow_gap_splits={self.narrow_gap_splits}, "
             f"cross_corner_splits={self.cross_corner_splits}, "
             f"stub_splits={self.stub_splits}, "
-            f"wing_submesh={self.wing_submesh})"
+            f"wing_submesh={self.wing_submesh!r})"
         )
 
 
@@ -738,6 +967,10 @@ class DragonCalculationScheme:
                       # For circular water rods (azimuthal sectorization):
                       sectors: [(list of sector counts per ring for water rods, e.g. [1, 1, 8] for 1 moderator, 1 clad, and subdivided coolant)]
                       angles:  [(list of angles for water rods, e.g. [0, 0, 22.5] for 22.5° offset on coolant only)]
+                      additional_radial_splits_in_moderator: <int or list[float]>
+                      # int N (default 1): N=1 no extra splits; N>=2 produces N-1 evenly spaced radii in the moderator region (r < inner_radius).
+                      # list[float]: explicit user-defined radii (must be > 0 and < inner_radius).
+                      # When extra rings are added, sectors[0]/angles[0] are automatically replicated for each new sub-ring.
                       # For square water rods (Cartesian grid sub-meshing):
                       splits: [nx, ny]  # grid subdivisions applied to the whole bounding box; material is reassigned by geometric containment
                 
@@ -751,7 +984,13 @@ class DragonCalculationScheme:
                       narrow_gap_splits: [n_par, n_perp]  # null = auto from gap_splits density
                       cross_corner_splits: [nx, ny]       # null = auto
                       stub_splits: [n_par, n_perp]        # null = auto
-                      wing_submesh: false
+                      wing_submesh: false  # or true (defaults) or dict:
+                      #   wing_submesh:
+                      #     enabled: true
+                      #     corner_splits: [n_along, n_across]  # null = (1,1)
+                      #     central_structure_splits: [n_along, n_across]  # null = (1,1)
+                      #     extend_splits_at_tube_boundaries: true
+                      #     split_tubes_in_half: false
         
         Note : the sectorization config matches sectorization options in glow's ``Cell.sectorize()`` method.
                       
@@ -808,6 +1047,9 @@ class DragonCalculationScheme:
                 wr_splits = wr.get("splits", None)
                 wr_sectors = wr.get("sectors", [])
                 wr_angles = wr.get("angles", [])
+                wr_additional = wr.get(
+                    "additional_radial_splits_in_moderator", 1
+                )
 
                 # Warn if both circular (sectors/angles) and square
                 # (splits) keys are present — user should use one or
@@ -828,6 +1070,7 @@ class DragonCalculationScheme:
                     angles=wr_angles,
                     windmill=sect.get("windmill", False),
                     splits=wr_splits,
+                    additional_radial_splits_in_moderator=wr_additional,
                 )
 
         # --- Radial overrides ---
@@ -847,11 +1090,12 @@ class DragonCalculationScheme:
             cross_disc = None
             cross_raw = box_disc_raw.get("cross_discretization", {})
             if cross_raw:
+                wing_raw = cross_raw.get("wing_submesh", False)
                 cross_disc = CrossDiscretizationConfig(
                     narrow_gap_splits=cross_raw.get("narrow_gap_splits"),
                     cross_corner_splits=cross_raw.get("cross_corner_splits"),
                     stub_splits=cross_raw.get("stub_splits"),
-                    wing_submesh=cross_raw.get("wing_submesh", False),
+                    wing_submesh=wing_raw,
                 )
 
             box_disc = BoxDiscretizationConfig(

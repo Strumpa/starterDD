@@ -2,6 +2,34 @@
 ## A starter pack for Donjon&Dragon : deterministic neutron transport open-source codes
 ## Dragon and Donjon are part of the Version5 environment developed at Polytechnique Montréal and hosted on the OECD/NEA gitlab : https://git.oecd-nea.org/dragon/5.1 
 
+# To install starterDD 
+
+- git clone https://github.com/Strumpa/starterDD.git
+- cd starterDD
+- pip install .
+
+# To build the documentation 
+- cd docs
+- make html
+
+# To open documentation : 
+open ``_build/html/index.html`` in your browser
+or use one of the following commands: 
+- python -m _build/html/http.server
+- sphinx-autobuild . ./_build/html
+
+# To run tests
+pytest
+
+# Examples
+
+Examples are available in the tutorials/ folder
+- simplified_GE14_model : simplified GE14 assembly model from https://github.com/cdlawing1/BWRProgressionProblemInputs 
+Chase Lawing, Scott Palmtag, and Mehdi Asgari, "BWR Progression Problems," Oak Ridge National Laboratory, ORNL/TM-2020/1792 (Sept 2021).
+- simple_4x4_minicore : simple CoreModel with 4x4 2D layout consisting of 3 different assembly types, defined by 3 axial layouts.
+
+
+
 ## StarterDD is :
 a python package aiming to help get a more user friendly experience with using Dragon and Donjon. 
 ## The main modules are : 

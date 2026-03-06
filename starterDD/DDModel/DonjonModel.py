@@ -7,9 +7,46 @@ from ..MaterialProperties.material_mixture import parse_all_compositions_from_ya
 from .helpers import associate_material_to_rod_ID
 
 class CoreModel:
+    """DONJON core model built from a collection of DRAGON assembly models.
+
+    Parses a core-description YAML file that defines:
+
+    * The 2-D radial layout of assembly IDs.
+    * Per-assembly axial region specifications (geometry YAML per slice,
+      axial bounds).
+
+    Each unique (assembly, axial_region) pair is represented by an
+    :class:`AxiallyExtrudedAssemblyModel` that records the 2-D slice
+    names, the axial bounds, and a mapping to the corresponding
+    geometry YAML files.
+
+    Parameters
+    ----------
+    name : str
+        Human-readable identifier for the core (e.g. ``"minicore_4x4"``).
+    path_to_yaml_configs : str
+        Directory containing all YAML configuration files referenced
+        by the core description.
+    core_description_yaml : str
+        Filename (relative to *path_to_yaml_configs*) of the
+        core-description YAML.
+
+    Attributes
+    ----------
+    geometry_type : str
+        ``"cartesian"`` (default) or ``"hexagonal"``.
+    reactor_type : str
+        ``"BWR"`` (default), ``"PWR"``, etc.
+    core_2D_layout : list of list of str
+        2-D grid of assembly IDs.
+    assembly_axial_layouts : dict
+        ``{assembly_id: [{"axial_region": …, "axial_bounds": …,
+        "assembly_geometry_file": …}, …]}``.
+    assemblies : dict
+        ``{(col_idx, row_idx, assembly_id):
+        AxiallyExtrudedAssemblyModel}``.
     """
-    Docstring for CoreModel
-    """
+
     def __init__(self, name, path_to_yaml_configs, core_description_yaml):
         self.name = name
         # extract the path 
@@ -121,8 +158,27 @@ class CoreModel:
                 print(f"CoreModel: after AssemblyModel geometry analysis for slice '{slice_2D}' of assembly '{assembly_id}', the model has {D5_assembly_model.count_number_of_pins()} pins.")
 
 class AxiallyExtrudedAssemblyModel:
-    """
-    Class representing an axially extruded assembly. Consists of a collection of 2D slices with respective axial bounds, and a mapping between each slice and its geometry description file. This class can be used to build the assembly model for each axial region of the assembly based on the geometry descriptions specified in the core description YAML file.
+    """Axially extruded assembly composed of stacked 2-D slices.
+
+    Each slice corresponds to a distinct axial region of the assembly
+    (e.g. lower plenum, active fuel zone, upper plenum) and is
+    associated with its own geometry-description YAML file.
+
+    Parameters
+    ----------
+    name : str
+        Assembly identifier (matches the assembly ID in the core layout).
+    slices_2D : list of str
+        Ordered list of 2-D slice identifiers (bottom → top).
+    z_bounds : list of float
+        Sorted, unique axial boundaries in cm.  Length is
+        ``len(slices_2D) + 1`` (N slices ⇒ N + 1 boundaries).
+
+    Attributes
+    ----------
+    slice_to_geometry_dict : dict
+        ``{slice_name: geometry_yaml_filename}`` — set via
+        :meth:`set_slice_to_geometry_mapping`.
     """
     def __init__(self, name, slices_2D, z_bounds):
         self.name = name

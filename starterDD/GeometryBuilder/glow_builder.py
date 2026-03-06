@@ -375,30 +375,51 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation=0.
                 ),
                 center=(0.0, 0.0, 0.0),
             )
-            tmp_cell.add_circle(water_rod_model.inner_radius)
-            tmp_cell.add_circle(water_rod_model.outer_radius)
-            tmp_cell.set_properties({
-                PropertyType.MATERIAL: [
-                    water_rod_model.moderator_material_name,
-                    water_rod_model.cladding_material_name,
-                    water_rod_model.coolant_material_name,
-                ],
-                PropertyType.MACRO: [f"MACRO_{water_rod_model.rod_ID}"] * 3,
-            })
-            # Apply sectorization: prefer calculation_step config, fall back to windmill flag
+
+            # --- Determine extra moderator radii from calculation step ---
+            extra_radii = []
+            wr_sectors = None
             if calculation_step is not None:
                 wr_sectors = calculation_step.get_water_rod_sectorization()
                 if wr_sectors is not None:
-                    if wr_sectors.splits is not None:
-                        import warnings
-                        warnings.warn(
-                            "Circular water rod: 'splits' in the "
-                            "water_rods config is ignored; only "
-                            "'sectors'/'angles' are used for circular "
-                            "water rods.",
-                            stacklevel=2,
-                        )
-                    tmp_cell.sectorize(wr_sectors.sectors, wr_sectors.angles, windmill=wr_sectors.windmill)
+                    extra_radii = wr_sectors.resolve_water_rod_radii(
+                        water_rod_model.inner_radius
+                    )
+
+            # Add circles: extra moderator sub-rings, then inner, then outer
+            for r in extra_radii:
+                tmp_cell.add_circle(r)
+            tmp_cell.add_circle(water_rod_model.inner_radius)
+            tmp_cell.add_circle(water_rod_model.outer_radius)
+
+            # Build material list: one moderator entry per sub-ring + base 3
+            n_extra = len(extra_radii)
+            materials = (
+                [water_rod_model.moderator_material_name] * (1 + n_extra)
+                + [water_rod_model.cladding_material_name,
+                   water_rod_model.coolant_material_name]
+            )
+            n_regions = len(materials)
+            tmp_cell.set_properties({
+                PropertyType.MATERIAL: materials,
+                PropertyType.MACRO: [f"MACRO_{water_rod_model.rod_ID}"] * n_regions,
+            })
+
+            # Apply sectorization: prefer calculation_step config, fall back to windmill flag
+            if wr_sectors is not None:
+                if wr_sectors.splits is not None:
+                    import warnings
+                    warnings.warn(
+                        "Circular water rod: 'splits' in the "
+                        "water_rods config is ignored; only "
+                        "'sectors'/'angles' are used for circular "
+                        "water rods.",
+                        stacklevel=2,
+                    )
+                expanded_s, expanded_a = wr_sectors.expanded_sectors_and_angles(
+                    water_rod_model.inner_radius
+                )
+                tmp_cell.sectorize(expanded_s, expanded_a, windmill=wr_sectors.windmill)
             elif windmill:
                 tmp_cell.sectorize([1, 1, 8], [0, 0, 0], windmill=True)
         elif assembly_model.water_rod_type == "square":
@@ -2186,6 +2207,222 @@ def _build_cross_aware_discretization_rects(
     return rects
 
 
+def _build_wing_submesh_rects(ctrl, ap, wing_submesh_config, ctrl_shapes):
+    """
+    Build splitting faces to sub-mesh the control cross wings into
+    axial zones.
+
+    Each wing arm is decomposed into three zones by cuts perpendicular
+    to the arm axis:
+
+    1. **Corner zone** — the ``bt/2 × bt/2`` square at the cross centre
+       where both arms overlap.
+    2. **Central-structure-to-absorber zone** — from the corner zone
+       edge to the first absorber tube boundary.
+    3. **Absorber-pin zone** — optionally split at each tube boundary
+       (``extend_splits_at_tube_boundaries``) and optionally bisected
+       at each tube centre (``split_tubes_in_half``).
+
+    Zones 1 and 2 can be further gridded by user-specified split counts.
+    All splitting faces are ``Rectangle`` objects suitable for passing to
+    ``make_grid_faces`` or directly into ``make_partition``.
+
+    Parameters
+    ----------
+    ctrl : ControlCrossModel
+        The control cross model with all geometric dimensions.
+    ap : float
+        Assembly pitch.
+    wing_submesh_config : WingSubmeshConfig
+        Configuration specifying the grid splits and options.
+    ctrl_shapes : dict
+        The shapes dict as returned by ``_build_control_cross_shapes``.
+
+    Returns
+    -------
+    list of (Rectangle, (nx, ny))
+        Splitting rectangles with their grid split counts.
+    """
+    corner = ctrl.center
+    bt = ctrl.blade_thickness
+    bt2 = bt / 2.0
+    cshs = ctrl.central_structure_half_span
+    bhs = ctrl.blade_half_span
+    n_tubes = ctrl.number_tubes_per_wing
+    delta = ctrl.tube_spacing
+    first_offset = ctrl.first_tube_offset
+    st = ctrl.sheath_thickness
+    inner_w = ctrl.inner_sheath_width  # = bt - 2*st
+
+    # Resolve split counts with defaults
+    corner_splits = wing_submesh_config.corner_splits or (1, 1)
+    cs_splits = wing_submesh_config.central_structure_splits or (1, 1)
+    extend_tube = wing_submesh_config.extend_splits_at_tube_boundaries
+    bisect_tube = wing_submesh_config.split_tubes_in_half
+
+    def ct(x, y):
+        """Shorthand for corner transform."""
+        return _corner_transform(corner, x, y, ap)
+
+    rects = []
+
+    # ------------------------------------------------------------------
+    # Helper: determine which arm axis is which.
+    # The horizontal arm extends along x (canonical NW: positive x).
+    # The vertical arm extends along y (canonical NW: negative y from ap).
+    #
+    # For the horizontal arm, "along arm" = x, "across arm" = y.
+    #   corner_splits = (n_along, n_across) → (nx, ny) for H arm
+    # For the vertical arm, "along arm" = y, "across arm" = x.
+    #   corner_splits = (n_along, n_across) → (ny, nx) for V arm → permute
+    # ------------------------------------------------------------------
+
+    # ==================================================================
+    # ZONE A — Corner zone: bt/2 × bt/2 at cross centre
+    # Both arms share this zone, so we only create it once.
+    # ==================================================================
+    cx, cy = ct(bt2 / 2.0, ap - bt2 / 2.0)
+    rects.append((
+        Rectangle(
+            name="WING_SUBMESH_CORNER",
+            height=bt2, width=bt2,
+            center=(cx, cy, 0.0),
+        ),
+        corner_splits,
+    ))
+
+    # ==================================================================
+    # ZONE B — Central-structure-to-absorber zone
+    # Span from bt/2 to first tube boundary along each arm.
+    # ==================================================================
+    # First tube boundary (lower edge of first tube bounding box)
+    first_tube_boundary = first_offset - delta / 2.0
+
+    # Horizontal arm zone B: x from bt/2 to first_tube_boundary
+    zone_b_len_h = first_tube_boundary - bt2
+    if zone_b_len_h > 1e-8:
+        cx, cy = ct(bt2 + zone_b_len_h / 2.0, ap)
+        rects.append((
+            Rectangle(
+                name="WING_SUBMESH_CS_H",
+                height=bt, width=zone_b_len_h,
+                center=(cx, cy, 0.0),
+            ),
+            cs_splits,
+        ))
+
+    # Vertical arm zone B: y from (ap - bt/2) to (ap - first_tube_boundary)
+    zone_b_len_v = first_tube_boundary - bt2
+    if zone_b_len_v > 1e-8:
+        cx, cy = ct(0.0, ap - bt2 - zone_b_len_v / 2.0)
+        rects.append((
+            Rectangle(
+                name="WING_SUBMESH_CS_V",
+                height=zone_b_len_v, width=bt,
+                center=(cx, cy, 0.0),
+            ),
+            (cs_splits[1], cs_splits[0]),  # permuted for vertical arm
+        ))
+
+    # ==================================================================
+    # ZONE C — Absorber pin zone
+    # Optionally extend tube bounding surfaces to sheath border and/or
+    # bisect tubes.
+    # ==================================================================
+    tubes = ctrl_shapes["absorber_tubes"]
+
+    if extend_tube or bisect_tube:
+        for i in range(n_tubes):
+            # Get tube centres from the Salome geometry objects.
+            # Horizontal tube is at index 2*i, vertical at 2*i+1.
+            tube_h = tubes[2 * i]
+            tube_v = tubes[2 * i + 1]
+
+            # Retrieve tube centres via Salome GetParameters
+            tx_h = float(tube_h.inner_circles[0].o.GetParameters().split(":")[0])
+            ty_h = float(tube_h.inner_circles[0].o.GetParameters().split(":")[1])
+            tx_v = float(tube_v.inner_circles[0].o.GetParameters().split(":")[0])
+            ty_v = float(tube_v.inner_circles[0].o.GetParameters().split(":")[1])
+
+            if extend_tube:
+                # Horizontal arm: full bt-wide rectangle at tube centre,
+                # spanning the blade thickness.
+                # The tube bounding box is inner_w × delta; we extend to
+                # bt × delta by creating a full-width splitting face.
+                rects.append((
+                    Rectangle(
+                        name=f"WING_TUBE_EXT_H_{i}",
+                        height=bt, width=delta,
+                        center=(tx_h, ty_h, 0.0),
+                    ),
+                    (1, 1),
+                ))
+
+                # Vertical arm: full bt-wide rectangle at tube centre
+                rects.append((
+                    Rectangle(
+                        name=f"WING_TUBE_EXT_V_{i}",
+                        height=delta, width=bt,
+                        center=(tx_v, ty_v, 0.0),
+                    ),
+                    (1, 1),
+                ))
+
+            if bisect_tube:
+                # Horizontal arm: bisect the tube at its centre along x
+                # (perpendicular to arm axis = a thin horizontal cut)
+                # A thin rectangle spanning bt across, half-delta wide,
+                # placed at the tube centre.  We split by creating two
+                # half-delta faces.
+                half_delta = delta / 2.0
+                # Left half
+                rects.append((
+                    Rectangle(
+                        name=f"WING_TUBE_BISECT_H_{i}_L",
+                        height=bt, width=half_delta,
+                        center=(tx_h - half_delta / 2.0, ty_h, 0.0),
+                    ),
+                    (1, 1),
+                ))
+                # Right half
+                rects.append((
+                    Rectangle(
+                        name=f"WING_TUBE_BISECT_H_{i}_R",
+                        height=bt, width=half_delta,
+                        center=(tx_h + half_delta / 2.0, ty_h, 0.0),
+                    ),
+                    (1, 1),
+                ))
+
+                # Vertical arm: bisect at tube centre along y
+                # Top half
+                rects.append((
+                    Rectangle(
+                        name=f"WING_TUBE_BISECT_V_{i}_T",
+                        height=half_delta, width=bt,
+                        center=(tx_v, ty_v + half_delta / 2.0, 0.0),
+                    ),
+                    (1, 1),
+                ))
+                # Bottom half
+                rects.append((
+                    Rectangle(
+                        name=f"WING_TUBE_BISECT_V_{i}_B",
+                        height=half_delta, width=bt,
+                        center=(tx_v, ty_v - half_delta / 2.0, 0.0),
+                    ),
+                    (1, 1),
+                ))
+
+    n_faces = sum(nx * ny for _, (nx, ny) in rects)
+    print(f"[wing submesh] Built {len(rects)} splitting rects "
+          f"({n_faces} total faces) for corner '{corner}', "
+          f"corner_splits={corner_splits}, cs_splits={cs_splits}, "
+          f"extend_tube={extend_tube}, bisect_tube={bisect_tube}.")
+
+    return rects
+
+
 def discretize_box(assembly_box_cell, assembly_model, box_discretization_config):
     """
     Subdivide the assembly-box peripheral regions into a grid of
@@ -2202,6 +2439,12 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
     into narrow gap strips, blade-width stubs, and a cross corner
     rectangle, each with independently configurable split counts
     (resolved from ``box_discretization_config.cross_discretization``).
+
+    If ``wing_submesh`` is enabled in the cross discretization config,
+    the control cross wings are further subdivided into three axial
+    zones per arm (corner, central-structure-to-absorber, absorber pin
+    zone) with optional tube boundary extension and tube bisection.
+    See ``WingSubmeshConfig`` for details.
 
     Unlike ``subdivide_box_into_macros`` (used for the IC method), this
     function does **not** assign MACRO properties.  Material properties
@@ -2363,6 +2606,30 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
     splitting_faces = []
     for rect, (nx, ny) in rectangles_and_splits:
         splitting_faces.extend(make_grid_faces(rect, nx, ny))
+
+    # ------------------------------------------------------------------
+    # Wing sub-mesh (if enabled)
+    # ------------------------------------------------------------------
+    if has_cross:
+        wing_cfg = None
+        if cross_disc is not None:
+            wing_cfg = cross_disc.wing_submesh
+        if wing_cfg is not None and wing_cfg.enabled:
+            ctrl_shapes = getattr(assembly_box_cell, "_ctrl_cross_shapes", None)
+            if ctrl_shapes is None:
+                import warnings
+                warnings.warn(
+                    "Wing sub-mesh requested but _ctrl_cross_shapes not "
+                    "attached to assembly_box_cell.  Skipping wing "
+                    "sub-meshing.",
+                    stacklevel=2,
+                )
+            else:
+                wing_rects = _build_wing_submesh_rects(
+                    ctrl, ap, wing_cfg, ctrl_shapes,
+                )
+                for rect, (nx, ny) in wing_rects:
+                    splitting_faces.extend(make_grid_faces(rect, nx, ny))
 
     # ------------------------------------------------------------------
     # Partition the box cell face

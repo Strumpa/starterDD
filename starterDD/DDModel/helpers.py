@@ -5,9 +5,33 @@
 import yaml
 
 def associate_material_to_rod_ID(path_to_materials_yaml, path_to_geometry_yaml):
-    """
-    Associate materials to rod IDs when using a material composition definition with the rod_id entry.
-    This is intended to facilitate Models based on benchmark problems where the material composition definition is based on the rod IDs, which is a common approach for BWR benchmarks.
+    """Map lattice rod IDs to material names from YAML definitions.
+
+    Reads the ``MIX_COMPOSITIONS`` section of *path_to_materials_yaml*
+    for entries that carry a ``rod_id`` key, and builds a
+    ``{rod_id: material_name}`` mapping.  Then validates that every
+    rod ID appearing in the ``lattice_description`` of
+    *path_to_geometry_yaml* has an associated material.
+
+    Parameters
+    ----------
+    path_to_materials_yaml : str
+        Path to the YAML file containing ``MIX_COMPOSITIONS`` entries
+        with ``name`` and ``rod_id`` keys.
+    path_to_geometry_yaml : str
+        Path to the geometry YAML file containing
+        ``lattice_description`` (2-D list of rod ID strings).
+
+    Returns
+    -------
+    dict
+        ``{rod_id: material_name}``
+
+    Raises
+    ------
+    ValueError
+        If a rod ID in the lattice has no corresponding material, or
+        if either YAML file cannot be read.
     """
     try:
         file_materials = open(path_to_materials_yaml, 'r')
