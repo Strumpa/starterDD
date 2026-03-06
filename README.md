@@ -2,6 +2,34 @@
 ## A starter pack for Donjon&Dragon : deterministic neutron transport open-source codes
 ## Dragon and Donjon are part of the Version5 environment developed at Polytechnique Montréal and hosted on the OECD/NEA gitlab : https://git.oecd-nea.org/dragon/5.1 
 
+# To install starterDD 
+
+- git clone https://github.com/Strumpa/starterDD.git
+- cd starterDD
+- pip install .
+
+# To build the documentation 
+- cd docs
+- make html
+
+# To open documentation : 
+open ``_build/html/index.html`` in your browser
+or use one of the following commands: 
+- python -m http.server --directory _build/html/
+- sphinx-autobuild . ./_build/html
+
+# To run tests
+pytest
+
+# Examples
+
+Examples are available in the tutorials/ folder
+- simplified_GE14_model : simplified GE14 assembly model from https://github.com/cdlawing1/BWRProgressionProblemInputs 
+Chase Lawing, Scott Palmtag, and Mehdi Asgari, "BWR Progression Problems," Oak Ridge National Laboratory, ORNL/TM-2020/1792 (Sept 2021).
+- simple_4x4_minicore : simple CoreModel with 4x4 2D layout consisting of 3 different assembly types, defined by 3 axial layouts.
+
+
+
 ## StarterDD is :
 a python package aiming to help get a more user friendly experience with using Dragon and Donjon. 
 ## The main modules are : 
@@ -10,10 +38,12 @@ a python package aiming to help get a more user friendly experience with using D
     - The Donjon model allows to build 3D cartesian core geometries from a 2D core layout and associated axial layout descriptors provided in YAML format.
     - The DragonCalculationScheme model allows to create CalculationSteps and associate a SECTORIZED geometry to the DragonModel's TECHNOLOGICAL geometry based on selected discretization options.
 - GeometryBuilder : uses the GLOW application developed by newcleo, available at https://github.com/newcleo-dev-team/glow for surface element geometry definition of complex lattice geometries.
+    - Support for rounded corner BWR assemblies.
+    - Support for control crosses.
 
 
-## To be implemented [23/02/2026] : 
+## To be implemented [03/03/2026] : 
 - full "abstract" reactor model to support multi-physics.
-- Calls to EDI: and COMPO: modules to assist with post treatment. Equivalent Serpent2 detector creation.
-- adapting the meshing of neutronics calculation geometries to assembly geometries with control crosses.
+- full reactor database creation with DRAGON to support DONJON full core calculations.
+- Support for colorsets / minicore 2D geometries for Dragon.
 - python to CLE-2000 generator : create a full Dragon&Donjon case from the python model and generate equivalent CLE-2000 instructions to run. 

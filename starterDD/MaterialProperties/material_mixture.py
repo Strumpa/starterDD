@@ -1,3 +1,33 @@
+"""Material composition and mixture definitions for Dragon/Serpent2 calculations.
+
+This module provides classes for defining isotopic compositions, material
+mixtures with associated cross-section data, and utilities for converting
+between density representations (mass density, atom density, isotopic
+number densities).
+
+Classes
+-------
+Composition
+    Isotopic composition with thermal scattering and depletability flags.
+MaterialMixture
+    A material with a composition, mixture index, and temperature.
+XSData
+    Cross-section data container for macroscopic library (MAC) module usage.
+
+Functions
+---------
+parse_all_compositions_from_yaml
+    Parse material compositions from a YAML file (supports three input formats).
+get_element_symbol
+    Extract the element symbol from a ZAID or isotope name string.
+get_isotope_atomic_mass
+    Retrieve the atomic mass of an isotope from its name or ZAID.
+fractions_to_iso_densities
+    Convert mass or atom fractions to isotopic number densities.
+DensToIsoDens_water
+    .. deprecated:: Convert water density to isotopic number densities.
+"""
+
 # Class to handle abstract material mixtures
 # Author : R. Guasch
 # Date : 04/02/2026
@@ -40,13 +70,40 @@ DEFAULT_THERMAL_SCATTERING = {
 } 
 
 class Composition:
-    def __init__(self, material_name : str, isotopic_composition: dict):
+    """Isotopic composition of a material.
+
+    Stores a mapping of isotope identifiers (names or ZAIDs) to number
+    densities (atoms / barn·cm).  Supports automatic ZAID-to-name
+    conversion, depletability flags, and thermal scattering configuration.
+
+    Attributes
+    ----------
+    material_name : str
+        Human-readable name (e.g. ``"UOX_4.5w%"``, ``"B4C"``).
+    isotopic_composition : dict
+        ``{isotope_name: number_density}`` in atoms / barn·cm.
+    therm : bool
+        Whether a bound thermal scattering law is required.
+    therm_data : list of dict
+        Per-isotope thermal scattering metadata (populated by
+        :meth:`setTherm`).
+    depletable : bool
+        Whether the material should be flagged as depletable in
+        transport codes.
+    """
+
+    def __init__(self, material_name: str, isotopic_composition: dict):
         """
-        Composition initialization.
-        material name + isotopic composition : dictionnary of isotope name and isotope density in iso/barn*cm
-        
-        :param material_name (str): material given name eg. "UOX_4.5w%", "B4C" or "moderator" 
-        :param isotopic_composition (dict): dictionnary of isotope name and isotope density in iso/barn*cm
+        Parameters
+        ----------
+        material_name : str
+            Material given name, e.g. ``"UOX_4.5w%"``, ``"B4C"``,
+            ``"moderator"``.
+        isotopic_composition : dict
+            ``{isotope_name_or_ZAID: number_density}`` where number
+            densities are in atoms / barn·cm.  If all keys are pure
+            digits they are treated as ZAIDs and auto-converted to
+            isotope names via :meth:`zaid_to_isotope`.
         """
         self.material_name = material_name
         self.isotopic_composition = isotopic_composition  # isotopic_composition is a dict of {isotope_name: density}

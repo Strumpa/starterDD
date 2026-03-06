@@ -17,7 +17,7 @@ from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel, 
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.InterfaceToDD.dragon_module_calls import LIB
 from starterDD.InterfaceToDD.dragon_module_calls import EDI, COMPO, EDI_COMPO
-from starterDD.InterfaceToDD.serpent2_cards import (
+from starterDD.InterfaceToDD.Serpent2_exports import (
     Serpent2Model, S2_Settings, S2_Material, S2_PinUniverse, S2_Lattice,
     S2_ChannelGeometry,
 )
@@ -474,7 +474,7 @@ class TestLIBCreation:
         assert "<<ssh_method>>" in lib_content, "Missing ssh_method placeholder."
         assert "<<anis_level>>" in lib_content, "Missing anis_level placeholder."
         assert "<<tran_correc>>" in lib_content, "Missing tran_correc placeholder."
-        assert "DTFUEL" in lib_content, "Missing DTFUEL temperature parameter."
+        assert "TFUEL" in lib_content, "Missing TFUEL temperature parameter."
 
     def test_generating_mix_lines(self, lib_content, ge14_assembly_for_lib):
         """Verify generating mixes have full isotopic composition."""
@@ -726,7 +726,7 @@ class TestEDICOMPOCreation:
 
     def test_procedure_header(self, edi_compo_content):
         """Verify CLE-2000 procedure header."""
-        assert "PARAMETER COMPO FLUX LIBRARY2 TRACK" in edi_compo_content
+        assert "PARAMETER FLUX LIBRARY2 TRACK" in edi_compo_content
         assert "MODULE EDI: COMPO: DELETE: END:" in edi_compo_content
         assert "LINKED_LIST EDIRATES" in edi_compo_content
         assert "SEQ_ASCII _COMPO :: FILE <<name_cpo>>" in edi_compo_content
@@ -765,7 +765,6 @@ class TestEDICOMPOCreation:
 
     def test_save_and_end_footer(self, edi_compo_content):
         """Verify footer with save conditional and END."""
-        assert "IF save_opt 'SAVE' = THEN" in edi_compo_content
         assert "_COMPO := COMPO" in edi_compo_content
         assert "END: ;" in edi_compo_content
 

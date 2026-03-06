@@ -110,6 +110,30 @@ class CartesianAssemblyModel:
         self.intra_assembly_coolant_width = (self.channel_box_inner_side - n_cols * pin_pitch) / 2.0 if self.channel_box_inner_side is not None else None
         self.translation_offset = self.gap_wide + self.channel_box_thickness + self.intra_assembly_coolant_width if self.gap_wide is not None and self.channel_box_thickness is not None and self.intra_assembly_coolant_width is not None else None
 
+        # Control cross information (optional)
+        ctrl_data = yaml_data.get("CONTROL_CROSS_GEOMETRY", None)
+        if ctrl_data is not None:
+            self.control_cross = ControlCrossModel(
+                center=ctrl_data["center"],
+                number_tubes_per_wing=ctrl_data["number_tubes_per_wing"],
+                blade_half_span=ctrl_data["blade_half_span"],
+                blade_thickness=ctrl_data["blade_thickness"],
+                tip_radius=ctrl_data["tip_radius"],
+                central_structure_half_span=ctrl_data["central_structure_half_span"],
+                sheath_thickness=ctrl_data["sheath_thickness"],
+                absorber_tube_outer_radius=ctrl_data["absorber_tube_outer_radius"],
+                absorber_tube_inner_radius=ctrl_data["absorber_tube_inner_radius"],
+                absorber_material=ctrl_data.get("absorber_material", "ABS"),
+                sheath_material=ctrl_data.get("sheath_material", "SHEATH"),
+                tube_spacing=ctrl_data.get("tube_spacing", None),
+                first_tube_offset=ctrl_data.get("first_tube_offset", None),
+            )
+            self.has_control_cross = True
+            self.validate_control_cross_symmetry()
+        else:
+            self.control_cross = None
+            self.has_control_cross = False
+
     # ------------------------------------------------------------------
     # YAML key validation
     # ------------------------------------------------------------------
@@ -148,6 +172,22 @@ class CartesianAssemblyModel:
         "centers": True,
     }
 
+    _EXPECTED_CONTROL_CROSS_KEYS = {
+        "center": True,
+        "number_tubes_per_wing": True,
+        "blade_half_span": True,
+        "blade_thickness": True,
+        "tip_radius": True,
+        "central_structure_half_span": True,
+        "sheath_thickness": True,
+        "absorber_tube_outer_radius": True,
+        "absorber_tube_inner_radius": True,
+        "absorber_material": False,
+        "sheath_material": False,
+        "tube_spacing": False,
+        "first_tube_offset": False,
+    }
+
     @classmethod
     def _validate_yaml_keys(cls, yaml_data, source_path="<unknown>"):
         """
@@ -174,7 +214,7 @@ class CartesianAssemblyModel:
         import warnings
 
         # --- Top-level sections ---
-        known_sections = {"ASSEMBLY_GEOMETRY", "PIN_GEOMETRY", "WATER_ROD_GEOMETRY"}
+        known_sections = {"ASSEMBLY_GEOMETRY", "PIN_GEOMETRY", "WATER_ROD_GEOMETRY", "CONTROL_CROSS_GEOMETRY"}
         present_sections = set(yaml_data.keys()) if isinstance(yaml_data, dict) else set()
         unknown_top = present_sections - known_sections
         if unknown_top:
@@ -196,6 +236,7 @@ class CartesianAssemblyModel:
             ("ASSEMBLY_GEOMETRY", cls._EXPECTED_ASSEMBLY_KEYS),
             ("PIN_GEOMETRY", cls._EXPECTED_PIN_KEYS),
             ("WATER_ROD_GEOMETRY", cls._EXPECTED_WATER_ROD_KEYS),
+            ("CONTROL_CROSS_GEOMETRY", cls._EXPECTED_CONTROL_CROSS_KEYS),
         ]
 
         for section_name, expected_keys in section_specs:
@@ -490,6 +531,51 @@ class CartesianAssemblyModel:
 
         print(f"[by_material] Created {len(self.fuel_material_mixtures)} fuel material mixtures "
                 f"for {len(materials_iterated_through)} unique fuel materials.")
+
+    def validate_control_cross_symmetry(self):
+        """
+        Check whether the control cross corner is compatible with the
+        lattice's diagonal symmetry and emit a warning if it breaks it.
+
+        Compatibility rules:
+
+        - **Anti-diagonal** lattice symmetry (axis from top-left to
+          bottom-right): preserved by control crosses at ``"north-west"``
+          or ``"south-east"`` corners (the cross sits on the symmetry
+          axis).  ``"north-east"`` or ``"south-west"`` would break it.
+        - **Main-diagonal** (transpose) lattice symmetry: preserved by
+          ``"south-west"`` or ``"north-east"`` corners.
+          ``"north-west"`` or ``"south-east"`` would break it.
+        - **No diagonal symmetry**: all corners are acceptable.
+
+        This method is called automatically at the end of
+        ``parse_geometry_description`` when a control cross is present.
+        """
+        import warnings
+
+        if not self.has_control_cross:
+            return
+
+        sym = self.check_diagonal_symmetry()
+        if sym is None:
+            return  # no symmetry to break
+
+        corner = self.control_cross.center
+
+        compatible = {
+            "anti-diagonal": {"north-west", "south-east"},
+            "main-diagonal": {"south-west", "north-east"},
+        }
+
+        if corner not in compatible.get(sym, set()):
+            warnings.warn(
+                f"[control cross symmetry] The lattice has "
+                f"{sym} symmetry, but the control cross is placed at "
+                f"'{corner}'. Compatible corners for {sym} symmetry "
+                f"are {sorted(compatible[sym])}. The control cross "
+                f"placement will break the lattice symmetry.",
+                stacklevel=2,
+            )
 
     def check_diagonal_symmetry(self):
         """
@@ -848,10 +934,21 @@ class CartesianAssemblyModel:
 
         # Separate fuel vs non-fuel entries from the TDT mapping
         fuel_names_set = set(self.fuel_material_mixture_names)
+
+        # If per-tube control cross absorber mixtures exist, collect their
+        # names so they are matched separately (not lumped into non-fuel).
+        ctrl_cross_names_set = set()
+        if (hasattr(self, 'control_cross_absorber_mixtures')
+                and self.control_cross_absorber_mixtures):
+            ctrl_cross_names_set = {
+                m.unique_material_mixture_name
+                for m in self.control_cross_absorber_mixtures
+            }
+
         non_fuel = {}
 
         for tdt_name, tdt_index in tdt_indices_dict.items():
-            if tdt_name not in fuel_names_set:
+            if tdt_name not in fuel_names_set and tdt_name not in ctrl_cross_names_set:
                 non_fuel[tdt_name] = tdt_index
 
         self.non_fuel_material_mixture_indices = non_fuel
@@ -889,6 +986,131 @@ class CartesianAssemblyModel:
         print(f"[enforce_tdt] Updated {len(self.fuel_material_mixture_names)} fuel mixture indices from TDT file.")
         if non_fuel:
             print(f"[enforce_tdt] Also stored {len(non_fuel)} non-fuel mixture indices: {non_fuel}")
+
+        # --- Update per-tube control cross absorber mixtures (if any) ---
+        if ctrl_cross_names_set:
+            missing_ctrl = [
+                n for n in ctrl_cross_names_set if n not in tdt_indices_dict
+            ]
+            if missing_ctrl:
+                raise ValueError(
+                    f"The following control cross absorber tube names were "
+                    f"not found in the TDT mapping: {missing_ctrl}. "
+                    f"Available TDT names: {list(tdt_indices_dict.keys())}"
+                )
+            for mix in self.control_cross_absorber_mixtures:
+                mix.material_mixture_index = tdt_indices_dict[
+                    mix.unique_material_mixture_name
+                ]
+            print(f"[enforce_tdt] Updated {len(ctrl_cross_names_set)} "
+                  f"control cross absorber tube indices from TDT file.")
+
+    def get_postprocessing_lattice_info(self):
+        """
+        Return a dictionary summarising the lattice for post-processing
+        (Dragon5 vs Serpent2 comparison).
+
+        Prerequisites
+        -------------
+        * ``analyze_lattice_description(build_pins=True)`` must have been
+          called.
+        * ``number_fuel_material_mixtures_by_pin()`` must have been called
+          so that each ``FuelPinModel`` carries a ``pin_idx``.
+
+        Returns
+        -------
+        dict with keys:
+
+        ``"n_fuel_pins"``
+            Total number of fuel pin cells in the lattice (for rate
+            normalisation).
+        ``"n_unique_pins"``
+            Number of unique pin positions (size of output rate arrays).
+        ``"symmetry_type"``
+            ``"anti-diagonal"``, ``"main-diagonal"``, or ``None``.
+        ``"pin_idx_on_symmetry_axis"``
+            ``set[int]`` — ``pin_idx`` values on the symmetry axis
+            (symmetry factor = 1).  All other fuel ``pin_idx`` values
+            have symmetry factor = 2.  Empty when there is no symmetry.
+        ``"pin_idx_to_material_name"``
+            ``dict[int, str]`` — ``pin_idx → base fuel material name``.
+        ``"pin_idx_to_composition"``
+            ``dict[int, dict]`` — ``pin_idx → {iso_name: number_density}``.
+            Obtained from the ``Composition`` object attached to the
+            first ``MaterialMixture`` of each pin.
+        ``"fuel_radius"``
+            Fuel pellet radius (for computing ``π r²`` volume).
+        ``"ordered_pin_indices"``
+            ``list[int]`` — unique ``pin_idx`` values in lattice-traversal
+            order (row-major).  This defines the canonical ordering of
+            the output arrays and matches the COMPO ``MIXTURES`` dimension
+            when the ``EDI`` spatial mode ``"by_pin"`` is used.
+        """
+        if self.lattice is None:
+            raise RuntimeError(
+                "Lattice has not been built. "
+                "Call analyze_lattice_description(build_pins=True) first."
+            )
+
+        symmetry_type = getattr(self, 'lattice_has_diagonal_symmetry', None)
+        # If symmetry hasn't been detected yet (e.g. number_by_pin wasn't
+        # called), detect now.
+        if symmetry_type is None:
+            symmetry_type = self.check_diagonal_symmetry()
+
+        n_rows = len(self.lattice)
+        n_fuel_pins = 0
+        pin_idx_on_axis = set()
+        pin_idx_to_material = {}
+        pin_idx_to_composition = {}
+        ordered_pin_indices = []
+        seen_pin_idx = set()
+
+        for i in range(n_rows):
+            for j in range(len(self.lattice[i])):
+                pin = self.lattice[i][j]
+                if isinstance(pin, FuelPinModel):
+                    n_fuel_pins += 1
+                    pidx = pin.pin_idx
+
+                    if pidx not in seen_pin_idx:
+                        seen_pin_idx.add(pidx)
+                        ordered_pin_indices.append(pidx)
+                        pin_idx_to_material[pidx] = pin.fuel_material_name
+
+                        # Composition from first zone's MaterialMixture
+                        if (hasattr(pin, 'fuel_material_mixtures')
+                                and pin.fuel_material_mixtures):
+                            comp = pin.fuel_material_mixtures[0].composition
+                            pin_idx_to_composition[pidx] = (
+                                comp.get_isotope_name_composition()
+                            )
+                        else:
+                            pin_idx_to_composition[pidx] = {}
+
+                    # Determine if the pin sits on the symmetry axis
+                    if symmetry_type == "anti-diagonal":
+                        mirror = (n_rows - 1 - j, n_rows - 1 - i)
+                    elif symmetry_type == "main-diagonal":
+                        mirror = (j, i)
+                    else:
+                        mirror = None
+
+                    if mirror is not None and mirror == (i, j):
+                        pin_idx_on_axis.add(pidx)
+
+        fuel_radius = self.pin_geometry_dict.get("fuel_radius", None)
+
+        return {
+            "n_fuel_pins": n_fuel_pins,
+            "n_unique_pins": len(ordered_pin_indices),
+            "symmetry_type": symmetry_type,
+            "pin_idx_on_symmetry_axis": pin_idx_on_axis,
+            "pin_idx_to_material_name": pin_idx_to_material,
+            "pin_idx_to_composition": pin_idx_to_composition,
+            "fuel_radius": fuel_radius,
+            "ordered_pin_indices": ordered_pin_indices,
+        }
 
     def count_number_of_pins(self):
         """
@@ -936,6 +1158,155 @@ class CartesianAssemblyModel:
         """
         self.lattice_description = new_lattice_description
         self.analyze_lattice_description(build_pins=True) # re-analyze the lattice description to update the lattice data structure and the pin models based on the new lattice description
+
+    # ------------------------------------------------------------------
+    # Control cross absorber tube numbering
+    # ------------------------------------------------------------------
+
+    def number_control_cross_absorber_tubes(self, strategy="lumped"):
+        """
+        Assign material mixture names (and optionally ``MaterialMixture``
+        objects) to the absorber tubes in the control cross.
+
+        Parameters
+        ----------
+        strategy : str
+            ``"lumped"`` (default) — all absorber tubes share the single
+            material name stored in ``self.control_cross.absorber_material``.
+            No ``MaterialMixture`` objects are created; the absorber is
+            treated as a plain non-fuel material (same path as CLAD, etc.).
+
+            ``"by_tube"`` — each tube on one wing receives a unique name
+            ``<absorber_material>_tube_<k>`` (k = 1 … *number_tubes_per_wing*).
+            The second wing's tubes are symmetric partners (anti-diagonal
+            symmetry when the cross sits at a corner) and share the same
+            names.  ``MaterialMixture`` objects are created for each unique
+            tube name and stored in ``self.control_cross_absorber_mixtures``.
+
+        Prerequisites
+        -------------
+        * ``parse_geometry_description`` must have found a
+          ``CONTROL_CROSS_GEOMETRY`` section (``self.has_control_cross``).
+        * ``set_material_compositions`` must have been called so that the
+          absorber ``Composition`` is available.
+        """
+        if not self.has_control_cross:
+            raise RuntimeError(
+                "No control cross defined for this assembly model. "
+                "Ensure the geometry YAML has a CONTROL_CROSS_GEOMETRY section."
+            )
+
+        ctrl = self.control_cross
+        n_tubes = ctrl.number_tubes_per_wing
+
+        if strategy == "lumped":
+            # Nothing to number — single material name for all tubes.
+            ctrl.tube_material_names = None
+            self.control_cross_absorber_mixtures = []
+            # Clear any previous by_tube generating/daughter state
+            self.control_cross_generating_mixes = []
+            self.control_cross_daughter_mixes = []
+            print(f"[control_cross] Lumped absorber: all tubes use "
+                  f"'{ctrl.absorber_material}'.")
+            return
+
+        if strategy != "by_tube":
+            raise ValueError(
+                f"Invalid control cross numbering strategy '{strategy}'. "
+                f"Valid options: 'lumped', 'by_tube'."
+            )
+
+        # --- by_tube strategy ---
+        if not hasattr(self, 'composition_lookup') or self.composition_lookup is None:
+            raise RuntimeError(
+                "Material compositions have not been set. "
+                "Call set_material_compositions(compositions) before "
+                "numbering control cross absorber tubes."
+            )
+
+        base_name = ctrl.absorber_material
+        composition = self.composition_lookup.get(base_name)
+        if composition is None:
+            raise ValueError(
+                f"No Composition found for absorber material "
+                f"'{base_name}'. Ensure the material compositions "
+                f"YAML contains an entry with name='{base_name}'."
+            )
+
+        # One wing has n_tubes unique names; the symmetric wing mirrors them.
+        unique_names = [f"{base_name}_tube_{k}" for k in range(1, n_tubes + 1)]
+
+        # Build full list for both wings: wing-1 = tubes 1…n,
+        # wing-2 = same names in reversed order (anti-diagonal symmetry).
+        wing_1_names = list(unique_names)
+        wing_2_names = list(reversed(unique_names))
+        ctrl.tube_material_names = {
+            "wing_1": wing_1_names,
+            "wing_2": wing_2_names,
+        }
+
+        # Create MaterialMixture objects for each unique tube name.
+        depletable = getattr(composition, 'depletable', False)
+        temperature = getattr(ctrl, 'absorber_temperature',
+                              getattr(self, 'structural_temperature', 600.0))
+
+        self.control_cross_absorber_mixtures = []
+        for idx_offset, unique_name in enumerate(unique_names):
+            # Temporary sequential indices — will be overridden by TDT
+            # enforcement later.  Start from a high offset to avoid
+            # collision with fuel indices.
+            tmp_index = 9000 + idx_offset + 1
+            mix = MaterialMixture(
+                material_name=base_name,
+                material_mixture_index=tmp_index,
+                composition=composition,
+                temperature=temperature,
+                isdepletable=depletable,
+            )
+            mix.set_unique_material_mixture_name(unique_name)
+            self.control_cross_absorber_mixtures.append(mix)
+
+        print(f"[control_cross] by_tube: created {len(unique_names)} "
+              f"unique absorber tube mixtures.")
+
+    def identify_generating_and_daughter_control_cross_mixes(self):
+        """
+        Among the per-tube absorber ``MaterialMixture`` objects, mark the
+        first one as the generating mix and the rest as daughters.
+
+        This mirrors ``identify_generating_and_daughter_mixes`` for fuel
+        materials.  All tubes share the same base composition, so the first
+        tube is the generating mix with a full isotopic definition, and
+        tubes 2 … *n* are daughters (``COMB`` from generating).
+
+        Prerequisites
+        -------------
+        * ``number_control_cross_absorber_tubes(strategy="by_tube")`` must
+          have been called.
+        """
+        if (not hasattr(self, 'control_cross_absorber_mixtures')
+                or not self.control_cross_absorber_mixtures):
+            raise RuntimeError(
+                "Control cross absorber mixtures have not been created. "
+                "Call number_control_cross_absorber_tubes(strategy='by_tube') first."
+            )
+
+        self.control_cross_generating_mixes = []
+        self.control_cross_daughter_mixes = []
+
+        for i, mix in enumerate(self.control_cross_absorber_mixtures):
+            if i == 0:
+                mix.is_generating = True
+                mix.generating_mix = None
+                self.control_cross_generating_mixes.append(mix)
+            else:
+                mix.is_generating = False
+                mix.generating_mix = self.control_cross_absorber_mixtures[0]
+                self.control_cross_daughter_mixes.append(mix)
+
+        print(f"[control_cross] Identified 1 generating mix and "
+              f"{len(self.control_cross_daughter_mixes)} daughter mixes "
+              f"for absorber tubes.")
 
 
 class FuelPinModel:
@@ -1246,3 +1617,118 @@ class DummyPinModel:
         self.center_x = center_x
         self.center_y = center_y
         self.center = (center_x, center_y)
+
+
+class ControlCrossModel:
+    """
+    Data class for a BWR control cross (cruciform control blade).
+
+    Stores geometric dimensions and material names for the absorber
+    tubes and the sheath of a BWR control cross mechanism.  The control
+    cross sits in the inter-assembly gap at one corner of the assembly
+    and consists of two perpendicular blades, each containing a row of
+    absorber tubes enclosed in a metallic sheath.
+
+    Parameters
+    ----------
+    center : str
+        Which assembly corner the cross occupies.  One of
+        ``"north-west"``, ``"north-east"``, ``"south-west"``,
+        ``"south-east"``.
+    number_tubes_per_wing : int
+        Number of absorber tubes in each blade wing.
+    blade_half_span : float
+        Half-span of a blade (from assembly corner to blade tip).
+    blade_thickness : float
+        Full thickness of the blade.
+    tip_radius : float
+        Rounding radius at the blade tip.
+    central_structure_half_span : float
+        Half-span of the central structural hub connecting the two
+        blades.
+    sheath_thickness : float
+        Thickness of the metallic sheath enclosing each blade.
+    absorber_tube_outer_radius : float
+        Outer radius of each absorber tube.
+    absorber_tube_inner_radius : float
+        Inner radius of each absorber tube.
+    absorber_material : str
+        Material name for the absorber (default ``"ABS"``).
+    sheath_material : str
+        Material name for the sheath (default ``"SHEATH"``).
+    """
+
+    VALID_CENTERS = {"north-west", "north-east", "south-west", "south-east"}
+
+    def __init__(self, center, number_tubes_per_wing, blade_half_span,
+                 blade_thickness, tip_radius, central_structure_half_span,
+                 sheath_thickness, absorber_tube_outer_radius,
+                 absorber_tube_inner_radius,
+                 absorber_material="ABS", sheath_material="SHEATH",
+                 tube_spacing=None, first_tube_offset=None):
+        if center not in self.VALID_CENTERS:
+            raise ValueError(
+                f"Invalid control cross center '{center}'. "
+                f"Valid options: {sorted(self.VALID_CENTERS)}"
+            )
+        self.center = center
+        self.number_tubes_per_wing = number_tubes_per_wing
+        self.blade_half_span = blade_half_span
+        self.blade_thickness = blade_thickness
+        self.tip_radius = tip_radius
+        self.central_structure_half_span = central_structure_half_span
+        self.sheath_thickness = sheath_thickness
+        self.absorber_tube_outer_radius = absorber_tube_outer_radius
+        self.absorber_tube_inner_radius = absorber_tube_inner_radius
+        self.absorber_material = absorber_material
+        self.sheath_material = sheath_material
+
+        # Derived dimensions
+        self.inner_sheath_width = blade_thickness - 2 * sheath_thickness
+        self.wing_length = blade_half_span - central_structure_half_span
+
+        # Tube spacing: compute automatically if not provided.
+        # The tubes are distributed evenly inside the inner sheath
+        # region of the wing (from central structure edge + sheath
+        # thickness to wing tip - sheath thickness).
+        inner_wing_length = self.wing_length - sheath_thickness
+        if tube_spacing is not None:
+            self.tube_spacing = tube_spacing
+        else:
+            self.tube_spacing = inner_wing_length / (number_tubes_per_wing + 0.5)
+
+        if first_tube_offset is not None:
+            self.first_tube_offset = first_tube_offset
+        else:
+            self.first_tube_offset = (
+                central_structure_half_span + sheath_thickness
+                + self.tube_spacing / 2.0
+            )
+
+        # Per-tube material names — populated by
+        # CartesianAssemblyModel.number_control_cross_absorber_tubes()
+        # when ``strategy="by_tube"``.  ``None`` means lumped (single
+        # material name for all tubes).
+        self.tube_material_names = None
+
+    @property
+    def is_solid(self):
+        """``True`` for solid-blade crosses (e.g. AT10).
+
+        A solid cross has no distinct sheath cavity: the structural
+        blade material fills the space between absorber rods directly
+        (no moderator between tubes, no inner/outer sheath walls).
+        Detected automatically when ``sheath_thickness == 0``.
+        """
+        return self.sheath_thickness == 0.0
+
+    def set_temperatures(self, absorber_temperature, sheath_temperature):
+        """Set temperatures for absorber and sheath materials."""
+        self.absorber_temperature = absorber_temperature
+        self.sheath_temperature = sheath_temperature
+
+    def __repr__(self):
+        return (f"ControlCrossModel(center='{self.center}', "
+                f"tubes_per_wing={self.number_tubes_per_wing}, "
+                f"absorber='{self.absorber_material}', "
+                f"sheath='{self.sheath_material}')")

@@ -27,7 +27,7 @@ from starterDD.DDModel.DragonCalculationScheme import (
 )
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.InterfaceToDD.dragon_module_calls import LIB, EDI, COMPO, EDI_COMPO
-from starterDD.InterfaceToDD.serpent2_cards import (
+from starterDD.InterfaceToDD.Serpent2_exports import (
     Serpent2Model, S2_Settings, S2_Material, S2_PinUniverse, S2_Lattice,
     S2_ChannelGeometry, S2_EnergyGrid, S2_Detector,
     REACTION_TO_MT_NUMBER, _reaction_name_to_mt,
@@ -459,7 +459,7 @@ class TestAT10EDICOMPOCreation:
 
     def test_procedure_header(self, edi_compo_content):
         """Verify CLE-2000 procedure header."""
-        assert "PARAMETER COMPO FLUX LIBRARY2 TRACK" in edi_compo_content
+        assert "PARAMETER FLUX LIBRARY2 TRACK" in edi_compo_content
         assert "MODULE EDI: COMPO: DELETE: END:" in edi_compo_content
 
     def test_compo_initialization(self, edi_compo_content):
@@ -492,7 +492,7 @@ class TestAT10EDICOMPOCreation:
 
     def test_save_and_end_footer(self, edi_compo_content):
         """Verify footer with save conditional and END."""
-        assert "IF save_opt 'SAVE' = THEN" in edi_compo_content
+        assert "_COMPO := COMPO ;" in edi_compo_content
         assert "END: ;" in edi_compo_content
 
     def test_merg_mix_vectors_present(self, edi_compo_content):

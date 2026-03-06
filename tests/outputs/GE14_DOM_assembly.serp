@@ -2106,7 +2106,7 @@ mat sheath_ss304 sum tmp 600.0
     28062.05c 2.834149E-04
     28064.05c 7.217747E-05
 
-therm lwtr  lwtr.06t
+therm lwtr  lwtr.05t
 
 % ============================================================
 %  PIN UNIVERSE DEFINITIONS

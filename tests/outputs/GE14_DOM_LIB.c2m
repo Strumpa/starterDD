@@ -15,18 +15,10 @@ INTEGER anis_level ;
 :: >>anis_level<< ; ! Anisotropy level
 STRING tran_correc ;
 :: >>tran_correc<< ; ! Transport correction option
-DOUBLE DTFUEL DTBOX DTCLAD DTCOOL DTMODE ;
-:: >>DTFUEL<< >>DTBOX<< >>DTCLAD<< >>DTCOOL<< >>DTMODE<< ; ! Temperatures
+REAL TFUEL TBOX TCLAD TCOOL TMODE TCTRL ;
+:: >>TFUEL<< >>TBOX<< >>TCLAD<< >>TCOOL<< >>TMODE<< >>TCTRL<< ;
 
-* --------------------------------------------
-*  CONVERT DOUBLE TO REALS for TEMPERATURES
-* --------------------------------------------
-REAL TFUEL := DTFUEL D_TO_R ;
-REAL TBOX := DTBOX D_TO_R ;
-REAL TCLAD := DTCLAD D_TO_R ;
-REAL TCOOL := DTCOOL D_TO_R ;
-REAL TMODE := DTMODE D_TO_R ;
-
+* -------------------------------
 *    STRUCTURES AND MODULES
 * -------------------------------
 MODULE  LIB: UTL: DELETE: END: ABORT: ;
@@ -307,7 +299,7 @@ MIXS LIB: DRAGON FIL: <<Library>>
     U234 = U234 8.50761E-06 1
     U236 = U236 4.35984E-06 1
     U238 = U238 2.04068E-02 1
-    Gd152 = Gd152 4.06302E-06
+    Gd152 = Gd152 4.06302E-06 1
     Gd154 = Gd154 4.42862E-05 1
     Gd155 = Gd155 3.00657E-04 1
     Gd156 = Gd156 4.15843E-04 1
@@ -320,7 +312,7 @@ MIXS LIB: DRAGON FIL: <<Library>>
     U234 = U234 9.27273E-06 1
     U236 = U236 4.75194E-06 1
     U238 = U238 1.98665E-02 1
-    Gd152 = Gd152 5.41736E-06
+    Gd152 = Gd152 5.41736E-06 1
     Gd154 = Gd154 5.90483E-05 1
     Gd155 = Gd155 4.00877E-04 1
     Gd156 = Gd156 5.54457E-04 1
@@ -339,7 +331,7 @@ MIXS LIB: DRAGON FIL: <<Library>>
     U234 = U234 7.47506E-06 1
     U236 = U236 3.83070E-06 1
     U238 = U238 2.00681E-02 1
-    Gd152 = Gd152 5.41736E-06
+    Gd152 = Gd152 5.41736E-06 1
     Gd154 = Gd154 5.90483E-05 1
     Gd155 = Gd155 4.00877E-04 1
     Gd156 = Gd156 5.54457E-04 1
@@ -358,7 +350,7 @@ MIXS LIB: DRAGON FIL: <<Library>>
     U234 = U234 9.47431E-06 1
     U236 = U236 4.85524E-06 1
     U238 = U238 2.02984E-02 1
-    Gd152 = Gd152 4.06302E-06
+    Gd152 = Gd152 4.06302E-06 1
     Gd154 = Gd154 4.42862E-05 1
     Gd155 = Gd155 3.00657E-04 1
     Gd156 = Gd156 4.15843E-04 1
@@ -371,7 +363,7 @@ MIXS LIB: DRAGON FIL: <<Library>>
     U234 = U234 8.77913E-06 1
     U236 = U236 4.49899E-06 1
     U238 = U238 2.10581E-02 1
-    Gd152 = Gd152 2.03151E-06
+    Gd152 = Gd152 2.03151E-06 1
     Gd154 = Gd154 2.21431E-05 1
     Gd155 = Gd155 1.50329E-04 1
     Gd156 = Gd156 2.07921E-04 1

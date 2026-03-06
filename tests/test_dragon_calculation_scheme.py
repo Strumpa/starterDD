@@ -11,6 +11,8 @@ from starterDD.DDModel.DragonCalculationScheme import (
     CalculationStep,
     SectorConfig,
     BoxDiscretizationConfig,
+    CrossDiscretizationConfig,
+    WingSubmeshConfig,
     VALID_STEP_TYPES,
     VALID_SELF_SHIELDING_MODULES,
     VALID_SELF_SHIELDING_METHODS,
@@ -111,6 +113,144 @@ class TestSectorConfig:
         assert sc.splits == (3, 3)
         assert sc.sectors == [1, 1, 8]
 
+    # ----- additional_radial_splits_in_moderator -----
+
+    def test_additional_radial_splits_default(self):
+        """Default additional_radial_splits_in_moderator is 1 (no extra splits)."""
+        sc = SectorConfig()
+        assert sc.additional_radial_splits_in_moderator == 1
+
+    def test_additional_radial_splits_int(self):
+        """Int value is stored as-is."""
+        sc = SectorConfig(additional_radial_splits_in_moderator=3)
+        assert sc.additional_radial_splits_in_moderator == 3
+
+    def test_additional_radial_splits_list(self):
+        """List of radii is stored as-is."""
+        sc = SectorConfig(additional_radial_splits_in_moderator=[0.3, 0.6])
+        assert sc.additional_radial_splits_in_moderator == [0.3, 0.6]
+
+    # ----- resolve_water_rod_radii -----
+
+    def test_resolve_radii_default_no_splits(self):
+        """N=1 → empty list (no extra radii)."""
+        sc = SectorConfig(additional_radial_splits_in_moderator=1)
+        assert sc.resolve_water_rod_radii(1.0) == []
+
+    def test_resolve_radii_none_no_splits(self):
+        """None → empty list."""
+        sc = SectorConfig(additional_radial_splits_in_moderator=None)
+        assert sc.resolve_water_rod_radii(1.0) == []
+
+    def test_resolve_radii_int_2(self):
+        """N=2 → 1 intermediate radius at inner_radius/2."""
+        sc = SectorConfig(additional_radial_splits_in_moderator=2)
+        radii = sc.resolve_water_rod_radii(1.0)
+        assert len(radii) == 1
+        assert radii[0] == pytest.approx(0.5)
+
+    def test_resolve_radii_int_3(self):
+        """N=3 → 2 intermediate radii at 1/3 and 2/3 of inner_radius."""
+        sc = SectorConfig(additional_radial_splits_in_moderator=3)
+        radii = sc.resolve_water_rod_radii(1.2)
+        assert len(radii) == 2
+        assert radii[0] == pytest.approx(0.4)
+        assert radii[1] == pytest.approx(0.8)
+
+    def test_resolve_radii_user_defined_list(self):
+        """Explicit radii list is returned sorted."""
+        sc = SectorConfig(additional_radial_splits_in_moderator=[0.6, 0.3])
+        radii = sc.resolve_water_rod_radii(1.0)
+        assert radii == [0.3, 0.6]
+
+    def test_resolve_radii_user_defined_invalid_too_large(self):
+        """Radius >= inner_radius should raise ValueError."""
+        sc = SectorConfig(additional_radial_splits_in_moderator=[0.5, 1.0])
+        with pytest.raises(ValueError, match="out of range"):
+            sc.resolve_water_rod_radii(1.0)
+
+    def test_resolve_radii_user_defined_invalid_negative(self):
+        """Radius <= 0 should raise ValueError."""
+        sc = SectorConfig(additional_radial_splits_in_moderator=[-0.1, 0.5])
+        with pytest.raises(ValueError, match="out of range"):
+            sc.resolve_water_rod_radii(1.0)
+
+    def test_resolve_radii_invalid_type(self):
+        """Non-int, non-list type should raise TypeError."""
+        sc = SectorConfig(additional_radial_splits_in_moderator="two")
+        with pytest.raises(TypeError, match="must be int or list"):
+            sc.resolve_water_rod_radii(1.0)
+
+    # ----- expanded_sectors_and_angles -----
+
+    def test_expanded_no_extra(self):
+        """No extra radii → sectors and angles unchanged."""
+        sc = SectorConfig(
+            sectors=[16, 16, 16], angles=[0, 0, 0],
+            additional_radial_splits_in_moderator=1,
+        )
+        s, a = sc.expanded_sectors_and_angles(1.0)
+        assert s == [16, 16, 16]
+        assert a == [0, 0, 0]
+
+    def test_expanded_with_int_2(self):
+        """N=2 → 1 extra ring; sectors[0]/angles[0] prepended once."""
+        sc = SectorConfig(
+            sectors=[16, 16, 16], angles=[0, 0, 0],
+            additional_radial_splits_in_moderator=2,
+        )
+        s, a = sc.expanded_sectors_and_angles(1.0)
+        assert s == [16, 16, 16, 16]
+        assert a == [0, 0, 0, 0]
+
+    def test_expanded_with_int_3(self):
+        """N=3 → 2 extra rings; sectors[0]/angles[0] prepended twice."""
+        sc = SectorConfig(
+            sectors=[8, 4, 12], angles=[10.0, 20.0, 30.0],
+            additional_radial_splits_in_moderator=3,
+        )
+        s, a = sc.expanded_sectors_and_angles(1.0)
+        assert s == [8, 8, 8, 4, 12]
+        assert a == [10.0, 10.0, 10.0, 20.0, 30.0]
+
+    def test_expanded_with_user_defined_list(self):
+        """Explicit 2-radii list → 2 extra entries prepended."""
+        sc = SectorConfig(
+            sectors=[16, 16, 16], angles=[0, 0, 0],
+            additional_radial_splits_in_moderator=[0.3, 0.6],
+        )
+        s, a = sc.expanded_sectors_and_angles(1.0)
+        assert s == [16, 16, 16, 16, 16]
+        assert a == [0, 0, 0, 0, 0]
+
+    def test_expanded_empty_sectors(self):
+        """Empty sectors → returned unchanged regardless of splits."""
+        sc = SectorConfig(
+            sectors=[], angles=[],
+            additional_radial_splits_in_moderator=3,
+        )
+        s, a = sc.expanded_sectors_and_angles(1.0)
+        assert s == []
+        assert a == []
+
+    def test_repr_with_additional_splits(self):
+        """repr should mention additional_radial_splits when != 1."""
+        sc = SectorConfig(
+            sectors=[16, 16, 16], angles=[0, 0, 0],
+            additional_radial_splits_in_moderator=3,
+        )
+        r = repr(sc)
+        assert "additional_radial_splits=3" in r
+
+    def test_repr_without_additional_splits(self):
+        """repr should NOT mention additional_radial_splits when == 1."""
+        sc = SectorConfig(
+            sectors=[16, 16, 16], angles=[0, 0, 0],
+            additional_radial_splits_in_moderator=1,
+        )
+        r = repr(sc)
+        assert "additional_radial_splits" not in r
+
 
 # =====================================================================
 #  BoxDiscretizationConfig
@@ -121,39 +261,164 @@ class TestBoxDiscretizationConfig:
         bdc = BoxDiscretizationConfig()
         assert bdc.enabled is False
         assert bdc.corner_splits == (4, 4)
-        assert bdc.side_x_splits is None
-        assert bdc.side_y_splits is None
+        assert bdc.gap_splits is None
 
     def test_custom(self):
         bdc = BoxDiscretizationConfig(
             enabled=True,
             corner_splits=[3, 3],
-            side_x_splits=[10, 1],
-            side_y_splits=[1, 10],
+            gap_splits=[10, 1],
         )
         assert bdc.enabled is True
         assert bdc.corner_splits == (3, 3)
-        assert bdc.side_x_splits == (10, 1)
-        assert bdc.side_y_splits == (1, 10)
+        assert bdc.gap_splits == (10, 1)
 
     def test_resolve_splits_defaults(self):
         bdc = BoxDiscretizationConfig(enabled=True)
-        corner, side_x, side_y = bdc.resolve_splits(n_cols=10, n_rows=10)
+        corner, side_h, side_v = bdc.resolve_splits(n_cols=10, n_rows=10)
         assert corner == (4, 4)
-        assert side_x == (10, 1)
-        assert side_y == (1, 10)
+        assert side_h == (10, 1)
+        assert side_v == (1, 10)
 
     def test_resolve_splits_explicit(self):
         bdc = BoxDiscretizationConfig(
             enabled=True,
             corner_splits=[2, 2],
-            side_x_splits=[5, 2],
-            side_y_splits=[2, 5],
+            gap_splits=[5, 2],
         )
-        corner, side_x, side_y = bdc.resolve_splits(n_cols=10, n_rows=10)
+        corner, side_h, side_v = bdc.resolve_splits(n_cols=10, n_rows=10)
         assert corner == (2, 2)
-        assert side_x == (5, 2)
-        assert side_y == (2, 5)
+        assert side_h == (5, 2)
+        assert side_v == (2, 5)
+
+    def test_deprecated_side_x_splits(self):
+        """side_x_splits should be accepted as deprecated alias."""
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            bdc = BoxDiscretizationConfig(
+                enabled=True,
+                corner_splits=[3, 3],
+                side_x_splits=[10, 1],
+            )
+        assert bdc.gap_splits == (10, 1)
+        assert any(issubclass(warning.category, DeprecationWarning) for warning in w)
+
+
+# =====================================================================
+#  WingSubmeshConfig
+# =====================================================================
+
+class TestWingSubmeshConfig:
+    def test_defaults(self):
+        cfg = WingSubmeshConfig()
+        assert cfg.enabled is True
+        assert cfg.corner_splits is None
+        assert cfg.central_structure_splits is None
+        assert cfg.extend_splits_at_tube_boundaries is True
+        assert cfg.split_tubes_in_half is False
+
+    def test_custom(self):
+        cfg = WingSubmeshConfig(
+            enabled=True,
+            corner_splits=[2, 3],
+            central_structure_splits=[4, 2],
+            extend_splits_at_tube_boundaries=False,
+            split_tubes_in_half=True,
+        )
+        assert cfg.corner_splits == (2, 3)
+        assert cfg.central_structure_splits == (4, 2)
+        assert cfg.extend_splits_at_tube_boundaries is False
+        assert cfg.split_tubes_in_half is True
+
+    def test_from_yaml_true(self):
+        cfg = WingSubmeshConfig.from_yaml(True)
+        assert cfg is not None
+        assert cfg.enabled is True
+        assert cfg.corner_splits is None
+        assert cfg.extend_splits_at_tube_boundaries is True
+
+    def test_from_yaml_false(self):
+        cfg = WingSubmeshConfig.from_yaml(False)
+        assert cfg is None
+
+    def test_from_yaml_dict(self):
+        raw = {
+            "enabled": True,
+            "corner_splits": [2, 2],
+            "central_structure_splits": [3, 2],
+            "extend_splits_at_tube_boundaries": False,
+            "split_tubes_in_half": True,
+        }
+        cfg = WingSubmeshConfig.from_yaml(raw)
+        assert cfg.enabled is True
+        assert cfg.corner_splits == (2, 2)
+        assert cfg.central_structure_splits == (3, 2)
+        assert cfg.extend_splits_at_tube_boundaries is False
+        assert cfg.split_tubes_in_half is True
+
+    def test_from_yaml_dict_defaults(self):
+        raw = {"enabled": True}
+        cfg = WingSubmeshConfig.from_yaml(raw)
+        assert cfg.corner_splits is None
+        assert cfg.central_structure_splits is None
+        assert cfg.extend_splits_at_tube_boundaries is True
+        assert cfg.split_tubes_in_half is False
+
+    def test_from_yaml_invalid_type(self):
+        with pytest.raises(TypeError, match="wing_submesh must be"):
+            WingSubmeshConfig.from_yaml(42)
+
+    def test_repr(self):
+        cfg = WingSubmeshConfig(corner_splits=[2, 2])
+        r = repr(cfg)
+        assert "WingSubmeshConfig" in r
+        assert "(2, 2)" in r
+
+
+# =====================================================================
+#  CrossDiscretizationConfig – wing_submesh integration
+# =====================================================================
+
+class TestCrossDiscretizationConfig:
+    def test_wing_submesh_false(self):
+        cdc = CrossDiscretizationConfig(wing_submesh=False)
+        assert cdc.wing_submesh is None
+
+    def test_wing_submesh_true(self):
+        cdc = CrossDiscretizationConfig(wing_submesh=True)
+        assert isinstance(cdc.wing_submesh, WingSubmeshConfig)
+        assert cdc.wing_submesh.enabled is True
+
+    def test_wing_submesh_dict(self):
+        cdc = CrossDiscretizationConfig(wing_submesh={
+            "enabled": True,
+            "corner_splits": [3, 3],
+            "split_tubes_in_half": True,
+        })
+        assert isinstance(cdc.wing_submesh, WingSubmeshConfig)
+        assert cdc.wing_submesh.corner_splits == (3, 3)
+        assert cdc.wing_submesh.split_tubes_in_half is True
+
+    def test_wing_submesh_config_object(self):
+        ws = WingSubmeshConfig(corner_splits=[1, 1])
+        cdc = CrossDiscretizationConfig(wing_submesh=ws)
+        assert cdc.wing_submesh is ws
+
+    def test_wing_submesh_disabled_config(self):
+        ws = WingSubmeshConfig(enabled=False)
+        cdc = CrossDiscretizationConfig(wing_submesh=ws)
+        assert cdc.wing_submesh is None
+
+    def test_repr_with_wing_submesh(self):
+        cdc = CrossDiscretizationConfig(wing_submesh=True)
+        r = repr(cdc)
+        assert "WingSubmeshConfig" in r
+
+    def test_repr_without_wing_submesh(self):
+        cdc = CrossDiscretizationConfig(wing_submesh=False)
+        r = repr(cdc)
+        assert "wing_submesh=None" in r
 
 
 # =====================================================================
@@ -612,7 +877,7 @@ class TestFromYAML:
                         "box_discretization": {
                             "enabled": True,
                             "corner_splits": [3, 3],
-                            "side_x_splits": [10, 1],
+                            "gap_splits": [10, 1],
                         },
                     },
                 ],
@@ -641,7 +906,7 @@ class TestFromYAML:
             assert moc_step.box_discretization is not None
             assert moc_step.box_discretization.enabled is True
             assert moc_step.box_discretization.corner_splits == (3, 3)
-            assert moc_step.box_discretization.side_x_splits == (10, 1)
+            assert moc_step.box_discretization.gap_splits == (10, 1)
         finally:
             os.unlink(tmp_path)
 
@@ -731,6 +996,137 @@ class TestFromYAML:
             flux = scheme.get_step("FLUX")
             assert flux.water_rod_sectors.splits == (3, 3)
             assert flux.water_rod_sectors.sectors == [1, 1, 8]
+        finally:
+            os.unlink(tmp_path)
+
+    def test_from_yaml_additional_radial_splits_int(self):
+        """Verify additional_radial_splits_in_moderator (int) is parsed
+        into SectorConfig."""
+        scheme_data = {
+            "DRAGON_CALCULATION_SCHEME": {
+                "name": "wr_radial_int_test",
+                "steps": [
+                    {
+                        "name": "FLUX",
+                        "step_type": "flux",
+                        "spatial_method": "MOC",
+                        "tracking": "TSPC",
+                        "radial_scheme": "Santamarina",
+                        "sectorization": {
+                            "enabled": True,
+                            "windmill": True,
+                            "fuel_pins": {
+                                "sectors": [8, 8, 8, 8, 8, 8, 8],
+                                "angles": [22.5] * 7,
+                            },
+                            "water_rods": {
+                                "additional_radial_splits_in_moderator": 3,
+                                "sectors": [16, 16, 16],
+                                "angles": [0, 0, 0],
+                            },
+                        },
+                    },
+                ],
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(scheme_data, f)
+            tmp_path = f.name
+
+        try:
+            scheme = DragonCalculationScheme.from_yaml(tmp_path)
+            flux = scheme.get_step("FLUX")
+            wr = flux.water_rod_sectors
+            assert wr is not None
+            assert wr.additional_radial_splits_in_moderator == 3
+            assert wr.sectors == [16, 16, 16]
+            # Verify expanded sectors: 2 extra + 3 base = 5
+            expanded_s, expanded_a = wr.expanded_sectors_and_angles(1.0)
+            assert len(expanded_s) == 5
+            assert expanded_s == [16, 16, 16, 16, 16]
+        finally:
+            os.unlink(tmp_path)
+
+    def test_from_yaml_additional_radial_splits_list(self):
+        """Verify additional_radial_splits_in_moderator (list) is parsed
+        into SectorConfig."""
+        scheme_data = {
+            "DRAGON_CALCULATION_SCHEME": {
+                "name": "wr_radial_list_test",
+                "steps": [
+                    {
+                        "name": "FLUX",
+                        "step_type": "flux",
+                        "spatial_method": "MOC",
+                        "tracking": "TSPC",
+                        "radial_scheme": "Santamarina",
+                        "sectorization": {
+                            "enabled": True,
+                            "water_rods": {
+                                "additional_radial_splits_in_moderator": [0.3, 0.6],
+                                "sectors": [8, 8, 8],
+                                "angles": [0, 0, 0],
+                            },
+                        },
+                    },
+                ],
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(scheme_data, f)
+            tmp_path = f.name
+
+        try:
+            scheme = DragonCalculationScheme.from_yaml(tmp_path)
+            flux = scheme.get_step("FLUX")
+            wr = flux.water_rod_sectors
+            assert wr.additional_radial_splits_in_moderator == [0.3, 0.6]
+            radii = wr.resolve_water_rod_radii(1.0)
+            assert radii == [0.3, 0.6]
+            # Expanded: 2 extra + 3 base = 5
+            expanded_s, _ = wr.expanded_sectors_and_angles(1.0)
+            assert len(expanded_s) == 5
+        finally:
+            os.unlink(tmp_path)
+
+    def test_from_yaml_additional_radial_splits_default(self):
+        """When additional_radial_splits_in_moderator is absent, default is 1."""
+        scheme_data = {
+            "DRAGON_CALCULATION_SCHEME": {
+                "name": "wr_radial_default_test",
+                "steps": [
+                    {
+                        "name": "FLUX",
+                        "step_type": "flux",
+                        "spatial_method": "IC",
+                        "tracking": "TISO",
+                        "radial_scheme": "Santamarina",
+                        "sectorization": {
+                            "enabled": True,
+                            "water_rods": {
+                                "sectors": [1, 1, 8],
+                                "angles": [0, 0, 22.5],
+                            },
+                        },
+                    },
+                ],
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(scheme_data, f)
+            tmp_path = f.name
+
+        try:
+            scheme = DragonCalculationScheme.from_yaml(tmp_path)
+            flux = scheme.get_step("FLUX")
+            wr = flux.water_rod_sectors
+            assert wr.additional_radial_splits_in_moderator == 1
+            assert wr.resolve_water_rod_radii(1.0) == []
+            s, a = wr.expanded_sectors_and_angles(1.0)
+            assert s == [1, 1, 8]
         finally:
             os.unlink(tmp_path)
 

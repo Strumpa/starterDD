@@ -1,0 +1,53 @@
+# Geometry description for the ATRIUM-10 BWR fuel bundle WITH control cross.
+# Control-cross dimensions extracted from AT10_ASSBLY_CTRL_mc_example Serpent2 reference.
+
+PIN_GEOMETRY:
+  fuel_radius: 0.4435
+  gap_radius: 0.4520
+  clad_radius: 0.5140
+  pin_pitch: 1.295
+  self_shielding_option: "Santamarina"
+
+ASSEMBLY_GEOMETRY:
+  lattice_type: "cartesian"
+  reactor_type: "BWR"
+  lattice_description:
+    - ["ROD1", "ROD2", "ROD3", "ROD5", "ROD6", "ROD5", "ROD4", "ROD3", "ROD2", "ROD1"]
+    - ["ROD2", "ROD4", "ROD7", "ROD6", "ROD7", "ROD6", "ROD6", "ROD7", "ROD4", "ROD2"]
+    - ["ROD3", "ROD7", "ROD6", "ROD6", "ROD6", "ROD7", "ROD6", "ROD6", "ROD7", "ROD3"]
+    - ["ROD5", "ROD6", "ROD6", "ROD6", "ROD6", "ROD6", "ROD7", "ROD6", "ROD5", "ROD4"]
+    - ["ROD6", "ROD7", "ROD6", "ROD6", "WROD", "WROD", "WROD", "ROD4", "ROD6", "ROD4"]
+    - ["ROD5", "ROD6", "ROD7", "ROD6", "WROD", "WROD", "WROD", "ROD3", "ROD7", "ROD4"]
+    - ["ROD4", "ROD6", "ROD6", "ROD7", "WROD", "WROD", "WROD", "ROD4", "ROD4", "ROD4"]
+    - ["ROD3", "ROD7", "ROD6", "ROD6", "ROD4", "ROD3", "ROD4", "ROD4", "ROD8", "ROD3"]
+    - ["ROD2", "ROD4", "ROD7", "ROD5", "ROD6", "ROD7", "ROD4", "ROD8", "ROD4", "ROD2"]
+    - ["ROD1", "ROD2", "ROD3", "ROD4", "ROD4", "ROD4", "ROD4", "ROD3", "ROD2", "ROD1"]
+
+  assembly_pitch: 15.24
+  gap_wide: 0.75
+  channel_box_thickness: 0.17
+  corner_inner_radius_of_curvature: 0.0
+
+  Gd_rod_ids: ["ROD7", "ROD8"]
+  non_fuel_rod_ids: ["WROD"]
+
+WATER_ROD_GEOMETRY:
+  type: "square"
+  inner_side : 3.34
+  outer_side : 3.5
+  centers: [[7.1225, 7.1225]]
+
+# Control cross geometry for ATRIUM-10 (solid-blade type)
+CONTROL_CROSS_GEOMETRY:
+  center: "south-west"
+  number_tubes_per_wing: 18
+  blade_half_span: 12.41654
+  blade_thickness: 0.70432
+  tip_radius: 0.0
+  central_structure_half_span: 2.0066
+  sheath_thickness: 0.0
+  absorber_tube_outer_radius: 0.21082
+  absorber_tube_inner_radius: 0.21082
+  absorber_material: "CTRL_ROD"
+  sheath_material: "CTRL_CROSS"
+  tube_spacing: 0.57833

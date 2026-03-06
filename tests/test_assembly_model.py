@@ -764,7 +764,6 @@ def test_lib_write_to_c2m():
         # Structure checks
         assert "*PROCEDURE MIX_LIB_GE14.c2m" in content
         assert "PARAMETER LIBRARY ::" in content
-        assert "REAL TFUEL := DTFUEL D_TO_R" in content
         assert "MODULE  LIB:" in content
         assert "LIBRARY := LIB: ::" in content
         assert "END: ;" in content
@@ -1158,7 +1157,7 @@ def test_edi_compo_write_to_c2m():
             content = f.read()
 
         # Header checks
-        assert "PARAMETER COMPO FLUX LIBRARY2 TRACK" in content
+        assert "PARAMETER FLUX LIBRARY2 TRACK" in content
         assert "MODULE EDI: COMPO: DELETE: END:" in content
         assert "LINKED_LIST EDIRATES" in content
         assert "SEQ_ASCII _COMPO :: FILE <<name_cpo>>" in content
@@ -1185,7 +1184,6 @@ def test_edi_compo_write_to_c2m():
         assert content.count("EDIRATES := DELETE: EDIRATES") == 4
 
         # Footer
-        assert "IF save_opt 'SAVE' = THEN" in content
         assert "_COMPO := COMPO" in content
         assert "END: ;" in content
 

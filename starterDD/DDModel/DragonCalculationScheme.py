@@ -55,20 +55,378 @@ class SectorConfig:
         resulting sub-face is performed by geometric containment.
         ``None`` means no grid sub-meshing (the cell keeps its base
         3-region technological geometry).
+    additional_radial_splits_in_moderator : int or list[float]
+        Controls radial subdivision of the innermost moderator region
+        of a **circular** water rod (the region with ``r < inner_radius``).
+
+        * ``int`` **N** (default ``1``): N = 1 means no extra splits.
+          N ≥ 2 produces N − 1 equally-spaced intermediate radii at
+          ``inner_radius × k / N`` for ``k = 1 … N − 1``.
+        * ``list[float]``: explicit radii (must all be > 0 and
+          < ``inner_radius``; validated at geometry-build time).
+
+        When extra rings are added, ``sectors[0]`` and ``angles[0]``
+        are automatically replicated for every new sub-ring so that
+        the user only needs to specify sectors/angles for the **base**
+        regions (moderator, clad, coolant).
     """
 
     def __init__(self, sectors=None, angles=None, windmill=False,
-                 splits=None):
+                 splits=None, additional_radial_splits_in_moderator=1):
         self.sectors = sectors or []
         self.angles = angles or []
         self.windmill = windmill
         self.splits = tuple(splits) if splits else None
+        self.additional_radial_splits_in_moderator = (
+            additional_radial_splits_in_moderator
+        )
+
+    # ------------------------------------------------------------------
+    # Radial-split helpers (circular water rods)
+    # ------------------------------------------------------------------
+
+    def resolve_water_rod_radii(self, inner_radius):
+        """
+        Compute intermediate radii for moderator sub-division.
+
+        Parameters
+        ----------
+        inner_radius : float
+            The base inner radius of the circular water rod (boundary
+            between moderator and cladding).
+
+        Returns
+        -------
+        list[float]
+            Sorted list of intermediate radii (all < ``inner_radius``).
+            Empty list when no additional splits are requested.
+
+        Raises
+        ------
+        ValueError
+            If user-supplied radii are outside ``(0, inner_radius)``.
+        """
+        spec = self.additional_radial_splits_in_moderator
+
+        if spec is None:
+            return []
+
+        # Integer mode
+        if isinstance(spec, int):
+            if spec <= 1:
+                return []
+            return [inner_radius * k / spec for k in range(1, spec)]
+
+        # List-of-radii mode
+        if isinstance(spec, (list, tuple)):
+            if len(spec) == 0:
+                return []
+            radii = sorted(float(r) for r in spec)
+            for r in radii:
+                if r <= 0.0 or r >= inner_radius:
+                    raise ValueError(
+                        f"additional_radial_splits_in_moderator: radius "
+                        f"{r} is out of range (0, {inner_radius})."
+                    )
+            return radii
+
+        raise TypeError(
+            f"additional_radial_splits_in_moderator must be int or "
+            f"list[float], got {type(spec).__name__}"
+        )
+
+    def expanded_sectors_and_angles(self, inner_radius):
+        """
+        Return ``(sectors, angles)`` lists expanded to account for
+        additional moderator sub-rings.
+
+        The first entry in ``self.sectors`` / ``self.angles`` corresponds
+        to the original moderator region.  For each extra sub-ring the
+        same value is prepended so that the resulting lists match the
+        total number of radial regions in the geometry.
+
+        Parameters
+        ----------
+        inner_radius : float
+            Base inner radius (used to compute the number of extra rings).
+
+        Returns
+        -------
+        (list[int], list[float])
+            Expanded sectors and angles lists.
+        """
+        extra_radii = self.resolve_water_rod_radii(inner_radius)
+        n_extra = len(extra_radii)
+
+        if n_extra == 0 or len(self.sectors) == 0:
+            return list(self.sectors), list(self.angles)
+
+        base_sector = self.sectors[0]
+        base_angle = self.angles[0] if self.angles else 0.0
+
+        expanded_s = [base_sector] * n_extra + list(self.sectors)
+        expanded_a = [base_angle] * n_extra + list(self.angles)
+
+        return expanded_s, expanded_a
 
     def __repr__(self):
         if self.splits is not None:
             return f"SectorConfig(splits={self.splits})"
+        extra = ""
+        spec = self.additional_radial_splits_in_moderator
+        if spec is not None and spec != 1:
+            extra = f", additional_radial_splits={spec}"
         return (f"SectorConfig(sectors={self.sectors}, "
-                f"angles={self.angles}, windmill={self.windmill})")
+                f"angles={self.angles}, windmill={self.windmill}{extra})")
+
+
+# ---------------------------------------------------------------------------
+# WingSubmeshConfig – sub-meshing options for the control cross wings
+# ---------------------------------------------------------------------------
+
+class WingSubmeshConfig:
+    """
+    Configuration for sub-meshing the control cross wing regions.
+
+    Each wing arm is decomposed into three axial zones (perpendicular to
+    the arm axis):
+
+    1. **Corner zone** — the ``bt/2 × bt/2`` square where both arms
+       overlap at the cross centre.
+    2. **Central-structure-to-absorber zone** — the span from the corner
+       zone edge to the first absorber tube boundary.
+    3. **Absorber-pin zone** — the span containing the absorber tubes
+       up to the wing tip.
+
+    Additional options control whether tube bounding surfaces are
+    extended to the sheath border and whether tubes are bisected along
+    the arm axis.
+
+    Attributes
+    ----------
+    enabled : bool
+        Whether wing sub-meshing is active.
+    corner_splits : tuple[int, int] or None
+        ``(n_along_arm, n_across_arm)`` grid for the corner zone.
+        ``None`` → ``(1, 1)`` (no sub-division).
+    central_structure_splits : tuple[int, int] or None
+        ``(n_along_arm, n_across_arm)`` grid for the CS-to-absorber zone.
+        ``None`` → ``(1, 1)``.
+    extend_splits_at_tube_boundaries : bool
+        When ``True``, generate ``bt``-wide splitting faces at each
+        absorber tube centre so that tube bounding surfaces extend to
+        the sheath border.  Default ``True``.
+    split_tubes_in_half : bool
+        When ``True``, add a bisecting split at each tube centre along
+        the arm axis.  Default ``False``.
+    """
+
+    # Default values used when ``wing_submesh: true`` (bool shorthand)
+    _DEFAULTS = dict(
+        enabled=True,
+        corner_splits=None,
+        central_structure_splits=None,
+        extend_splits_at_tube_boundaries=True,
+        split_tubes_in_half=False,
+    )
+
+    def __init__(self, enabled=True, corner_splits=None,
+                 central_structure_splits=None,
+                 extend_splits_at_tube_boundaries=True,
+                 split_tubes_in_half=False):
+        self.enabled = enabled
+        self.corner_splits = (
+            tuple(corner_splits) if corner_splits else None
+        )
+        self.central_structure_splits = (
+            tuple(central_structure_splits)
+            if central_structure_splits else None
+        )
+        self.extend_splits_at_tube_boundaries = extend_splits_at_tube_boundaries
+        self.split_tubes_in_half = split_tubes_in_half
+
+    @classmethod
+    def from_yaml(cls, raw):
+        """
+        Parse a ``wing_submesh`` YAML value.
+
+        Accepts:
+
+        - ``bool``: ``True`` → default config, ``False`` → disabled.
+        - ``dict``: explicit configuration keys.
+
+        Parameters
+        ----------
+        raw : bool or dict
+            The raw YAML value.
+
+        Returns
+        -------
+        WingSubmeshConfig or None
+            ``None`` when disabled.
+        """
+        if isinstance(raw, bool):
+            return cls(**cls._DEFAULTS) if raw else None
+        if isinstance(raw, dict):
+            return cls(
+                enabled=raw.get("enabled", True),
+                corner_splits=raw.get("corner_splits", None),
+                central_structure_splits=raw.get(
+                    "central_structure_splits", None
+                ),
+                extend_splits_at_tube_boundaries=raw.get(
+                    "extend_splits_at_tube_boundaries", True
+                ),
+                split_tubes_in_half=raw.get("split_tubes_in_half", False),
+            )
+        raise TypeError(
+            f"wing_submesh must be a bool or dict, got {type(raw).__name__}"
+        )
+
+    def __repr__(self):
+        return (
+            f"WingSubmeshConfig(enabled={self.enabled}, "
+            f"corner_splits={self.corner_splits}, "
+            f"central_structure_splits={self.central_structure_splits}, "
+            f"extend_tube_boundaries={self.extend_splits_at_tube_boundaries}, "
+            f"split_tubes_in_half={self.split_tubes_in_half})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# CrossDiscretizationConfig – sub-meshing options for cross-affected regions
+# ---------------------------------------------------------------------------
+
+class CrossDiscretizationConfig:
+    """
+    Sub-meshing options for the peripheral regions affected by a control
+    cross device, used within ``BoxDiscretizationConfig``.
+
+    All split fields are optional.  When ``None``, splits are computed
+    automatically from the ``gap_splits`` density applied to the actual
+    dimensions of each region.
+
+    Attributes
+    ----------
+    narrow_gap_splits : tuple[int, int] or None
+        ``(n_parallel, n_perpendicular)`` grid for the narrow moderator
+        gap between the blade edge and the pin-lattice footprint edge.
+        Orientation follows the same convention as ``gap_splits``:
+        ``n_parallel`` is along the lattice edge, ``n_perpendicular``
+        is across the gap width.  Auto-permuted for horizontal vs
+        vertical affected sides.
+    cross_corner_splits : tuple[int, int] or None
+        ``(nx, ny)`` grid for the small gap rectangle between the two
+        cross arms and the lattice corner.
+    stub_splits : tuple[int, int] or None
+        ``(n_parallel, n_perpendicular)`` grid for the moderator stubs
+        that sit in the blade-thickness zone beyond the arm tip extent.
+        Auto-permuted for horizontal vs vertical stubs.
+    wing_submesh : WingSubmeshConfig or None
+        Configuration for sub-meshing the control cross wing regions.
+        ``None`` means no wing sub-meshing.  Accepts ``bool`` or
+        ``WingSubmeshConfig`` in the constructor for convenience.
+    """
+
+    def __init__(self, narrow_gap_splits=None, cross_corner_splits=None,
+                 stub_splits=None, wing_submesh=False):
+        self.narrow_gap_splits = (
+            tuple(narrow_gap_splits) if narrow_gap_splits else None
+        )
+        self.cross_corner_splits = (
+            tuple(cross_corner_splits) if cross_corner_splits else None
+        )
+        self.stub_splits = (
+            tuple(stub_splits) if stub_splits else None
+        )
+        # Normalise wing_submesh: accept bool, dict, WingSubmeshConfig or None
+        if isinstance(wing_submesh, WingSubmeshConfig):
+            self.wing_submesh = wing_submesh if wing_submesh.enabled else None
+        elif isinstance(wing_submesh, (bool, dict)):
+            self.wing_submesh = WingSubmeshConfig.from_yaml(wing_submesh)
+        else:
+            self.wing_submesh = wing_submesh  # None passthrough
+
+    def resolve(self, gap_splits, lattice_pitch, wide_gap_width,
+                narrow_gap_width, cross_corner_dims, stub_dims):
+        """
+        Return resolved ``(narrow_gap, cross_corner, stub)`` split tuples,
+        auto-computing from mesh density when a field is ``None``.
+
+        The reference density is derived from ``gap_splits`` applied to a
+        strip of size ``lattice_pitch × wide_gap_width``:
+
+        - ``density_parallel  = gap_splits[0] / lattice_pitch``
+        - ``density_perpendicular = gap_splits[1] / wide_gap_width``
+
+        Parameters
+        ----------
+        gap_splits : tuple[int, int]
+            ``(n_parallel, n_perpendicular)`` for unaffected gap strips.
+        lattice_pitch : float
+            Parallel extent of an unaffected gap strip (lattice edge).
+        wide_gap_width : float
+            Perpendicular extent of an unaffected gap strip.
+        narrow_gap_width : float
+            Perpendicular extent of the narrow gap (blade edge to
+            lattice edge).
+        cross_corner_dims : tuple[float, float]
+            ``(width, height)`` of the cross-corner gap rectangle.
+        stub_dims : tuple[float, float]
+            ``(parallel_length, perpendicular_length)`` of a typical
+            stub region.
+
+        Returns
+        -------
+        narrow_gap : tuple[int, int]
+            ``(n_parallel, n_perpendicular)`` for the narrow gap.
+        cross_corner : tuple[int, int]
+            ``(nx, ny)`` for the cross corner rectangle.
+        stub : tuple[int, int]
+            ``(n_parallel, n_perpendicular)`` for stub regions.
+        """
+        d_par = gap_splits[0] / lattice_pitch if lattice_pitch > 0 else 1.0
+        d_perp = (
+            gap_splits[1] / wide_gap_width if wide_gap_width > 0 else 1.0
+        )
+
+        # Narrow gap
+        if self.narrow_gap_splits is not None:
+            narrow_gap = self.narrow_gap_splits
+        else:
+            narrow_gap = (
+                max(1, round(d_par * lattice_pitch)),
+                max(1, round(d_perp * narrow_gap_width)),
+            )
+
+        # Cross corner
+        if self.cross_corner_splits is not None:
+            cross_corner = self.cross_corner_splits
+        else:
+            cross_corner = (
+                max(1, round(d_perp * cross_corner_dims[0])),
+                max(1, round(d_perp * cross_corner_dims[1])),
+            )
+
+        # Stubs
+        if self.stub_splits is not None:
+            stub = self.stub_splits
+        else:
+            stub = (
+                max(1, round(d_par * stub_dims[0])),
+                max(1, round(d_perp * stub_dims[1])),
+            )
+
+        return narrow_gap, cross_corner, stub
+
+    def __repr__(self):
+        return (
+            f"CrossDiscretizationConfig("
+            f"narrow_gap_splits={self.narrow_gap_splits}, "
+            f"cross_corner_splits={self.cross_corner_splits}, "
+            f"stub_splits={self.stub_splits}, "
+            f"wing_submesh={self.wing_submesh!r})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +443,16 @@ class BoxDiscretizationConfig:
     independently sub-meshed:
 
     * **corner_splits** ``(nx, ny)`` — grid size for each corner region.
-    * **side_x_splits** ``(nx, ny)`` — grid size for horizontal (top /
-      bottom) side strips.  ``nx`` defaults to the number of pin columns.
-    * **side_y_splits** ``(nx, ny)`` — grid size for vertical (left /
-      right) side strips.  ``ny`` defaults to the number of pin rows.
+    * **gap_splits** ``(n_parallel, n_perpendicular)`` — grid size for
+      side strips.  ``n_parallel`` is along the lattice edge,
+      ``n_perpendicular`` is across the gap width.  The tuple is
+      automatically permuted for horizontal vs vertical strips:
+      horizontal strips use ``(n_par, n_perp)`` as ``(nx, ny)``,
+      vertical strips use ``(n_perp, n_par)``.
+
+    When a control cross is present, ``cross_discretization`` provides
+    additional split parameters for the affected regions (narrow gap,
+    cross corner, stubs).
 
     Attributes
     ----------
@@ -96,23 +460,47 @@ class BoxDiscretizationConfig:
         Whether box discretization is active.
     corner_splits : tuple[int, int]
         ``(nx, ny)`` grid subdivisions for each corner region.
-    side_x_splits : tuple[int, int]
-        ``(nx, ny)`` grid subdivisions for horizontal side strips.
-    side_y_splits : tuple[int, int]
-        ``(nx, ny)`` grid subdivisions for vertical side strips.
+    gap_splits : tuple[int, int] or None
+        ``(n_parallel, n_perpendicular)`` grid subdivisions for
+        gap side strips.  Defaults to ``(n_cols, 1)`` when ``None``.
+    cross_discretization : CrossDiscretizationConfig or None
+        Optional sub-meshing config for control-cross-affected regions.
     """
 
     def __init__(self, enabled=False, corner_splits=None,
+                 gap_splits=None, cross_discretization=None,
+                 # deprecated aliases kept for backward compatibility
                  side_x_splits=None, side_y_splits=None):
+        import warnings
+
         self.enabled = enabled
         self.corner_splits = tuple(corner_splits) if corner_splits else (4, 4)
-        self.side_x_splits = tuple(side_x_splits) if side_x_splits else None
-        self.side_y_splits = tuple(side_y_splits) if side_y_splits else None
+        self.cross_discretization = cross_discretization
+
+        # Handle deprecated aliases
+        if gap_splits is not None:
+            self.gap_splits = tuple(gap_splits)
+        elif side_x_splits is not None:
+            warnings.warn(
+                "'side_x_splits' / 'side_y_splits' are deprecated; "
+                "use 'gap_splits' instead.  'side_x_splits' is being "
+                "used as gap_splits = (n_parallel, n_perpendicular).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.gap_splits = tuple(side_x_splits)
+        else:
+            self.gap_splits = None  # will be defaulted in resolve_splits
 
     def resolve_splits(self, n_cols, n_rows):
         """
-        Return the resolved ``(corner, side_x, side_y)`` split tuples,
+        Return the resolved ``(corner, side_h, side_v)`` split tuples,
         filling in lattice-dimension defaults for ``None`` values.
+
+        ``gap_splits`` is auto-permuted:
+
+        - Horizontal strips (top / bottom): ``(n_par, n_perp)``
+        - Vertical strips (left / right): ``(n_perp, n_par)``
 
         Parameters
         ----------
@@ -124,21 +512,22 @@ class BoxDiscretizationConfig:
         Returns
         -------
         corner : tuple[int, int]
-        side_x : tuple[int, int]
-            Splits for top/bottom strips (default ``(n_cols, 1)``).
-        side_y : tuple[int, int]
-            Splits for left/right strips (default ``(1, n_rows)``).
+        side_h : tuple[int, int]
+            Splits for horizontal (top/bottom) strips.
+        side_v : tuple[int, int]
+            Splits for vertical (left/right) strips (permuted).
         """
         corner = self.corner_splits
-        side_x = self.side_x_splits if self.side_x_splits else (n_cols, 1)
-        side_y = self.side_y_splits if self.side_y_splits else (1, n_rows)
-        return corner, side_x, side_y
+        gap = self.gap_splits if self.gap_splits else (n_cols, 1)
+        side_h = gap                   # (n_parallel, n_perpendicular)
+        side_v = (gap[1], gap[0])      # permuted for vertical strips
+        return corner, side_h, side_v
 
     def __repr__(self):
         return (f"BoxDiscretizationConfig(enabled={self.enabled}, "
                 f"corner_splits={self.corner_splits}, "
-                f"side_x_splits={self.side_x_splits}, "
-                f"side_y_splits={self.side_y_splits})")
+                f"gap_splits={self.gap_splits}, "
+                f"cross_discretization={self.cross_discretization})")
 
 
 # ---------------------------------------------------------------------------
@@ -578,14 +967,30 @@ class DragonCalculationScheme:
                       # For circular water rods (azimuthal sectorization):
                       sectors: [(list of sector counts per ring for water rods, e.g. [1, 1, 8] for 1 moderator, 1 clad, and subdivided coolant)]
                       angles:  [(list of angles for water rods, e.g. [0, 0, 22.5] for 22.5° offset on coolant only)]
+                      additional_radial_splits_in_moderator: <int or list[float]>
+                      # int N (default 1): N=1 no extra splits; N>=2 produces N-1 evenly spaced radii in the moderator region (r < inner_radius).
+                      # list[float]: explicit user-defined radii (must be > 0 and < inner_radius).
+                      # When extra rings are added, sectors[0]/angles[0] are automatically replicated for each new sub-ring.
                       # For square water rods (Cartesian grid sub-meshing):
                       splits: [nx, ny]  # grid subdivisions applied to the whole bounding box; material is reassigned by geometric containment
                 
                   box_discretization: 
                     enabled: boolean flag to enable sub-meshing of the assembly box peripheral regions into a grid of sub-faces (for MOC tracking)
                     corner_splits: [nx, ny]  # grid size for corner regions, default [4, 4]
-                    side_x_splits: [nx, ny]  # grid size to submesh inter assembly moderator, horizontal sides : [10, 1] by default
-                    side_y_splits: [8, 30]   # grid size to submesh inter assembly moderator, vertical sides : [1, 10] by default
+                    gap_splits: [n_parallel, n_perpendicular]  # grid size for side strips, auto-permuted for H/V
+                    # Deprecated aliases (still accepted):
+                    # side_x_splits / side_y_splits
+                    cross_discretization:  # optional, for controlled assemblies
+                      narrow_gap_splits: [n_par, n_perp]  # null = auto from gap_splits density
+                      cross_corner_splits: [nx, ny]       # null = auto
+                      stub_splits: [n_par, n_perp]        # null = auto
+                      wing_submesh: false  # or true (defaults) or dict:
+                      #   wing_submesh:
+                      #     enabled: true
+                      #     corner_splits: [n_along, n_across]  # null = (1,1)
+                      #     central_structure_splits: [n_along, n_across]  # null = (1,1)
+                      #     extend_splits_at_tube_boundaries: true
+                      #     split_tubes_in_half: false
         
         Note : the sectorization config matches sectorization options in glow's ``Cell.sectorize()`` method.
                       
@@ -642,6 +1047,9 @@ class DragonCalculationScheme:
                 wr_splits = wr.get("splits", None)
                 wr_sectors = wr.get("sectors", [])
                 wr_angles = wr.get("angles", [])
+                wr_additional = wr.get(
+                    "additional_radial_splits_in_moderator", 1
+                )
 
                 # Warn if both circular (sectors/angles) and square
                 # (splits) keys are present — user should use one or
@@ -662,6 +1070,7 @@ class DragonCalculationScheme:
                     angles=wr_angles,
                     windmill=sect.get("windmill", False),
                     splits=wr_splits,
+                    additional_radial_splits_in_moderator=wr_additional,
                 )
 
         # --- Radial overrides ---
@@ -677,9 +1086,24 @@ class DragonCalculationScheme:
         box_disc_raw = d.get("box_discretization", {})
         box_disc = None
         if box_disc_raw.get("enabled", False):
+            # Parse optional cross_discretization sub-block
+            cross_disc = None
+            cross_raw = box_disc_raw.get("cross_discretization", {})
+            if cross_raw:
+                wing_raw = cross_raw.get("wing_submesh", False)
+                cross_disc = CrossDiscretizationConfig(
+                    narrow_gap_splits=cross_raw.get("narrow_gap_splits"),
+                    cross_corner_splits=cross_raw.get("cross_corner_splits"),
+                    stub_splits=cross_raw.get("stub_splits"),
+                    wing_submesh=wing_raw,
+                )
+
             box_disc = BoxDiscretizationConfig(
                 enabled=True,
                 corner_splits=box_disc_raw.get("corner_splits", None),
+                gap_splits=box_disc_raw.get("gap_splits", None),
+                cross_discretization=cross_disc,
+                # deprecated aliases (backward compatibility)
                 side_x_splits=box_disc_raw.get("side_x_splits", None),
                 side_y_splits=box_disc_raw.get("side_y_splits", None),
             )
@@ -832,8 +1256,7 @@ class DragonCalculationScheme:
             box_discretization=BoxDiscretizationConfig(
                 enabled=True,
                 corner_splits=(8, 8),
-                side_x_splits=(30, 8),
-                side_y_splits=(30, 8),
+                gap_splits=(30, 8),
             ),
         ))
 
@@ -911,8 +1334,7 @@ class DragonCalculationScheme:
             box_discretization=BoxDiscretizationConfig(
                 enabled=True,
                 corner_splits=(8, 8),
-                side_x_splits=(30, 8),
-                side_y_splits=(30, 8),
+                gap_splits=(30, 8),
             ),
         ))
 

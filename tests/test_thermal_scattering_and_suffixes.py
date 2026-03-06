@@ -18,7 +18,7 @@ from starterDD.MaterialProperties.material_mixture import (
     DEFAULT_THERMAL_SCATTERING,
 )
 
-from starterDD.InterfaceToDD.serpent2_cards import (
+from starterDD.InterfaceToDD.Serpent2_exports import (
     get_xs_suffix,
     get_therm_suffix,
     get_therm_interpolation_suffixes,
@@ -131,8 +131,8 @@ class TestThermSuffix:
     def test_interpolation_between_points(self):
         """559 K is between 500 (.04t) and 600 (.05t)."""
         lo, hi = get_therm_interpolation_suffixes(559.0, evaluation="endfb8r1")
-        assert lo == '.05t'
-        assert hi == '.06t'
+        assert lo == '.04t'
+        assert hi == '.05t'
 
     def test_above_all_points(self):
         """Above all tabulated → lo is the highest, hi is None."""
@@ -141,7 +141,7 @@ class TestThermSuffix:
 
     def test_get_therm_suffix_returns_inferior(self):
         suffix = get_therm_suffix(559.0, evaluation="endfb8r1")
-        assert suffix == '.05t'
+        assert suffix == '.04t'
 
 
 # ---------------------------------------------------------------------------
@@ -175,8 +175,8 @@ class TestS2ThermalScattering:
             "lwtr", 559.0, evaluation="endfb8r1"
         )
         assert ts.interpolation_temperature == 559.0
-        assert ts.lo_library == "lwtr.05t"
-        assert ts.hi_library == "lwtr.06t"
+        assert ts.lo_library == "lwtr.04t"
+        assert ts.hi_library == "lwtr.05t"
 
 
 # ---------------------------------------------------------------------------

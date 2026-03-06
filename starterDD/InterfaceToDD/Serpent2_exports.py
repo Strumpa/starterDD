@@ -171,11 +171,7 @@ EVALUATION_THERM_SUFFIX_MAPS = {
         400.0:  '.02t',
         450.0:  '.03t',
         500.0:  '.04t',
-        550.0:  '.05t',
-        600.0:  '.06t',
-        650.0:  '.07t',
-        800.0:  '.08t',
-        1000.0: '.09t',
+        600.0:  '.05t',
     },
     "jeff311": {
         294.0:  '.00t',
@@ -425,10 +421,19 @@ class S2_Material:
             composition: Dict of {zaid_string: number_density} pairs.
                         zaid_string should be like '92235' (without suffix).
                         number_density in atoms/barn-cm.
+                        When ``density_type='mass'`` the values are **negative
+                        mass fractions** (Serpent2 convention).
             temperature: Temperature in Kelvin.
             is_burnable: Whether this material is depletable.
-            density_type: 'sum' for sum of isotopic densities, 'total' for total given density.
-            total_density: Total atom density (used when density_type='total').
+            density_type: ``'sum'`` for sum of isotopic densities,
+                          ``'total'`` for a given positive atom density,
+                          ``'mass'`` for negative mass density with negative
+                          mass-fraction isotope entries (Serpent2 convention
+                          for structural materials like SS304).
+            total_density: Total atom density (used when density_type='total')
+                           or **positive** mass density in g/cm³ (used when
+                           density_type='mass'; written as negative in the
+                           Serpent2 card).
             rgb: Optional RGB color tuple for plotting.
             moder: Optional tuple (thermal_name, nuclide_zaid) for thermal scattering.
             xs_suffix: Override for cross-section temperature suffix.
@@ -542,8 +547,75 @@ class S2_Material:
             moder=moder,
         )
     
+    @classmethod
+    def from_mass_fractions(cls, name: str, mass_fractions: dict,
+                            mass_density: float, temperature: float,
+                            xs_suffix: str = None, rgb: tuple = None,
+                            moder: tuple = None):
+        """Create a material using mass-density + mass-fraction format.
+
+        This produces a Serpent2 ``mat`` card with a **negative** density
+        (negative mass density in g/cm³) and **negative** isotope entries
+        (mass fractions), following the Serpent2 convention for
+        structural materials (e.g. SS304).
+
+        Example Serpent2 output::
+
+            mat ctrl_cross -7.9000 tmp 559.0
+                14028.05c -0.0047049795
+                ...
+
+        Args:
+            name: Material name.
+            mass_fractions: Dict ``{zaid_str_or_isotope_name: mass_fraction}``.
+                           Mass fractions must be **positive** (the negative
+                           sign is applied automatically).
+            mass_density: Mass density in g/cm³ (**positive** value; the
+                          negative sign is applied in the card output).
+            temperature: Temperature in Kelvin.
+            xs_suffix: Cross-section suffix override.
+            rgb: RGB color tuple.
+            moder: Thermal scattering tuple ``(therm_name, nuclide_zaid)``.
+
+        Returns:
+            S2_Material instance with ``density_type='mass'``.
+        """
+        composition = {}
+        for iso, frac in mass_fractions.items():
+            if re.match(r'^\d+$', iso):
+                zaid = iso
+            else:
+                try:
+                    zaid = isotope_name_to_zaid_str(iso)
+                except ValueError:
+                    print(f"Warning: Could not convert isotope '{iso}' to ZAID, skipping.")
+                    continue
+            # Store as negative mass fraction (Serpent2 convention)
+            composition[zaid] = -abs(frac)
+
+        mat = cls(
+            name=name,
+            composition=composition,
+            temperature=temperature,
+            is_burnable=False,
+            density_type='mass',
+            total_density=abs(mass_density),
+            xs_suffix=xs_suffix,
+            rgb=rgb,
+            moder=moder,
+        )
+        return mat
+    
     def format_card(self) -> str:
         """Format the complete Serpent2 `mat` card as a string.
+        
+        Supports three density modes:
+
+        * ``'sum'`` – ``mat NAME sum tmp T`` with positive number densities.
+        * ``'total'`` – ``mat NAME <N_tot> tmp T`` with positive number
+          densities.
+        * ``'mass'`` – ``mat NAME -<rho> tmp T`` with negative mass
+          fractions (Serpent2 convention for mass-density materials).
         
         Returns:
             Formatted mat card string.
@@ -552,6 +624,8 @@ class S2_Material:
         
         if self.density_type == 'sum':
             parts.append("sum")
+        elif self.density_type == 'mass' and self.total_density is not None:
+            parts.append(f"-{abs(self.total_density):.4f}")
         elif self.total_density is not None:
             parts.append(f"{self.total_density:.8E}")
         
@@ -570,8 +644,13 @@ class S2_Material:
         
         lines = [header]
         suffix = self.xs_suffix
-        for zaid, density in self.composition.items():
-            lines.append(f"    {zaid}{suffix} {density:.6E}")
+        if self.density_type == 'mass':
+            # Mass-fraction mode: values stored as negative mass fractions
+            for zaid, frac in self.composition.items():
+                lines.append(f"    {zaid}{suffix} {frac}")
+        else:
+            for zaid, density in self.composition.items():
+                lines.append(f"    {zaid}{suffix} {density:.6E}")
         
         return "\n".join(lines)
     
@@ -899,7 +978,8 @@ class S2_ChannelGeometry:
                  outer_water_material: str = "cool",
                  surf_id_start: int = 1000,
                  cell_id_start: int = 500,
-                 water_rods: list = None):
+                 water_rods: list = None,
+                 control_cross: 'S2_ControlCrossGeometry' = None):
         """
         Args:
             center_x, center_y: Center of the channel box (same as lattice center).
@@ -920,6 +1000,10 @@ class S2_ChannelGeometry:
                             "moderator_material": "cool",
                             "wall_material": "clad", "rod_id": "WR_1"}, ...]``
                         or ``{"type": "square", ...}`` for square moderator boxes.
+            control_cross: Optional ``S2_ControlCrossGeometry`` instance.
+                          When provided, the moderator gap cell is modified to
+                          exclude the control cross surfaces via Serpent2
+                          ``#surf_id`` complement operators.
         """
         self.cx = center_x
         self.cy = center_y
@@ -935,6 +1019,7 @@ class S2_ChannelGeometry:
         self.sid = surf_id_start
         self.cid = cell_id_start
         self.water_rods = water_rods or []
+        self.control_cross = control_cross
     
     @classmethod
     def from_assembly_model(cls, assembly_model, lattice_universe_name: str = "10",
@@ -989,8 +1074,13 @@ class S2_ChannelGeometry:
         else:
             outer_hw = inner_hw + 0.2  # default 2mm thickness
         
-        # Outer corner radius = inner corner radius + wall thickness
-        cr_outer = cr_inner + (thickness if thickness is not None else 0.0)
+        # Outer corner radius = inner corner radius + wall thickness.
+        # Only apply rounding when the inner surface has rounded corners;
+        # sharp inner corners (cr_inner == 0) → sharp outer corners.
+        if cr_inner > 0:
+            cr_outer = cr_inner + (thickness if thickness is not None else 0.0)
+        else:
+            cr_outer = 0.0
         
         assembly_hp = getattr(am, 'assembly_pitch', None)
         if assembly_hp is None:
@@ -1202,10 +1292,24 @@ class S2_ChannelGeometry:
         # Channel box wall
         lines.append(f"cell {c_box}  0  {self.box_mat}  {s_inner} -{s_outer}")
         # Water gap between channel box and assembly boundary
-        lines.append(f"cell {c_gap}  0  {self.outer_water_mat}  "
-                    f"{s_outer} -{s_bndry}")
+        # If a control cross is present, exclude its cells with #cell_id
+        # complement operators.  In Serpent2 ``#N`` refers to the
+        # complement of **cell** N (not surface N).
+        if self.control_cross is not None:
+            cc_compl = self.control_cross.get_complement_cell_ids()
+            cc_excl = " ".join(f"#{cid}" for cid in cc_compl)
+            lines.append(f"cell {c_gap}  0  {self.outer_water_mat}  "
+                        f"{s_outer} -{s_bndry} {cc_excl}")
+        else:
+            lines.append(f"cell {c_gap}  0  {self.outer_water_mat}  "
+                        f"{s_outer} -{s_bndry}")
         # Outside world
         lines.append(f"cell {c_outside}  0  outside  {s_bndry}")
+        
+        # Control cross geometry cards (surfaces, lattices, cells)
+        if self.control_cross is not None:
+            lines.append("")
+            lines.append(self.control_cross.format_cards())
         
         return "\n".join(lines)
     
@@ -1824,7 +1928,7 @@ class S2_Settings:
         Args:
             base_path: Base directory for the nuclear data files.
         """
-        self.acelib = f"{base_path}/endfb8r1_pynjoy2012_KERMA.xsdata"
+        self.acelib = f"{base_path}/endfb8r1.xsdata"
         self.declib = f"{base_path}/endfb8r1.dec"
         self.nfylib = f"{base_path}/endfb8r1.nfy"
     
@@ -1834,7 +1938,7 @@ class S2_Settings:
         Args:
             base_path: Base directory for the nuclear data files.
         """
-        self.acelib = f"{base_path}/JEFF-311_pynjoy2016.xsdata"
+        self.acelib = f"{base_path}/JEFF-311.xsdata"
         self.declib = f"{base_path}/sss_jeff311.dec"
         self.nfylib = f"{base_path}/sss_jeff311.nfy"
     
@@ -1932,6 +2036,1231 @@ class S2_Settings:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  S2_ControlCrossGeometry
+# ═══════════════════════════════════════════════════════════════
+
+class S2_ControlCrossGeometry:
+    """Generates Serpent2 geometry cards for a BWR control cross (cruciform
+    control blade) sitting in the inter-assembly water gap.
+
+    The control cross consists of two perpendicular blades (wings),
+    each containing a row of absorber tubes embedded in a metallic
+    sheath/structural material.  The cross is centred on one assembly
+    corner (north-west, north-east, south-west, south-east).
+
+    Two absorber-tube designs are supported:
+
+    * **Solid rod** (AT10-type): ``absorber_tube_inner_radius ==
+      absorber_tube_outer_radius``, ``sheath_thickness == 0``.
+      Produces a 2-zone Serpent2 pin (absorber | sheath fill).
+    * **Annular tube** (GE14-type): distinct inner/outer radii with
+      ``sheath_thickness > 0``.  Produces a 3-zone pin (absorber |
+      tube clad | coolant in blade cavity).
+
+    Assembly coordinate convention (x+/y+ quadrant):
+
+    * Lower-left assembly corner at (0, 0).
+    * Assembly centre at ``(P/2, P/2)`` where ``P = assembly_pitch``.
+    * Assembly boundary at ``x, y = 0`` and ``x, y = P``.
+    * Control cross corner at the designated corner of the boundary.
+
+    Serpent2 entities emitted:
+
+    * ``pin`` – absorber pin universe.
+    * ``surf`` – rectangular (``rect``) or rounded (``sqc``) surfaces
+      for blade wing regions.
+    * ``lat`` – type-11 (3-D Cartesian used as 1-D array) lattices for
+      absorber tube placement within each wing.
+    * ``cell`` – cells filling lattices / sheath structures inside
+      the blade surfaces, and complement exclusion tokens for the
+      moderator gap cell.
+    """
+
+    def __init__(self, control_cross_model, assembly_pitch: float,
+                 absorber_material_name: str = "ctrl_rod",
+                 sheath_material_name: str = "ctrl_cross",
+                 blade_fill_material_name: str = None,
+                 absorber_pin_name: str = "ctrl_pin",
+                 surf_id_start: int = 2000,
+                 cell_id_start: int = 700,
+                 lat_id_start: int = 20,
+                 pin_id: str = "ctrl_pin"):
+        """
+        Args:
+            control_cross_model: A ``ControlCrossModel`` instance (from
+                ``DragonModel.py``).
+            assembly_pitch: Full assembly pitch (cm).
+            absorber_material_name: Serpent2 material for absorber.
+            sheath_material_name: Serpent2 material for sheath/structural
+                fill within the blade.
+            blade_fill_material_name: Optional material filling the blade
+                cavity around the tubes (GE14: coolant water).
+                Defaults to *sheath_material_name* for AT10-type designs
+                (solid rod, no cavity).
+            absorber_pin_name: Serpent2 pin universe name.
+            surf_id_start: Starting surface ID number.
+            cell_id_start: Starting cell ID number.
+            lat_id_start: Starting lattice ID number.
+            pin_id: Identifier for the absorber pin card.
+        """
+        self.ccm = control_cross_model
+        self.P = assembly_pitch
+        self.abs_mat = absorber_material_name
+        self.sheath_mat = sheath_material_name
+        self.blade_fill_mat = blade_fill_material_name or sheath_material_name
+        self.pin_name = pin_id
+        self.sid = surf_id_start
+        self.cid = cell_id_start
+        self.lid = lat_id_start
+
+        # Determine tube type
+        self._is_solid_rod = (
+            abs(self.ccm.absorber_tube_inner_radius
+                - self.ccm.absorber_tube_outer_radius) < 1e-8
+        )
+
+        # Pre-compute corner position (cross centre in assembly coords)
+        self._cx, self._cy = self._corner_position()
+
+        # Sign multipliers for blade direction relative to cross centre
+        self._sx, self._sy = self._sign_multipliers()
+
+    # ------------------------------------------------------------------
+    #  Internal geometry helpers
+    # ------------------------------------------------------------------
+
+    def _corner_position(self):
+        """Return (x, y) of the cross centre in +x/+y assembly coords."""
+        c = self.ccm.center
+        if c == "north-west":
+            return (0.0, self.P)
+        elif c == "north-east":
+            return (self.P, self.P)
+        elif c == "south-west":
+            return (0.0, 0.0)
+        elif c == "south-east":
+            return (self.P, 0.0)
+        else:
+            raise ValueError(f"Unsupported control cross center: {c}")
+
+    def _sign_multipliers(self):
+        """Return (sx, sy) sign multipliers for blade extent direction.
+
+        The vertical blade extends along y and the horizontal blade along x.
+        Sign conventions (relative to cross centre):
+            NW  →  sx=+1 (horizontal blade goes +x)  sy=-1 (vertical blade goes -y)
+            NE  →  sx=-1  sy=-1
+            SW  →  sx=+1  sy=+1
+            SE  →  sx=-1  sy=+1
+        """
+        c = self.ccm.center
+        if c == "north-west":
+            return (+1, -1)
+        elif c == "north-east":
+            return (-1, -1)
+        elif c == "south-west":
+            return (+1, +1)
+        elif c == "south-east":
+            return (-1, +1)
+
+    @property
+    def _use_individual_tubes(self):
+        """Use individual cylinder surfaces instead of a lattice.
+
+        When ``tip_radius > 0`` the bounding rectangle for the lattice
+        must be capped before the tip-rounding cylinder, which clips
+        the last absorber tube.  In that case we fall back to defining
+        each tube as an individual ``cyl`` surface pair (absorber +
+        sheath), matching the reference approach in ge-14-00-C.serp.
+        """
+        return self.ccm.tip_radius > 0
+
+    # ------------------------------------------------------------------
+    #  Surface computations
+    # ------------------------------------------------------------------
+
+    def _blade_surfaces(self):
+        """Compute ``rect`` surface coordinates for blade wing regions.
+
+        Returns a list of dicts, each with keys:
+            ``'id'``, ``'type'`` (``'rect'``),
+            ``'role'`` (e.g. ``'vert_tube'``, ``'vert_sheath'``,
+                       ``'hub'``, ``'horiz_tube'``, ``'horiz_sheath'``,
+                       ``'vert_inner'``, ``'horiz_inner'``, ...),
+            ``'params'`` (tuple ``(x_lo, x_hi, y_lo, y_hi)`` for the
+            ``surf`` card).
+
+        Decomposition (matching glow_builder and the AT10/GE14 references):
+
+        Only the **half** of the blade that falls inside this assembly
+        (half-width ``bt/2``) is modelled.  The other half is in the
+        adjacent assembly (handled by reflective BC).
+
+        Non-overlapping rectangles
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1. **Hub** — ``bt/2 × bt/2`` square at the cross corner where
+           both blades overlap.
+        2. **Vert sheath** — between hub and vertical tube region
+           (exists when ``tube_region_near > bt/2``).
+        3. **Vert tube** — bounding rect around the vertical tube
+           array (filled by type-11 lattice).
+        4. **Vert tip sheath** — between last tube and blade tip
+           (exists when ``tube_region_far < bhs``, GE14-type).
+        5–7. Same three for the **horizontal** wing.
+
+        Inner cavity rects  *(GE14-type only, st > 0)*
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        8. **Vert inner** — narrower rect (width ``bt/2 − st``) inside
+           the vert tube rect, defining the absorber cavity boundary.
+           The lattice fills this; the annular gap to the outer tube
+           rect is sheath material.
+        9. **Horiz inner** — same for the horizontal wing.
+        """
+        ccm = self.ccm
+        cx, cy = self._cx, self._cy
+        sx, sy = self._sx, self._sy
+
+        half_bt = ccm.blade_thickness / 2.0
+        bhs = ccm.blade_half_span
+        st = ccm.sheath_thickness
+        n_tubes = ccm.number_tubes_per_wing
+        delta = ccm.tube_spacing
+        first_offset = ccm.first_tube_offset
+        is_solid = ccm.is_solid
+
+        # ── Tube region bounds (from cross centre along wing axis) ──
+        # Consistent with glow_builder: first tube at first_offset,
+        # subsequent tubes spaced by delta.  The tube region rect
+        # covers from half a pitch before the first tube to half a
+        # pitch after the last tube.
+        tube_region_near = first_offset - delta / 2.0
+        tube_region_far = first_offset + (n_tubes - 1) * delta + delta / 2.0
+
+        # Hub half-span: bt/2 in each direction from the cross centre.
+        hub_hs = half_bt
+
+        # ── Rounded-tip start (distance from cross centre) ──
+        # When tip_radius > 0 the semicircular cap starts at
+        # (bhs - tip_radius) from the cross centre.  The tip rect
+        # must cover this full range so the cylinder intersects it
+        # properly.  When there is no rounding, the tip region simply
+        # starts at tube_region_far.
+        #
+        # The tube rect must NOT extend past tip_near.  Tubes that
+        # protrude past this boundary (which happens for GE14) are
+        # handled either by the lattice or by individual cylinder
+        # cells that are independent of the rect.  Capping prevents
+        # the tube rect from overlapping with the tip-sheath rect.
+        if ccm.tip_radius > 0:
+            tip_near = bhs - ccm.tip_radius
+            tube_region_far = min(tube_region_far, tip_near)
+        else:
+            tip_near = tube_region_far
+
+        # ── Sheath region flags ──
+        has_hub_sheath = (tube_region_near - hub_hs > 1e-6)
+        has_tip_sheath = (bhs - tube_region_far > 1e-6)
+
+        def _rect(x1, x2, y1, y2):
+            """Canonicalize to (x_lo, x_hi, y_lo, y_hi)."""
+            return (min(x1, x2), max(x1, x2),
+                    min(y1, y2), max(y1, y2))
+
+        surfs = []
+        sid = self.sid
+
+        # ==============================================================
+        #  VERTICAL WING  (extends along y from the cross corner;
+        #  half-width bt/2 in the sx direction)
+        # ==============================================================
+        v_x_lo, v_x_hi = cx, cx + sx * half_bt
+
+        # -- Vert tube region --
+        surfs.append({
+            'id': sid, 'type': 'rect', 'role': 'vert_tube',
+            'params': _rect(v_x_lo, v_x_hi,
+                            cy + sy * tube_region_near,
+                            cy + sy * tube_region_far),
+        })
+        sid += 1
+
+        # -- Vert sheath between hub and tube region --
+        if has_hub_sheath:
+            surfs.append({
+                'id': sid, 'type': 'rect', 'role': 'vert_sheath',
+                'params': _rect(v_x_lo, v_x_hi,
+                                cy + sy * hub_hs,
+                                cy + sy * tube_region_near),
+            })
+            sid += 1
+
+        # -- Vert tip sheath (beyond last tube toward blade tip) --
+        if has_tip_sheath:
+            surfs.append({
+                'id': sid, 'type': 'rect', 'role': 'vert_tip_sheath',
+                'params': _rect(v_x_lo, v_x_hi,
+                                cy + sy * tip_near,
+                                cy + sy * bhs),
+            })
+            sid += 1
+
+        # ==============================================================
+        #  HUB  (bt/2 × bt/2 square at the cross corner)
+        # ==============================================================
+        surfs.append({
+            'id': sid, 'type': 'rect', 'role': 'hub',
+            'params': _rect(cx, cx + sx * hub_hs,
+                            cy, cy + sy * hub_hs),
+        })
+        sid += 1
+
+        # ==============================================================
+        #  HORIZONTAL WING  (extends along x from the cross corner;
+        #  half-width bt/2 in the sy direction)
+        # ==============================================================
+        h_y_lo, h_y_hi = cy, cy + sy * half_bt
+
+        # -- Horiz tube region --
+        surfs.append({
+            'id': sid, 'type': 'rect', 'role': 'horiz_tube',
+            'params': _rect(cx + sx * tube_region_near,
+                            cx + sx * tube_region_far,
+                            h_y_lo, h_y_hi),
+        })
+        sid += 1
+
+        # -- Horiz sheath between hub and tube region --
+        if has_hub_sheath:
+            surfs.append({
+                'id': sid, 'type': 'rect', 'role': 'horiz_sheath',
+                'params': _rect(cx + sx * hub_hs,
+                                cx + sx * tube_region_near,
+                                h_y_lo, h_y_hi),
+            })
+            sid += 1
+
+        # -- Horiz tip sheath --
+        if has_tip_sheath:
+            surfs.append({
+                'id': sid, 'type': 'rect', 'role': 'horiz_tip_sheath',
+                'params': _rect(cx + sx * tip_near,
+                                cx + sx * bhs,
+                                h_y_lo, h_y_hi),
+            })
+            sid += 1
+
+        # ==============================================================
+        #  INNER SHEATH CAVITY  (GE14-type: st > 0)
+        #
+        #  Narrower rect inside each tube region defining the absorber
+        #  cavity boundary.  The lattice fills the inner rect; the gap
+        #  between inner and outer tube rects is sheath material.
+        #  Skipped for solid crosses (AT10, st == 0) where the blade
+        #  material fills directly between absorber rods.
+        # ==============================================================
+        if not is_solid and st > 0:
+            inner_half_w = half_bt - st
+
+            # Vertical inner cavity (same y-span as vert tube region)
+            surfs.append({
+                'id': sid, 'type': 'rect', 'role': 'vert_inner',
+                'params': _rect(cx, cx + sx * inner_half_w,
+                                cy + sy * tube_region_near,
+                                cy + sy * tube_region_far),
+            })
+            sid += 1
+
+            # Horizontal inner cavity (same x-span as horiz tube region)
+            surfs.append({
+                'id': sid, 'type': 'rect', 'role': 'horiz_inner',
+                'params': _rect(cx + sx * tube_region_near,
+                                cx + sx * tube_region_far,
+                                cy, cy + sy * inner_half_w),
+            })
+            sid += 1
+
+            # -----------------------------------------------------------
+            #  Tip-region inner cavity  (sheathed only)
+            #
+            #  If a tip-sheath region exists, define a narrower rect
+            #  inside it for the inner cavity moderator.  When a
+            #  rounded tip cyl is also present, cells will clip the
+            #  inner rect to the inner cyl.
+            # -----------------------------------------------------------
+            if has_tip_sheath:
+                surfs.append({
+                    'id': sid, 'type': 'rect', 'role': 'vert_tip_inner',
+                    'params': _rect(cx, cx + sx * inner_half_w,
+                                    cy + sy * tip_near,
+                                    cy + sy * bhs),
+                })
+                sid += 1
+
+                surfs.append({
+                    'id': sid, 'type': 'rect', 'role': 'horiz_tip_inner',
+                    'params': _rect(cx + sx * tip_near,
+                                    cx + sx * bhs,
+                                    cy, cy + sy * inner_half_w),
+                })
+                sid += 1
+
+        # ==============================================================
+        #  ROUNDED TIP CYLINDERS  (tip_radius > 0)
+        #
+        #  A cylinder centred at (bhs - tip_radius) along the wing
+        #  axis rounds the blade tip.  The radius equals ``half_bt``
+        #  so the semicircle matches the blade half-width exactly.
+        #  For sheathed crosses a second, smaller cylinder (radius =
+        #  half_bt - st) rounds the inner-cavity tip.
+        # ==============================================================
+        if ccm.tip_radius > 0 and has_tip_sheath:
+            tr = ccm.tip_radius
+            tip_dist = bhs - tr   # distance from cross centre to cyl centre
+
+            # ── Vertical wing tip cylinders ──
+            surfs.append({
+                'id': sid, 'type': 'cyl', 'role': 'vert_tip_cyl_outer',
+                'params': (cx, cy + sy * tip_dist, tr),
+            })
+            sid += 1
+
+            # ── Horizontal wing tip cylinders ──
+            surfs.append({
+                'id': sid, 'type': 'cyl', 'role': 'horiz_tip_cyl_outer',
+                'params': (cx + sx * tip_dist, cy, tr),
+            })
+            sid += 1
+
+            # Inner tip cylinders (sheathed only)
+            if not is_solid and st > 0:
+                inner_tr = tr - st
+                if inner_tr > 1e-8:
+                    surfs.append({
+                        'id': sid, 'type': 'cyl',
+                        'role': 'vert_tip_cyl_inner',
+                        'params': (cx, cy + sy * tip_dist, inner_tr),
+                    })
+                    sid += 1
+
+                    surfs.append({
+                        'id': sid, 'type': 'cyl',
+                        'role': 'horiz_tip_cyl_inner',
+                        'params': (cx + sx * tip_dist, cy, inner_tr),
+                    })
+                    sid += 1
+
+        # ==============================================================
+        #  CROSS-CENTRE CLIPPING PLANES  (px / py)
+        #
+        #  The absorber tubes sit centred ON the cross-centre lines
+        #  (x = cx for the vertical wing, y = cy for the horizontal
+        #  wing).  Half of each tube cylinder protrudes outside the
+        #  modelled assembly domain.  To avoid geometry errors every
+        #  tube cell (and blade-fill, tip) must be clipped by a plane
+        #  at the cross centre.
+        #
+        #  For NW corner (cx=0, cy=P):
+        #    vert tubes need x > 0   →  positive sense of  px 0
+        #    horiz tubes need y < P   →  negative sense of  py P
+        #
+        #  We also add a py surface at the tip boundary of the vert
+        #  wing and a px surface at the tip boundary of the horiz
+        #  wing.  These are used in the reference to clip the tip
+        #  region cells cleanly.
+        # ==============================================================
+        # px at cross centre (used to clip vert-wing tube cells)
+        surfs.append({
+            'id': sid, 'type': 'px', 'role': 'clip_vert',
+            'params': (cx,),
+        })
+        sid += 1
+
+        # py at cross centre (used to clip horiz-wing tube cells)
+        surfs.append({
+            'id': sid, 'type': 'py', 'role': 'clip_horiz',
+            'params': (cy,),
+        })
+        sid += 1
+
+        # ── Tip boundary planes ──
+        # These planes sit at the tube-region / tip-region boundary
+        # (distance tip_near from cross centre along the wing axis).
+        # They are used by the tip cells to cleanly bound the rounded
+        # tip region without resorting to rect surfaces that span the
+        # domain boundary.  Only emitted when tip_radius > 0.
+        if ccm.tip_radius > 0:
+            # py at vert tip boundary
+            surfs.append({
+                'id': sid, 'type': 'py', 'role': 'vert_tip_bdy',
+                'params': (cy + sy * tip_near,),
+            })
+            sid += 1
+
+            # px at horiz tip boundary
+            surfs.append({
+                'id': sid, 'type': 'px', 'role': 'horiz_tip_bdy',
+                'params': (cx + sx * tip_near,),
+            })
+            sid += 1
+
+        self._surfaces = surfs
+        self._next_sid = sid
+        return surfs
+
+    # ------------------------------------------------------------------
+    #  Individual tube surfaces & cells  (fallback for tip_radius > 0)
+    # ------------------------------------------------------------------
+
+    def _individual_tube_cards(self, surf_by_role, start_sid, start_cid):
+        """Generate individual cylinder surfaces and cells for each
+        absorber tube in both wings.
+
+        This is the fallback approach used when ``tip_radius > 0``.
+        Instead of a type-11 lattice bounded by a ``rect`` surface
+        (which would clip the outermost tube at the rounded tip), each
+        tube is defined as a pair of concentric ``cyl`` surfaces with
+        dedicated cells for the absorber fill and sheath ring.
+
+        Each tube cell is clipped by a cross-centre plane surface so
+        that the half of the cylinder protruding outside the assembly
+        domain is excluded.  This matches the reference approach in
+        ge-14-00-C.serp (surfaces 335-418, cells 407-490).
+
+        Args:
+            surf_by_role: dict mapping surface role names to IDs
+                (from ``_blade_surfaces()``).
+            start_sid: next available surface ID.
+            start_cid: next available cell ID.
+
+        Returns:
+            Tuple ``(lines, cell_ids, next_sid, next_cid)`` where
+            *lines* is a list of formatted Serpent2 card strings,
+            *cell_ids* is a list of emitted cell IDs for complement
+            exclusion, and *next_sid*/*next_cid* are the next
+            available IDs.
+        """
+        ccm = self.ccm
+        cx, cy = self._cx, self._cy
+        sx, sy = self._sx, self._sy
+        n = ccm.number_tubes_per_wing
+        ts = ccm.tube_spacing
+        first_offset = ccm.first_tube_offset
+        r_inner = ccm.absorber_tube_inner_radius
+        r_outer = ccm.absorber_tube_outer_radius
+
+        is_sheathed = (not self._is_solid_rod
+                       and ccm.sheath_thickness > 0)
+
+        # ── Clipping-plane surface references ──
+        # Vertical-wing tubes are centred at x = cx and extend in
+        # both x directions.  We clip to keep only the inside half:
+        #   NW (sx=+1): keep x > cx  → positive sense of px(cx)
+        #   SW (sx=+1): keep x > cx  → positive sense
+        #   NE (sx=-1): keep x < cx  → negative sense
+        #   SE (sx=-1): keep x < cx  → negative sense
+        # Same logic applies to horizontal-wing tubes at y = cy.
+        clip_vert_sid = surf_by_role['clip_vert']     # px at cx
+        clip_horiz_sid = surf_by_role['clip_horiz']   # py at cy
+
+        # Sense token: positive (+sid) or negative (-sid)
+        # For vert wing:  sx > 0 → tubes go +x → keep x > cx → +sid
+        #                 sx < 0 → tubes go -x → keep x < cx → -sid
+        vert_clip = (f"{clip_vert_sid}" if sx > 0
+                     else f"-{clip_vert_sid}")
+        # For horiz wing: sy > 0 → tubes go +y → keep y > cy → -sid  (NO!)
+        # Actually for NW: sy=-1, horiz wing y=cy=P, tubes go -y from cy
+        # We keep y < cy → negative sense of py(cy) → -sid
+        # For SW: sy=+1, cy=0, tubes go +y, keep y > 0 → positive sense
+        horiz_clip = (f"-{clip_horiz_sid}" if sy < 0
+                      else f"{clip_horiz_sid}")
+
+        surf_lines = []
+        cell_lines = []
+        surf_lines.append("")
+        surf_lines.append("% Control blade individual absorber tube surfaces")
+
+        sid = start_sid
+        cid = start_cid
+        cell_ids = []
+
+        # Collect outer-cyl surface IDs per wing for blade-fill cell
+        # exclusion (the wing-water / blade-fill cell must exclude
+        # each tube's outer surface).
+        vert_outer_sids = []
+        horiz_outer_sids = []
+
+        # ── Vertical wing tubes (arrayed along y) ──
+        for i in range(n):
+            dist = first_offset + i * ts
+            tube_x = cx
+            tube_y = cy + sy * dist
+
+            if self._is_solid_rod:
+                # Solid rod: single absorber cylinder
+                surf_lines.append(
+                    f"surf {sid}  cyl  {tube_x:.10f}  {tube_y:.10f}  "
+                    f"{r_outer:.7f}  % Vert tube {i+1} absorber")
+                outer_sid = sid
+                sid += 1
+                vert_outer_sids.append(outer_sid)
+
+                # Cell: absorber fill, clipped to domain
+                cell_lines.append(
+                    f"cell {cid}  0  {self.abs_mat}  "
+                    f"{vert_clip} -{outer_sid}  "
+                    f"% Vert tube {i+1} absorber")
+                cell_ids.append(cid); cid += 1
+            else:
+                # Annular tube: inner absorber + outer sheath ring
+                inner_sid = sid
+                surf_lines.append(
+                    f"surf {sid}  cyl  {tube_x:.10f}  {tube_y:.10f}  "
+                    f"{r_inner:.7f}  % Vert tube {i+1} absorber")
+                sid += 1
+
+                outer_sid = sid
+                surf_lines.append(
+                    f"surf {sid}  cyl  {tube_x:.10f}  {tube_y:.10f}  "
+                    f"{r_outer:.7f}  % Vert tube {i+1} sheath")
+                sid += 1
+                vert_outer_sids.append(outer_sid)
+
+                # Cell: absorber fill (inside inner cyl), clipped
+                cell_lines.append(
+                    f"cell {cid}  0  {self.abs_mat}  "
+                    f"{vert_clip} -{inner_sid}  "
+                    f"% Vert tube {i+1} absorber")
+                cell_ids.append(cid); cid += 1
+
+                # Cell: sheath ring (between inner and outer cyl), clipped
+                cell_lines.append(
+                    f"cell {cid}  0  {self.sheath_mat}  "
+                    f"{vert_clip} {inner_sid} -{outer_sid}  "
+                    f"% Vert tube {i+1} sheath")
+                cell_ids.append(cid); cid += 1
+
+        # ── Horizontal wing tubes (arrayed along x) ──
+        for i in range(n):
+            dist = first_offset + i * ts
+            tube_x = cx + sx * dist
+            tube_y = cy
+
+            if self._is_solid_rod:
+                surf_lines.append(
+                    f"surf {sid}  cyl  {tube_x:.10f}  {tube_y:.10f}  "
+                    f"{r_outer:.7f}  % Horiz tube {i+1} absorber")
+                outer_sid = sid
+                sid += 1
+                horiz_outer_sids.append(outer_sid)
+
+                cell_lines.append(
+                    f"cell {cid}  0  {self.abs_mat}  "
+                    f"{horiz_clip} -{outer_sid}  "
+                    f"% Horiz tube {i+1} absorber")
+                cell_ids.append(cid); cid += 1
+            else:
+                inner_sid = sid
+                surf_lines.append(
+                    f"surf {sid}  cyl  {tube_x:.10f}  {tube_y:.10f}  "
+                    f"{r_inner:.7f}  % Horiz tube {i+1} absorber")
+                sid += 1
+
+                outer_sid = sid
+                surf_lines.append(
+                    f"surf {sid}  cyl  {tube_x:.10f}  {tube_y:.10f}  "
+                    f"{r_outer:.7f}  % Horiz tube {i+1} sheath")
+                sid += 1
+                horiz_outer_sids.append(outer_sid)
+
+                cell_lines.append(
+                    f"cell {cid}  0  {self.abs_mat}  "
+                    f"{horiz_clip} -{inner_sid}  "
+                    f"% Horiz tube {i+1} absorber")
+                cell_ids.append(cid); cid += 1
+
+                cell_lines.append(
+                    f"cell {cid}  0  {self.sheath_mat}  "
+                    f"{horiz_clip} {inner_sid} -{outer_sid}  "
+                    f"% Horiz tube {i+1} sheath")
+                cell_ids.append(cid); cid += 1
+
+        # ── Blade-fill cells (water / moderator between tubes) ──
+        # For sheathed crosses: fill the inner cavity rect with
+        # blade_fill material, excluding all tube outer cylinders.
+        # For solid crosses: fill the tube-region rect with blade_fill
+        # material, excluding all tube outer cylinders.
+        cell_lines.append("")
+        cell_lines.append("% Blade wing fill (moderator between tubes)")
+
+        if is_sheathed and 'vert_inner' in surf_by_role:
+            # Sheathed: fill vert inner cavity, exclude tubes
+            excl = " ".join(str(s) for s in vert_outer_sids)
+            cell_lines.append(
+                f"cell {cid}  0  {self.blade_fill_mat}  "
+                f"-{surf_by_role['vert_inner']} {excl}  "
+                f"% Vert blade - moderator between tubes")
+            cell_ids.append(cid); cid += 1
+
+            # Sheath walls around vertical cavity
+            cell_lines.append(
+                f"cell {cid}  0  {self.sheath_mat}  "
+                f"-{surf_by_role['vert_tube']} "
+                f"{surf_by_role['vert_inner']}  "
+                f"% Vert blade - sheath walls")
+            cell_ids.append(cid); cid += 1
+        else:
+            excl = " ".join(str(s) for s in vert_outer_sids)
+            cell_lines.append(
+                f"cell {cid}  0  {self.blade_fill_mat}  "
+                f"-{surf_by_role['vert_tube']} {excl}  "
+                f"% Vert blade - fill between tubes")
+            cell_ids.append(cid); cid += 1
+
+        if is_sheathed and 'horiz_inner' in surf_by_role:
+            excl = " ".join(str(s) for s in horiz_outer_sids)
+            cell_lines.append(
+                f"cell {cid}  0  {self.blade_fill_mat}  "
+                f"-{surf_by_role['horiz_inner']} {excl}  "
+                f"% Horiz blade - moderator between tubes")
+            cell_ids.append(cid); cid += 1
+
+            cell_lines.append(
+                f"cell {cid}  0  {self.sheath_mat}  "
+                f"-{surf_by_role['horiz_tube']} "
+                f"{surf_by_role['horiz_inner']}  "
+                f"% Horiz blade - sheath walls")
+            cell_ids.append(cid); cid += 1
+        else:
+            excl = " ".join(str(s) for s in horiz_outer_sids)
+            cell_lines.append(
+                f"cell {cid}  0  {self.blade_fill_mat}  "
+                f"-{surf_by_role['horiz_tube']} {excl}  "
+                f"% Horiz blade - fill between tubes")
+            cell_ids.append(cid); cid += 1
+
+        # Combine: all surfaces first, then all cells
+        lines = surf_lines
+        lines.append("")
+        lines.append("% Control blade individual absorber tube cells")
+        lines.extend(cell_lines)
+
+        return lines, cell_ids, sid, cid, vert_outer_sids, horiz_outer_sids
+
+    # ------------------------------------------------------------------
+    #  Lattice computations
+    # ------------------------------------------------------------------
+
+    def _lattice_cards(self):
+        """Compute type-11 lattice parameters for tube placement.
+
+        Serpent2 type-11 lattice (3-D Cartesian, used as 1-D array)::
+
+            lat NAME 11 x0 y0 z0 nx ny nz px py pz
+
+        The lattice origin ``(x0, y0)`` is placed at the midpoint of
+        the tube region (consistent with :meth:`_blade_surfaces`).  The
+        *dummy pitch* in the perpendicular direction equals
+        ``blade_thickness`` so that each tile covers the full blade
+        half-width (Serpent2 clips tiles falling outside the bounding
+        surface).
+
+        Returns a list of dicts with keys:
+            ``'id'``, ``'role'`` (``'vert'``/``'horiz'``),
+            ``'x0'``, ``'y0'``, ``'z0'``,
+            ``'nx'``, ``'ny'``, ``'nz'``,
+            ``'px'``, ``'py'``, ``'pz'``.
+        """
+        ccm = self.ccm
+        cx, cy = self._cx, self._cy
+        sx, sy = self._sx, self._sy
+        n = ccm.number_tubes_per_wing
+        ts = ccm.tube_spacing
+        first_offset = ccm.first_tube_offset
+
+        # ── Tube region bounds (consistent with _blade_surfaces) ──
+        tube_region_near = first_offset - ts / 2.0
+        tube_region_far = first_offset + (n - 1) * ts + ts / 2.0
+
+        # ── Vertical lattice (tubes arrayed along y) ──
+        v_hub_y = cy + sy * tube_region_near
+        v_tip_y = cy + sy * tube_region_far
+        v_x0 = cx
+        v_y0 = (v_hub_y + v_tip_y) / 2.0
+        v_z0 = 0.0
+
+        # ── Horizontal lattice (tubes arrayed along x) ──
+        h_hub_x = cx + sx * tube_region_near
+        h_tip_x = cx + sx * tube_region_far
+        h_x0 = (h_hub_x + h_tip_x) / 2.0
+        h_y0 = cy
+        h_z0 = 0.0
+
+        # Dummy pitch for the perpendicular direction (single element).
+        # blade_thickness fully covers the half-blade; Serpent2 clips
+        # the tile to the bounding surface.
+        dummy_pitch = ccm.blade_thickness
+
+        lats = []
+        lid = self.lid
+
+        # Vertical wing lattice
+        lats.append({
+            'id': lid, 'role': 'vert',
+            'x0': v_x0, 'y0': v_y0, 'z0': v_z0,
+            'nx': 1, 'ny': n, 'nz': 1,
+            'px': dummy_pitch, 'py': ts, 'pz': dummy_pitch,
+        })
+        lid += 1
+
+        # Horizontal wing lattice
+        lats.append({
+            'id': lid, 'role': 'horiz',
+            'x0': h_x0, 'y0': h_y0, 'z0': h_z0,
+            'nx': n, 'ny': 1, 'nz': 1,
+            'px': ts, 'py': dummy_pitch, 'pz': dummy_pitch,
+        })
+        lid += 1
+
+        self._lattices = lats
+        self._next_lid = lid
+        return lats
+
+    # ------------------------------------------------------------------
+    #  Pin card
+    # ------------------------------------------------------------------
+
+    def _absorber_pin_card(self) -> str:
+        """Format the absorber pin universe card.
+
+        AT10 (solid rod):  pin NAME  absorber R_outer  sheath_fill
+        GE14 (tube):       pin NAME  absorber R_inner  tube_clad R_outer  blade_fill
+        """
+        ccm = self.ccm
+        lines = [f"pin {self.pin_name}"]
+        if self._is_solid_rod:
+            lines.append(f"{self.abs_mat}  {ccm.absorber_tube_outer_radius:.5f}")
+            lines.append(f"{self.blade_fill_mat}")
+        else:
+            lines.append(f"{self.abs_mat}  {ccm.absorber_tube_inner_radius:.5f}")
+            lines.append(f"{self.sheath_mat}  {ccm.absorber_tube_outer_radius:.5f}")
+            lines.append(f"{self.blade_fill_mat}")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    #  Complete formatted output
+    # ------------------------------------------------------------------
+
+    def format_cards(self) -> str:
+        """Format all control cross geometry cards.
+
+        Returns a multi-line string containing:
+          - Absorber pin definition (lattice path) or individual tube
+            cylinder surfaces (individual-tube path)
+          - Blade wing surfaces
+          - Type-11 lattices for tube placement (lattice path only)
+          - Cell definitions (lattice fills + sheath cells)
+
+        For **solid** crosses (AT10-type, ``st == 0``) the lattice
+        fills the tube-region rect directly; all other rects are
+        filled with sheath material.
+
+        For **sheathed** crosses (GE14-type, ``st > 0``) the lattice
+        fills the *inner* cavity rect (narrower than the tube-region
+        rect).  An extra cell fills the annular gap between the inner
+        and outer tube-region rects with sheath material.
+
+        When ``tip_radius > 0`` the lattice approach clips the last
+        absorber tube at the rounded tip.  In that case we fall back
+        to defining each tube as individual ``cyl`` surface pairs,
+        matching the reference approach in ge-14-00-C.serp.
+        """
+        lines = ["% --- Control cross geometry ---"]
+
+        use_individual = self._use_individual_tubes
+
+        # Pin (only needed for lattice path)
+        if not use_individual:
+            lines.append("")
+            lines.append("% Control blade absorber pin")
+            lines.append(self._absorber_pin_card())
+
+        # Surfaces
+        surfs = self._blade_surfaces()
+        lines.append("")
+        lines.append("% Control blade surfaces")
+        role_comment = {
+            'vert_tube': 'Vertical blade - tube region',
+            'vert_sheath': 'Vertical blade - sheath between hub and tubes',
+            'vert_tip_sheath': 'Vertical blade - tip sheath',
+            'hub': 'Central hub (corner)',
+            'horiz_tube': 'Horizontal blade - tube region',
+            'horiz_sheath': 'Horizontal blade - sheath between hub and tubes',
+            'horiz_tip_sheath': 'Horizontal blade - tip sheath',
+            'vert_inner': 'Vertical blade - inner cavity (sheathed)',
+            'horiz_inner': 'Horizontal blade - inner cavity (sheathed)',
+            'vert_tip_inner': 'Vertical blade - tip inner cavity',
+            'horiz_tip_inner': 'Horizontal blade - tip inner cavity',
+            'vert_tip_cyl_outer': 'Vertical blade - outer tip rounding',
+            'horiz_tip_cyl_outer': 'Horizontal blade - outer tip rounding',
+            'vert_tip_cyl_inner': 'Vertical blade - inner tip rounding',
+            'horiz_tip_cyl_inner': 'Horizontal blade - inner tip rounding',
+            'clip_vert': 'Cross-centre clipping plane (vertical wing)',
+            'clip_horiz': 'Cross-centre clipping plane (horizontal wing)',
+            'vert_tip_bdy': 'Vertical wing tip boundary',
+            'horiz_tip_bdy': 'Horizontal wing tip boundary',
+        }
+        for s in surfs:
+            comment = role_comment.get(s['role'], '')
+            if s['type'] == 'cyl':
+                cx_s, cy_s, r = s['params']
+                lines.append(f"surf {s['id']}  cyl  "
+                            f"{cx_s:.5f}  {cy_s:.5f}  {r:.5f}  "
+                            f"% {comment}")
+            elif s['type'] in ('px', 'py'):
+                val = s['params'][0]
+                lines.append(f"surf {s['id']}  {s['type']}  "
+                            f"{val:.5f}  "
+                            f"% {comment}")
+            else:
+                x1, x2, y1, y2 = s['params']
+                lines.append(f"surf {s['id']}  {s['type']}  "
+                            f"{x1:.5f}  {x2:.5f}  {y1:.5f}  {y2:.5f}  "
+                            f"% {comment}")
+
+        # Build lookup dict for surface IDs by role
+        surf_by_role = {s['role']: s['id'] for s in surfs}
+
+        is_sheathed = (not self._is_solid_rod
+                       and self.ccm.sheath_thickness > 0)
+
+        cid = self.cid
+        cell_ids = []  # track all emitted cell IDs for complement
+
+        if use_individual:
+            # ==============================================================
+            #  INDIVIDUAL TUBE PATH  (tip_radius > 0)
+            #
+            #  Each absorber tube is defined as individual cyl surfaces
+            #  with dedicated cells.  The blade-fill and sheath-wall
+            #  cells exclude the tube cylinders explicitly.
+            # ==============================================================
+            tube_lines, tube_cell_ids, next_sid, cid, \
+                vert_outer_sids, horiz_outer_sids = (
+                self._individual_tube_cards(surf_by_role,
+                                           self._next_sid, cid))
+            lines.extend(tube_lines)
+            cell_ids.extend(tube_cell_ids)
+        else:
+            # ==============================================================
+            #  LATTICE PATH  (tip_radius == 0)
+            # ==============================================================
+            lats = self._lattice_cards()
+            lines.append("")
+            lines.append("% Control blade tube lattices (type 11)")
+            for lat in lats:
+                n = self.ccm.number_tubes_per_wing
+                lines.append(
+                    f"lat {lat['id']}  11  {lat['x0']:.5f}  {lat['y0']:.5f}  "
+                    f"{lat['z0']:.1f}  {lat['nx']}  {lat['ny']}  {lat['nz']}  "
+                    f"{lat['px']:.5f}  {lat['py']:.5f}  {lat['pz']:.1f}"
+                )
+                # All positions filled with the same absorber pin
+                pin_names = " ".join([self.pin_name] * max(lat['nx'], lat['ny']))
+                lines.append(pin_names)
+
+            # Cells for lattice path
+            lines.append("")
+            lines.append("% Control blade cells")
+
+            vert_lat_id = [l['id'] for l in lats if l['role'] == 'vert'][0]
+            horiz_lat_id = [l['id'] for l in lats if l['role'] == 'horiz'][0]
+
+            if is_sheathed:
+                # Sheathed cross (GE14-type): lattice in inner cavity
+                vi_sid = surf_by_role['vert_inner']
+                hi_sid = surf_by_role['horiz_inner']
+                vt_sid = surf_by_role['vert_tube']
+                ht_sid = surf_by_role['horiz_tube']
+
+                lines.append(f"cell {cid}  0  fill {vert_lat_id}  "
+                            f"-{vi_sid}  "
+                            f"% Vert blade - lattice in inner cavity")
+                cell_ids.append(cid); cid += 1
+
+                lines.append(f"cell {cid}  0  {self.sheath_mat}  "
+                            f"-{vt_sid} {vi_sid}  "
+                            f"% Vert blade - sheath walls")
+                cell_ids.append(cid); cid += 1
+
+                lines.append(f"cell {cid}  0  fill {horiz_lat_id}  "
+                            f"-{hi_sid}  "
+                            f"% Horiz blade - lattice in inner cavity")
+                cell_ids.append(cid); cid += 1
+
+                lines.append(f"cell {cid}  0  {self.sheath_mat}  "
+                            f"-{ht_sid} {hi_sid}  "
+                            f"% Horiz blade - sheath walls")
+                cell_ids.append(cid); cid += 1
+            else:
+                # Solid cross (AT10-type): lattice fills tube rect
+                lines.append(f"cell {cid}  0  fill {vert_lat_id}  "
+                            f"-{surf_by_role['vert_tube']}  "
+                            f"% Vert blade - tube region")
+                cell_ids.append(cid); cid += 1
+
+                lines.append(f"cell {cid}  0  fill {horiz_lat_id}  "
+                            f"-{surf_by_role['horiz_tube']}  "
+                            f"% Horiz blade - tube region")
+                cell_ids.append(cid); cid += 1
+
+        # ── Hub cell (always sheath, both types) ──
+        lines.append("")
+        lines.append("% Control blade structural cells")
+        if 'hub' in surf_by_role:
+            lines.append(f"cell {cid}  0  {self.sheath_mat}  "
+                        f"-{surf_by_role['hub']}  "
+                        f"% Central hub")
+            cell_ids.append(cid); cid += 1
+
+        # ── Sheath region between hub and tubes ──
+        for role in ('vert_sheath', 'horiz_sheath'):
+            if role not in surf_by_role:
+                continue
+            lines.append(f"cell {cid}  0  {self.sheath_mat}  "
+                        f"-{surf_by_role[role]}  "
+                        f"% {role_comment.get(role, role)}")
+            cell_ids.append(cid); cid += 1
+
+        # ── Tip region cells ──
+        # Two approaches depending on whether we are using individual
+        # tubes (tip_radius > 0) or a lattice (tip_radius == 0).
+        #
+        # INDIVIDUAL-TUBE PATH (tip_radius > 0):
+        #   Use cross-centre clipping planes and tip-boundary planes
+        #   combined with tip cylinders, matching the reference
+        #   topology in ge-14-00-C.serp.  No rect surfaces are used
+        #   for the tip cells because the tip rects span the domain
+        #   boundary and produce incorrect Serpent2 geometry.
+        #
+        # LATTICE PATH (tip_radius == 0):
+        #   Use the tip rect, optionally clipped by tip cylinders.
+        use_individual = self._use_individual_tubes
+
+        for axis in ('vert', 'horiz'):
+            tip_key = f'{axis}_tip_sheath'
+            if tip_key not in surf_by_role:
+                continue
+            tip_sid = surf_by_role[tip_key]
+            tip_inner_key = f'{axis}_tip_inner'
+            tip_cyl_outer_key = f'{axis}_tip_cyl_outer'
+            tip_cyl_inner_key = f'{axis}_tip_cyl_inner'
+            tube_key = f'{axis}_tube'
+            tip_bdy_key = f'{axis}_tip_bdy'
+
+            has_tip_cyl = tip_cyl_outer_key in surf_by_role
+            has_tip_inner = tip_inner_key in surf_by_role
+            has_tip_cyl_inner = tip_cyl_inner_key in surf_by_role
+
+            if use_individual and has_tip_cyl:
+                # ==========================================================
+                #  PLANE-BASED TIP CELLS  (individual-tube path)
+                #
+                #  Topology matches reference ge-14-00-C.serp cells 405/406.
+                #
+                #  For vert wing:
+                #    clip_vert  vert_tip_bdy  [tip_cyl_inner]  -tip_cyl_outer
+                #  For horiz wing:
+                #    clip_horiz  horiz_tip_bdy  [tip_cyl_inner]  -tip_cyl_outer
+                #
+                #  The clip sense keeps the domain side; the tip_bdy
+                #  sense keeps the tip side (away from cross centre).
+                #
+                #  Tubes whose outer cylinder overlaps with the inner
+                #  tip cylinder must be excluded from the tip moderator
+                #  cell (positive sense = outside the tube).
+                # ==========================================================
+                ccm = self.ccm
+                tip_near = ccm.blade_half_span - ccm.tip_radius
+                inner_tip_r = (ccm.tip_radius - ccm.sheath_thickness
+                               if has_tip_cyl_inner else 0.0)
+                r_outer_tube = ccm.absorber_tube_outer_radius
+                overlap_limit = inner_tip_r + r_outer_tube
+
+                if axis == 'vert':
+                    clip_sid = surf_by_role['clip_vert']
+                    clip_sense = (f"{clip_sid}" if self._sx > 0
+                                  else f"-{clip_sid}")
+                    bdy_sid = surf_by_role[tip_bdy_key]
+                    bdy_sense = (f"{bdy_sid}" if self._sy > 0
+                                 else f"-{bdy_sid}")
+                    outer_sids = vert_outer_sids
+                else:
+                    clip_sid = surf_by_role['clip_horiz']
+                    clip_sense = (f"-{clip_sid}" if self._sy < 0
+                                  else f"{clip_sid}")
+                    bdy_sid = surf_by_role[tip_bdy_key]
+                    bdy_sense = (f"{bdy_sid}" if self._sx > 0
+                                 else f"-{bdy_sid}")
+                    outer_sids = horiz_outer_sids
+
+                # Find tubes that protrude into the tip inner cyl
+                tip_excl_sids = []
+                if has_tip_cyl_inner and overlap_limit > 0:
+                    n = ccm.number_tubes_per_wing
+                    for i in range(n):
+                        d = ccm.first_tube_offset + i * ccm.tube_spacing
+                        if abs(d - tip_near) < overlap_limit:
+                            tip_excl_sids.append(outer_sids[i])
+                tip_excl = (" ".join(str(s) for s in tip_excl_sids)
+                            if tip_excl_sids else "")
+
+                if is_sheathed and has_tip_cyl_inner:
+                    # Inner moderator at tip:
+                    #   clip AND tip_bdy AND inside inner_tip_cyl
+                    #   + exclude tubes that protrude into tip
+                    excl_str = f" {tip_excl}" if tip_excl else ""
+                    lines.append(
+                        f"cell {cid}  0  {self.blade_fill_mat}  "
+                        f"{clip_sense} {bdy_sense} "
+                        f"-{surf_by_role[tip_cyl_inner_key]}"
+                        f"{excl_str}  "
+                        f"% {axis.capitalize()} tip - inner moderator")
+                    cell_ids.append(cid); cid += 1
+
+                    # Tip sheath (ring between inner and outer tip cyl):
+                    #   clip AND tip_bdy AND outside inner AND inside outer
+                    lines.append(
+                        f"cell {cid}  0  {self.sheath_mat}  "
+                        f"{clip_sense} {bdy_sense} "
+                        f"{surf_by_role[tip_cyl_inner_key]} "
+                        f"-{surf_by_role[tip_cyl_outer_key]}  "
+                        f"% {axis.capitalize()} tip - sheath")
+                    cell_ids.append(cid); cid += 1
+                else:
+                    # No inner cavity: solid sheath in tip region
+                    #   clip AND tip_bdy AND inside outer_tip_cyl
+                    lines.append(
+                        f"cell {cid}  0  {self.sheath_mat}  "
+                        f"{clip_sense} {bdy_sense} "
+                        f"-{surf_by_role[tip_cyl_outer_key]}  "
+                        f"% {axis.capitalize()} tip - sheath")
+                    cell_ids.append(cid); cid += 1
+            else:
+                # ==========================================================
+                #  RECT-BASED TIP CELLS  (lattice path / no tip rounding)
+                # ==========================================================
+                # Exclude the tube rect when the tip rect overlaps it
+                tube_excl = (f"{surf_by_role[tube_key]} "
+                             if tube_key in surf_by_role else "")
+
+                if is_sheathed and has_tip_inner:
+                    inner_mod_cid = cid
+                    if has_tip_cyl_inner:
+                        lines.append(
+                            f"cell {cid}  0  {self.blade_fill_mat}  "
+                            f"-{surf_by_role[tip_inner_key]} "
+                            f"-{surf_by_role[tip_cyl_inner_key]} "
+                            f"{tube_excl} "
+                            f"% {axis.capitalize()} tip - inner moderator")
+                    else:
+                        lines.append(
+                            f"cell {cid}  0  {self.blade_fill_mat}  "
+                            f"-{surf_by_role[tip_inner_key]} "
+                            f"{tube_excl} "
+                            f"% {axis.capitalize()} tip - inner moderator")
+                    cell_ids.append(cid); cid += 1
+
+                    if has_tip_cyl:
+                        lines.append(
+                            f"cell {cid}  0  {self.sheath_mat}  "
+                            f"-{tip_sid} "
+                            f"-{surf_by_role[tip_cyl_outer_key]} "
+                            f"{tube_excl}"
+                            f"#{inner_mod_cid}  "
+                            f"% {axis.capitalize()} tip - sheath")
+                    else:
+                        lines.append(
+                            f"cell {cid}  0  {self.sheath_mat}  "
+                            f"-{tip_sid} "
+                            f"{tube_excl}"
+                            f"#{inner_mod_cid}  "
+                            f"% {axis.capitalize()} tip - sheath")
+                    cell_ids.append(cid); cid += 1
+                else:
+                    if has_tip_cyl:
+                        lines.append(
+                            f"cell {cid}  0  {self.sheath_mat}  "
+                            f"-{tip_sid} "
+                            f"-{surf_by_role[tip_cyl_outer_key]} "
+                            f"{tube_excl} "
+                            f"% {axis.capitalize()} tip - sheath")
+                    else:
+                        lines.append(
+                            f"cell {cid}  0  {self.sheath_mat}  "
+                            f"-{tip_sid} "
+                            f"{tube_excl} "
+                            f"% {axis.capitalize()} tip - sheath")
+                    cell_ids.append(cid); cid += 1
+
+        self._cell_ids = cell_ids
+        self._next_cid = cid
+        return "\n".join(lines)
+
+    def get_complement_cell_ids(self) -> list:
+        """Return the list of **cell** IDs that must be excluded (via
+        Serpent2 ``#cell_id`` complement operators) from the moderator
+        gap cell.
+
+        In Serpent2 the ``#N`` operator in a cell definition refers to
+        the complement of **cell** N, not surface N.  This method must
+        therefore return cell IDs, not surface IDs.
+
+        Call this **after** :meth:`format_cards`.
+        """
+        if not hasattr(self, '_cell_ids'):
+            self.format_cards()
+        return list(self._cell_ids)
+
+    @classmethod
+    def from_assembly_model(cls, assembly_model,
+                            absorber_material_name: str = "ctrl_rod",
+                            sheath_material_name: str = "ctrl_cross",
+                            blade_fill_material_name: str = None,
+                            **kwargs):
+        """Build control cross geometry from a CartesianAssemblyModel
+        that has a ``control_cross`` attribute.
+
+        Args:
+            assembly_model: CartesianAssemblyModel with
+                ``has_control_cross == True``.
+            absorber_material_name: Serpent2 name for absorber.
+            sheath_material_name: Serpent2 name for sheath.
+            blade_fill_material_name: Material filling blade cavity
+                around tubes (GE14: coolant).  Defaults to
+                *sheath_material_name*.
+            **kwargs: Forwarded to ``__init__`` (surf/cell/lat ID starts).
+
+        Returns:
+            S2_ControlCrossGeometry instance.
+        """
+        ccm = assembly_model.control_cross
+        P = assembly_model.assembly_pitch
+        return cls(
+            control_cross_model=ccm,
+            assembly_pitch=P,
+            absorber_material_name=absorber_material_name,
+            sheath_material_name=sheath_material_name,
+            blade_fill_material_name=blade_fill_material_name,
+            **kwargs,
+        )
+
+    def __repr__(self):
+        return (f"S2_ControlCrossGeometry(center='{self.ccm.center}', "
+                f"tubes={self.ccm.number_tubes_per_wing}, "
+                f"solid_rod={self._is_solid_rod})")
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Serpent2Model — Top-level orchestrator
 # ═══════════════════════════════════════════════════════════════
 
@@ -1977,8 +3306,15 @@ class Serpent2Model:
               lattice_name: str = "10",
               empty_universe_name: str = "empty",
               xs_suffix_fuel: str = None,
-              xs_suffix_struct: str = None):
+              xs_suffix_struct: str = None,
+              ctrl_absorber_material_name: str = "ctrl_rod",
+              ctrl_sheath_material_name: str = "ctrl_cross",
+              ctrl_blade_fill_material_name: str = None):
         """Build all Serpent2 cards from the assembly model.
+        
+        If the assembly model has a control cross
+        (``has_control_cross == True``), the control cross geometry is
+        automatically built and integrated into the channel geometry.
         
         Args:
             gap_material_name: Serpent2 name for gap material.
@@ -1990,6 +3326,13 @@ class Serpent2Model:
             empty_universe_name: Name for empty lattice positions.
             xs_suffix_fuel: Override XS suffix for fuel materials.
             xs_suffix_struct: Override XS suffix for structural materials.
+            ctrl_absorber_material_name: Serpent2 name for control cross
+                absorber material (B4C).
+            ctrl_sheath_material_name: Serpent2 name for control cross
+                sheath/structural material (SS304).
+            ctrl_blade_fill_material_name: Serpent2 name for material
+                filling the blade cavity around tubes (GE14: coolant).
+                Defaults to *ctrl_sheath_material_name* (AT10-type).
         """
         if self.assembly is None:
             raise RuntimeError("No assembly model provided. Cannot build.")
@@ -2007,6 +3350,9 @@ class Serpent2Model:
             lattice_name=lattice_name,
             channel_box_material=channel_box_material_name,
             outer_water_material=outer_water_material_name,
+            ctrl_absorber_material=ctrl_absorber_material_name,
+            ctrl_sheath_material=ctrl_sheath_material_name,
+            ctrl_blade_fill_material=ctrl_blade_fill_material_name,
         )
         
         self._built = True
@@ -2300,14 +3646,33 @@ class Serpent2Model:
     
     def _build_channel_geometry(self, lattice_name: str,
                                 channel_box_material: str,
-                                outer_water_material: str):
-        """Build channel box geometry from assembly parameters."""
+                                outer_water_material: str,
+                                ctrl_absorber_material: str = "ctrl_rod",
+                                ctrl_sheath_material: str = "ctrl_cross",
+                                ctrl_blade_fill_material: str = None):
+        """Build channel box geometry from assembly parameters.
+
+        If the assembly has a control cross, the
+        ``S2_ControlCrossGeometry`` is built and passed to the channel
+        geometry so that the moderator gap cell excludes the cross
+        surfaces.
+        """
+        cc_geom = None
+        if getattr(self.assembly, 'has_control_cross', False):
+            cc_geom = S2_ControlCrossGeometry.from_assembly_model(
+                self.assembly,
+                absorber_material_name=ctrl_absorber_material,
+                sheath_material_name=ctrl_sheath_material,
+                blade_fill_material_name=ctrl_blade_fill_material,
+            )
+
         self.channel_geometry = S2_ChannelGeometry.from_assembly_model(
             self.assembly,
             lattice_universe_name=lattice_name,
             channel_box_material=channel_box_material,
             outer_water_material=outer_water_material,
         )
+        self.channel_geometry.control_cross = cc_geom
     
     def add_detector_config(self, reaction_isotope_map: dict = None,
                             energy_bounds: list = None,

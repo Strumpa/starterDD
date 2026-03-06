@@ -45,7 +45,14 @@ class LIB:
     DEFAULT_SELF_SHIELDED_FUEL_ISOTOPES = [
         "U234", "U235", "U236", "U238",
         "Pu239", "Pu240", "Pu241", "Pu242",
-        "Gd154", "Gd155", "Gd156", "Gd157", "Gd158", "Gd160",
+        "Gd152", "Gd154", "Gd155", "Gd156", "Gd157", "Gd158", "Gd160",
+    ]
+    
+    DEFAULT_NON_FUEL_SELF_SHIELDED_ISOTOPES = [
+        "Zr90", "Zr91", "Zr92", "Zr94", "Zr96",
+        "Fe56",
+        "Cr52",
+        "Hf174", "Hf176", "Hf177", "Hf178", "Hf179", "Hf180",
     ]
 
     # CLE-2000 temperature variable used for each non-fuel material
@@ -55,6 +62,8 @@ class LIB:
         "GAP":         "TFUEL",
         "MODERATOR":   "TMODE",
         "COOLANT":     "TCOOL",
+        "ABS":         "TCTRL",
+        "SHEATH":      "TCTRL",
     }
 
     def __init__(self, assembly_model):
@@ -80,6 +89,7 @@ class LIB:
         self.fuel_inrs = 1  # INRS value for fuel self-shielding group
 
         # Non-fuel self-shielding: {material_name: {isotope_name: inrs_value}}
+        self.default_non_fuel_inrs = {isotope: 2 for isotope in self.DEFAULT_NON_FUEL_SELF_SHIELDED_ISOTOPES}
         self.non_fuel_inrs = {}
 
         # CLE-2000 temperature variable per non-fuel material
@@ -96,6 +106,9 @@ class LIB:
 
         # --- Auto-populate aliases from the Composition.therm flag --------
         self._auto_populate_therm_aliases()
+
+        # --- Register control cross material temperature variables --------
+        self._register_control_cross_temp_vars()
 
     # ------------------------------------------------------------------
     #  Configuration helpers
@@ -187,6 +200,18 @@ class LIB:
                 key = (mat_name, entry["isotope"])
                 if key not in self.isotope_aliases:
                     self.isotope_aliases[key] = entry["dragon_alias"]
+
+    def _register_control_cross_temp_vars(self):
+        """Ensure the assembly's control cross material names have entries
+        in ``non_fuel_temperature_map``, even when the user chose custom
+        material names that are not in ``DEFAULT_TEMPERATURE_MAP``.
+        """
+        ctrl = getattr(self.assembly, 'control_cross', None)
+        if ctrl is None:
+            return
+        for mat_name in (ctrl.absorber_material, ctrl.sheath_material):
+            if mat_name not in self.non_fuel_temperature_map:
+                self.non_fuel_temperature_map[mat_name] = "TCTRL"
 
     def add_non_fuel_mix(self, material_name, mix_index, composition,
                          temperature_variable="TCOOL"):
@@ -288,7 +313,11 @@ class LIB:
         for mat_name, idx, composition, temp_var in entries:
             iso_comp = composition.get_isotope_name_composition()
             inrs_map = self.non_fuel_inrs.get(mat_name, {})
-            lines += f"    MIX {idx} <<{temp_var}>> NOEV\n"
+            depletable = getattr(composition, 'depletable', False)
+            if depletable:
+                lines += f"    MIX {idx} <<{temp_var}>>\n"
+            else:
+                lines += f"    MIX {idx} <<{temp_var}>> NOEV\n"
             for isotope, density in iso_comp.items():
                 lib_name = self.isotope_aliases.get(
                     (mat_name, isotope), isotope
@@ -299,6 +328,65 @@ class LIB:
                 lines += line + "\n"
             lines += "\n"
 
+        return lines
+
+    def build_control_cross_generating_mix_lines(self):
+        """
+        Build full isotopic ``MIX`` definitions for control cross absorber
+        generating mixes (per-tube numbering only).
+
+        Returns an empty string if there are no per-tube absorber mixtures.
+
+        Returns
+        -------
+        str
+        """
+        if (not hasattr(self.assembly, 'control_cross_generating_mixes')
+                or not self.assembly.control_cross_generating_mixes):
+            return ""
+
+        temp_var = self.non_fuel_temperature_map.get(
+            self.assembly.control_cross.absorber_material, "TCTRL"
+        )
+        lines = ""
+        for mix in self.assembly.control_cross_generating_mixes:
+            idx = mix.material_mixture_index
+            lines += f"    MIX {idx} <<{temp_var}>>\n"
+            iso_comp = mix.composition.get_isotope_name_composition()
+            if self.non_fuel_inrs:
+                inrs_map = self.non_fuel_inrs.get(mix.material_name, {})
+            else:
+                inrs_map = self.default_non_fuel_inrs
+            for isotope, density in iso_comp.items():
+                lib_name = self.isotope_aliases.get(
+                    (mix.material_name, isotope), isotope
+                )
+                line = f"    {isotope} = {lib_name} {density:.5E}"
+                if isotope in inrs_map:
+                    line += f" {inrs_map[isotope]}"
+                lines += line + "\n"
+        return lines
+
+    def build_control_cross_daughter_mix_lines(self):
+        """
+        Build ``MIX <index> COMB <generating_index> 1.0`` lines for
+        control cross absorber daughter mixes (per-tube numbering only).
+
+        Returns an empty string if there are no per-tube absorber mixtures.
+
+        Returns
+        -------
+        str
+        """
+        if (not hasattr(self.assembly, 'control_cross_daughter_mixes')
+                or not self.assembly.control_cross_daughter_mixes):
+            return ""
+
+        lines = ""
+        for mix in self.assembly.control_cross_daughter_mixes:
+            idx = mix.material_mixture_index
+            gen_idx = mix.generating_mix.material_mixture_index
+            lines += f"    MIX {idx} COMB {gen_idx} 1.0\n"
         return lines
 
     def build_mix_index_comment_block(self):
@@ -330,6 +418,18 @@ class LIB:
             for name, idx in self.assembly.non_fuel_material_mixture_indices.items():
                 lines += f"*   {idx:4d} : {name}\n"
 
+        # Control cross absorber tube mixes (per-tube numbering)
+        if (hasattr(self.assembly, 'control_cross_absorber_mixtures')
+                and self.assembly.control_cross_absorber_mixtures):
+            lines += "* -- Control cross absorber tubes --\n"
+            for mix in self.assembly.control_cross_absorber_mixtures:
+                if mix.is_generating:
+                    tag = " (generating)"
+                else:
+                    tag = f" (daughter of mix {mix.generating_mix.material_mixture_index})"
+                lines += (f"*   {mix.material_mixture_index:4d} : "
+                          f"{mix.unique_material_mixture_name}{tag}\n")
+
         for extra in self._extra_non_fuel_mixes:
             lines += f"*   {extra['index']:4d} : {extra['name']}\n"
 
@@ -346,6 +446,8 @@ class LIB:
         max_mix = self._get_max_mix_index()
         generating = self.build_generating_mix_lines()
         daughters = self.build_daughter_mix_lines()
+        ctrl_generating = self.build_control_cross_generating_mix_lines()
+        ctrl_daughters = self.build_control_cross_daughter_mix_lines()
         non_fuel = self.build_non_fuel_mix_lines()
 
         call = (
@@ -359,6 +461,8 @@ class LIB:
             "MIXS LIB: DRAGON FIL: <<Library>>\n"
             f"{generating}"
             f"{daughters}"
+            f"{ctrl_generating}"
+            f"{ctrl_daughters}"
             f"{non_fuel}"
             ";\n"
         )
@@ -406,19 +510,10 @@ class LIB:
             ":: >>anis_level<< ; ! Anisotropy level\n"
             "STRING tran_correc ;\n"
             ":: >>tran_correc<< ; ! Transport correction option\n"
-            "DOUBLE DTFUEL DTBOX DTCLAD DTCOOL DTMODE ;\n"
-            ":: >>DTFUEL<< >>DTBOX<< >>DTCLAD<< >>DTCOOL<< "
-            ">>DTMODE<< ; ! Temperatures\n"
+            "REAL TFUEL TBOX TCLAD TCOOL TMODE TCTRL ;\n"
+            ":: >>TFUEL<< >>TBOX<< >>TCLAD<< >>TCOOL<< >>TMODE<< >>TCTRL<< ;\n"
             "\n"
-            "* --------------------------------------------\n"
-            "*  CONVERT DOUBLE TO REALS for TEMPERATURES\n"
-            "* --------------------------------------------\n"
-            "REAL TFUEL := DTFUEL D_TO_R ;\n"
-            "REAL TBOX := DTBOX D_TO_R ;\n"
-            "REAL TCLAD := DTCLAD D_TO_R ;\n"
-            "REAL TCOOL := DTCOOL D_TO_R ;\n"
-            "REAL TMODE := DTMODE D_TO_R ;\n"
-            "\n"
+            "* -------------------------------\n"
             "*    STRUCTURES AND MODULES\n"
             "* -------------------------------\n"
             "MODULE  LIB: UTL: DELETE: END: ABORT: ;\n"
@@ -468,6 +563,12 @@ class LIB:
         if hasattr(self.assembly, 'non_fuel_material_mixture_indices'):
             all_indices.extend(
                 self.assembly.non_fuel_material_mixture_indices.values()
+            )
+        if (hasattr(self.assembly, 'control_cross_absorber_mixtures')
+                and self.assembly.control_cross_absorber_mixtures):
+            all_indices.extend(
+                m.material_mixture_index
+                for m in self.assembly.control_cross_absorber_mixtures
             )
         for extra in self._extra_non_fuel_mixes:
             all_indices.append(extra["index"])
@@ -932,14 +1033,12 @@ class EDI_COMPO:
             "* --------------------------------\n"
             "*    INPUT & OUTPUT PARAMETERS\n"
             "* --------------------------------\n"
-            "PARAMETER COMPO FLUX LIBRARY2 TRACK ::\n"
-            "::: LINKED_LIST COMPO ;\n"
+            "PARAMETER FLUX LIBRARY2 TRACK ::\n"
             "::: LINKED_LIST FLUX ;\n"
             "::: LINKED_LIST LIBRARY2 ;\n"
             "::: LINKED_LIST TRACK ; ;\n"
-            "STRING name_cpo save_opt ;\n"
-            ":: >>name_cpo<< >>save_opt<< ; "
-            "! save option for COMPO: module, e.g. 'SAVE' or 'NOSAVE'\n"
+            "STRING name_cpo ;\n"
+            ":: >>name_cpo<< ; "
             "* --------------------------------\n"
             "*    MODULES DEFINITION\n"
             "* --------------------------------\n"
@@ -947,7 +1046,7 @@ class EDI_COMPO:
             "* --------------------------------\n"
             "*    LOCAL VARIABLES DEFINITION\n"
             "* --------------------------------\n"
-            "LINKED_LIST EDIRATES ;\n"
+            "LINKED_LIST EDIRATES COMPO ;\n"
             "* --------------------------------\n"
             "*    COMPO FILE NAME FOR EXPORT\n"
             "* --------------------------------\n"
@@ -958,9 +1057,9 @@ class EDI_COMPO:
 
         footer = (
             "* --------------------------------\n"
-            "IF save_opt 'SAVE' = THEN\n"
-            "   _COMPO := COMPO ;\n"
-            "ENDIF ;\n"
+            "*    EXPORT COMPO TO ASCII FILE\n"
+            "* --------------------------------\n"
+            "_COMPO := COMPO ;\n"
             "END: ;\n"
         )
 
@@ -978,6 +1077,39 @@ class EDI_COMPO:
 
 
 class MAC:
+    """Generate DRAGON5 ``MAC:`` module calls for macroscopic cross-section libraries.
+
+    Creates a macrolib from a collection of :class:`MaterialMixture` objects
+    whose ``xs_data`` attribute carries the cross-section values (total,
+    absorption, nu·fission, scattering matrix, etc.).
+
+    The module supports two modes:
+
+    * ``create_new=True`` (default): emit ``MACLIB := MAC: :: …``
+      which creates a new macroscopic library.
+    * ``create_new=False``: emit ``MACLIB := MAC: MACLIB :: …`` which
+      updates an existing macrolib.
+
+    Parameters
+    ----------
+    macro_lib_name : str
+        CLE-2000 identifier for the macrolib object.
+    create_new : bool
+        If ``True`` (default), a fresh macrolib is created.  If
+        ``False``, an existing one is updated.
+
+    Attributes
+    ----------
+    material_mixtures : list of MaterialMixture
+        Mixtures added via :meth:`add_material_mixture`.
+    iprint : int
+        DRAGON print level (default 1).
+    ngroup : int
+        Number of energy groups (default 1).
+    anisotropy_level : int
+        Legendre expansion order for scattering (default 0).
+    """
+
     def __init__(self, macro_lib_name: str, create_new: bool = True):
         """
         MAC: module initialization.
