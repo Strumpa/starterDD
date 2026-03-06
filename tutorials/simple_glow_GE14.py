@@ -97,7 +97,7 @@ for step in scheme.steps:
 
     # ---- Recover TDT material mixture indices ----
     tdt_indices = read_material_mixture_indices_from_tdt_file(
-        tdt_file_path=f"/home/user/{path_to_tdt}",
+        tdt_file_path=path_to_tdt,
         tdt_file_name=file_to_save_name,
         tracking_option=step.tracking,
         include_macros=step.export_macros,

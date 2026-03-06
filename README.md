@@ -15,7 +15,7 @@
 # To open documentation : 
 open ``_build/html/index.html`` in your browser
 or use one of the following commands: 
-- python -m _build/html/http.server
+- python -m http.server --directory _build/html/
 - sphinx-autobuild . ./_build/html
 
 # To run tests

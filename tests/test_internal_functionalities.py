@@ -1,4 +1,4 @@
-"""Tests for internal functionalities, called and implicitely tested by the remaining test suite.
+"""Tests for internal functionalities, called and implicitly tested by the remaining test suite.
 
 Covers gaps identified in the comprehensive review, grouped by module:
   A. MaterialProperties — get_element_symbol, zaid_to_isotope, XSData edges, HM_isotopes
@@ -482,7 +482,7 @@ class TestS2MaterialUnit:
         """from_mass_fractions should produce negative density card."""
         mat = S2_Material.from_mass_fractions(
             name="test_mass",
-            mass_fractions={"92235": -0.04, "8016": -0.96},
+            mass_fractions={"92235": 0.04, "U238": 0.96},
             mass_density=10.0,
             temperature=600.0,
         )
