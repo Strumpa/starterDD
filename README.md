@@ -12,7 +12,7 @@
 - cd docs
 - make html
 
-# To open documentation : 
+# To open the documentation : 
 open ``_build/html/index.html`` in your browser
 or use one of the following commands: 
 - python -m http.server --directory _build/html/
