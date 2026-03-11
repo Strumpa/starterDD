@@ -1,6 +1,6 @@
 # Classes defining a DRAGON calculation scheme for starterDD.
 # A calculation scheme orchestrates the sequence of DRAGON calculation steps
-# (self-shielding, flux, depletion) and their respective geometry
+# (self-shielding, flux) and their respective geometry
 # discretization options (radial subdivision, azimuthal sectorization).
 #
 # R.Guasch
@@ -629,6 +629,8 @@ class CalculationStep:
         ``None``, no box discretization is applied.
     """
 
+    VALID_POLAR_QUADRATURES = ("GAUS", "CACA", "CACB", "LCMD", "OPP1", "OGAU")
+
     def __init__(
         self,
         name,
@@ -647,6 +649,11 @@ class CalculationStep:
         water_rod_sectors=None,
         export_macros=False,
         box_discretization=None,
+        num_angles_2d=8,
+        line_density=25.0,
+        anisotropy_level=1,
+        polar_angles_quadrature=None,
+        number_of_polar_angles=None,
     ):
         # --- Validate step type ---
         if step_type not in VALID_STEP_TYPES:
@@ -719,6 +726,23 @@ class CalculationStep:
                 f"Valid options: {VALID_RADIAL_SCHEMES}"
             )
 
+        # --- Validate tracking parameters ---
+        if spatial_method == "MOC":
+            if polar_angles_quadrature is None:
+                raise ValueError(
+                    "polar_angles_quadrature is required for MOC steps. "
+                    f"Valid options: {self.VALID_POLAR_QUADRATURES}"
+                )
+            if polar_angles_quadrature not in self.VALID_POLAR_QUADRATURES:
+                raise ValueError(
+                    f"Invalid polar_angles_quadrature '{polar_angles_quadrature}'. "
+                    f"Valid options: {self.VALID_POLAR_QUADRATURES}"
+                )
+            if number_of_polar_angles is None:
+                raise ValueError(
+                    "number_of_polar_angles is required for MOC steps."
+                )
+
         self.name = name
         self.step_type = step_type
         self.self_shielding_module = self_shielding_module
@@ -735,6 +759,11 @@ class CalculationStep:
         self.water_rod_sectors = water_rod_sectors
         self.export_macros = export_macros
         self.box_discretization = box_discretization
+        self.num_angles_2d = num_angles_2d
+        self.line_density = line_density
+        self.anisotropy_level = anisotropy_level
+        self.polar_angles_quadrature = polar_angles_quadrature
+        self.number_of_polar_angles = number_of_polar_angles
 
     # ------------------------------------------------------------------
     # Radii application
@@ -1149,46 +1178,53 @@ class DragonCalculationScheme:
                 side_y_splits=box_disc_raw.get("side_y_splits", None),
             )
 
+        # --- Tracking parameters (common to all step types) ---
+        tracking_kwargs = dict(
+            num_angles_2d=d.get("num_angles_2d", 8),
+            line_density=d.get("line_density", 25.0),
+            anisotropy_level=d.get("anisotropy_level", 1),
+            polar_angles_quadrature=d.get(
+                "polar_angles_quadrature", None),
+            number_of_polar_angles=d.get(
+                "number_of_polar_angles", None),
+        )
+
         # --- Build CalculationStep with appropriate parameters ---
         step_type = d["step_type"]
-        
-        # Only include self_shielding_module and self_shielding_method for self_shielding steps
+
+        # Common kwargs shared by both branches
+        common_kwargs = dict(
+            tracking=d.get("tracking", "TISO"),
+            flux_level=d.get("flux_level", None),
+            radial_scheme=d.get("radial_scheme", "Santamarina"),
+            radial_params=d.get("radial_params", {}),
+            radial_overrides=radial_overrides,
+            sectorization_enabled=sect_enabled,
+            fuel_sectors=fuel_sectors,
+            gd_sectors=gd_sectors,
+            water_rod_sectors=water_rod_sectors,
+            export_macros=d.get("export_macros", False),
+            box_discretization=box_disc,
+            **tracking_kwargs,
+        )
+
         if step_type == "self_shielding":
             return CalculationStep(
                 name=d["name"],
                 step_type=step_type,
-                self_shielding_module=d.get("self_shielding_module", "USS"),
-                self_shielding_method=d.get("self_shielding_method", "RSE"),
+                self_shielding_module=d.get(
+                    "self_shielding_module", "USS"),
+                self_shielding_method=d.get(
+                    "self_shielding_method", "RSE"),
                 spatial_method=d.get("spatial_method", "CP"),
-                tracking=d.get("tracking", "TISO"),
-                flux_level=d.get("flux_level", None),
-                radial_scheme=d.get("radial_scheme", "Santamarina"),
-                radial_params=d.get("radial_params", {}),
-                radial_overrides=radial_overrides,
-                sectorization_enabled=sect_enabled,
-                fuel_sectors=fuel_sectors,
-                gd_sectors=gd_sectors,
-                water_rod_sectors=water_rod_sectors,
-                export_macros=d.get("export_macros", False),
-                box_discretization=box_disc,
+                **common_kwargs,
             )
         else:
-            # Flux steps: no self_shielding_module or self_shielding_method
             return CalculationStep(
                 name=d["name"],
                 step_type=step_type,
                 spatial_method=d.get("spatial_method", "CP"),
-                tracking=d.get("tracking", "TISO"),
-                flux_level=d.get("flux_level", None),
-                radial_scheme=d.get("radial_scheme", "Santamarina"),
-                radial_params=d.get("radial_params", {}),
-                radial_overrides=radial_overrides,
-                sectorization_enabled=sect_enabled,
-                fuel_sectors=fuel_sectors,
-                gd_sectors=gd_sectors,
-                water_rod_sectors=water_rod_sectors,
-                export_macros=d.get("export_macros", False),
-                box_discretization=box_disc,
+                **common_kwargs,
             )
 
     # ------------------------------------------------------------------
@@ -1279,6 +1315,11 @@ class DragonCalculationScheme:
             radial_scheme="Santamarina",
             sectorization_enabled=True,
             export_macros=False,
+            num_angles_2d=24,
+            line_density=40.0,
+            anisotropy_level=4,
+            polar_angles_quadrature="GAUS",
+            number_of_polar_angles=4,
             fuel_sectors=SectorConfig(
                 sectors=[8, 8, 8, 8, 8, 8, 8],
                 angles=[22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5],
@@ -1357,6 +1398,11 @@ class DragonCalculationScheme:
             radial_scheme="Santamarina",
             sectorization_enabled=True,
             export_macros=True,
+            num_angles_2d=24,
+            line_density=40.0,
+            anisotropy_level=4,
+            polar_angles_quadrature="GAUS",
+            number_of_polar_angles=4,
             fuel_sectors=SectorConfig(
                 sectors=[8, 8, 8, 8, 8, 8, 8],
                 angles=[22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5],

@@ -574,6 +574,7 @@ class LIB:
             all_indices.append(extra["index"])
         return max(all_indices) if all_indices else 0
 
+
 class EDI:
     """
     Class for generating DRAGON5 ``EDI:`` module call blocks.
@@ -1177,3 +1178,316 @@ class MAC:
                         file.write(f"  {reaction.upper()} {values_str}\n")
             
             file.write(";\n")
+
+
+class SALT:
+    """
+    Generate DRAGON5 ``SALT:`` module call blocks for tracking glow
+    generated TDT geometries.
+
+    Builds the correct SALT syntax depending on the spatial method
+    (CP, IC, MOC) stored in the ``CalculationStep``.
+
+    Parameters
+    ----------
+    calculation_step : CalculationStep
+        Provides spatial_method, tracking, num_angles_2d,
+        line_density, anisotropy_level, polar_angles_quadrature.
+    tdt_var_name : str
+        CLE-2000 variable name for the SEQ_ASCII TDT geometry.
+    track_name : str or None
+        Name for the LINKED_LIST tracking object.  Derived from
+        ``step.name`` when ``None``.
+    title : str or None
+        Title string for the SALT call.  Auto-generated if ``None``.
+    batch : int or None
+        BATCH parameter.  Defaults to 200 for IC/CP, 2000 for MOC.
+    """
+
+    AVAILABLE_QUADRATURES = (
+        "GAUS", "CACA", "CACB", "LCMD", "OPP1", "OGAU",
+    )
+
+    def __init__(self, calculation_step, tdt_var_name,
+                 track_name=None, title=None, batch=None):
+        self.step = calculation_step
+        self.tdt_var_name = tdt_var_name
+
+        step_tag = self.step.name.upper()
+        self.track_name = track_name or f"TRK{step_tag}"
+        self.trkfil_name = f"TRKFIL{step_tag}"
+        self.title = title or (
+            f"{step_tag} - {self.step.spatial_method}"
+        )
+        if batch is not None:
+            self.batch = batch
+        else:
+            self.batch = (
+                2000 if self.step.spatial_method == "MOC"
+                else 200
+            )
+
+    def build_salt_call(self):
+        """Return the full ``SALT:`` call block as a string."""
+        s = self.step
+        lines = []
+        lines.append(
+            f"{self.track_name} {self.trkfil_name} "
+            f":= SALT: {self.tdt_var_name} ::"
+        )
+        lines.append("    EDIT 1")
+        lines.append(f"    TITLE '{self.title}'")
+
+        if s.spatial_method == "MOC":
+            lines.append("    ALLG LONG")
+
+        lines.append(f"    BATCH {self.batch}")
+
+        if s.spatial_method == "MOC":
+            lines.append(f"    {s.polar_angles_quadrature}")
+            lines.append(f"    ANIS <<o_anis>>")
+            lines.append(
+                f"    {s.tracking} EQW2 "
+                f"{s.num_angles_2d} "
+                f"{s.line_density:.1f} REND"
+            )
+            lines.append("    NOIC")
+        elif s.spatial_method == "IC":
+            lines.append(
+                f"    {s.tracking} EQW "
+                f"{s.num_angles_2d} "
+                f"{s.line_density:.1f}"
+            )
+            lines.append("    IC EPSJ 1.0E-5")
+        else:
+            # CP
+            lines.append(
+                f"    {s.tracking} EQW "
+                f"{s.num_angles_2d} "
+                f"{s.line_density:.1f}"
+            )
+
+        lines.append(";")
+        return "\n".join(lines) + "\n"
+
+
+class MCCGT:
+    """
+    Generate DRAGON5 ``MCCGT:`` module call for MOC tracking.
+
+    Only applicable when ``spatial_method == "MOC"``.
+
+    Parameters
+    ----------
+    calculation_step : CalculationStep
+        Must have ``spatial_method == "MOC"``.
+    track_name : str or None
+        LINKED_LIST tracking object name.  Defaults to
+        ``TRK{step.name}``.
+    max_inner_iterations : int
+        AAC iteration limit (default 100).
+    krylov_dim : int
+        Krylov subspace dimension (default 10).
+    """
+
+    def __init__(self, calculation_step, track_name=None,
+                 max_inner_iterations=100, krylov_dim=10):
+        if calculation_step.spatial_method != "MOC":
+            raise ValueError(
+                "MCCGT is only applicable for MOC steps."
+            )
+        self.step = calculation_step
+        step_tag = self.step.name.upper()
+        self.track_name = track_name or f"TRK{step_tag}"
+        self.trkfil_name = f"TRKFIL{step_tag}"
+        self.max_inner_iterations = max_inner_iterations
+        self.krylov_dim = krylov_dim
+
+    def build_mccgt_call(self):
+        """Return the full ``MCCGT:`` call block as a string."""
+        s = self.step
+        lines = []
+        lines.append(
+            f"{self.track_name} := MCCGT: "
+            f"{self.track_name} {self.trkfil_name} ::"
+        )
+        lines.append("    EDIT 1")
+        lines.append(
+            f"    {s.polar_angles_quadrature} <<o_anis>> "
+            f"AAC {self.max_inner_iterations} ILU0"
+        )
+        lines.append(
+            f"    HDD 0.0 SC KRYL {self.krylov_dim}"
+        )
+        lines.append(";")
+        return "\n".join(lines) + "\n"
+
+
+class TRK:
+    """
+    Generate a ``TRK.c2m`` sub-procedure that contains all SALT:
+    (and MCCGT:) calls for every step in a calculation scheme.
+
+    The procedure receives TDT SEQ_ASCII variables and the anisotropy
+    level as input parameters and returns the LINKED_LIST tracking
+    objects and their SEQ_BINARY companion files.
+
+    Parameters
+    ----------
+    scheme : DragonCalculationScheme
+        Calculation scheme whose steps define the tracking calls.
+    case_name : str
+        Used to derive TDT file names.
+    """
+
+    def __init__(self, scheme, case_name):
+        self.scheme = scheme
+        self.case_name = case_name
+        self._salt_objects = []
+        self._mccgt_objects = []
+        self._build_tracking_objects()
+
+    def _build_tracking_objects(self):
+        """Create SALT (and MCCGT) objects for each step."""
+        for step in self.scheme.steps:
+            tdt_var = self._tdt_var_name(step)
+            salt = SALT(step, tdt_var)
+            self._salt_objects.append(salt)
+            if step.spatial_method == "MOC":
+                mccgt = MCCGT(step)
+                self._mccgt_objects.append(mccgt)
+
+    def _tdt_var_name(self, step):
+        """CLE-2000 variable name for the TDT file import."""
+        tag = step.name.lower()
+        return f"tdt_{tag}"
+
+    def _tdt_file_name(self, step):
+        """Physical TDT file name as produced by glow."""
+        suffix = "_MACRO" if step.export_macros else ""
+        return (
+            f"{self.case_name}_{step.name}"
+            f"_{step.spatial_method}"
+            f"_{step.tracking}{suffix}.dat"
+        )
+
+    def get_tdt_file_mapping(self):
+        """
+        ``{cle2000_var_name: physical_file_name}`` for every step.
+        Used by the main x2m to declare SEQ_ASCII imports.
+        """
+        return {
+            self._tdt_var_name(s): self._tdt_file_name(s)
+            for s in self.scheme.steps
+        }
+
+    def get_track_names(self):
+        """
+        ``[(track_ll_name, trkfil_name)]`` per step (ordered).
+        """
+        result = []
+        for step in self.scheme.steps:
+            tag = step.name.upper()
+            result.append((f"TRK{tag}", f"TRKFIL{tag}"))
+        return result
+
+    def build_procedure_body(self):
+        """Build the body of the TRK.c2m procedure."""
+        from .CLE2000 import CLE2000_MAX_LINE, wrap_cle2000_line
+        body = ""
+        for salt in self._salt_objects:
+            body += (
+                f"* Tracking for step {salt.step.name}\n"
+            )
+            body += salt.build_salt_call()
+            body += "\n"
+
+        for mccgt in self._mccgt_objects:
+            body += (
+                f"* MOC tracking for step "
+                f"{mccgt.step.name}\n"
+            )
+            body += mccgt.build_mccgt_call()
+            body += "\n"
+
+        return body
+
+    def write_to_c2m(self, path_to_procs, proc_name):
+        """
+        Write the complete TRK sub-procedure to a ``.c2m`` file.
+        """
+        from .CLE2000 import (
+            CLE2000_MAX_LINE, CLE2000_MAX_VARNAME,
+            validate_varname, wrap_cle2000_line,
+        )
+
+        track_names = self.get_track_names()
+        tdt_map = self.get_tdt_file_mapping()
+
+        # --- PARAMETER block ---
+        param_items = []
+        for trk_ll, trkfil in track_names:
+            validate_varname(trk_ll)
+            validate_varname(trkfil)
+            param_items.append(trk_ll)
+        for tdt_var in tdt_map:
+            validate_varname(tdt_var)
+            param_items.append(tdt_var)
+
+        header = (
+            f"* PROCEDURE {proc_name}.c2m : tracking\n"
+            "* --------------------------------\n"
+            "* Procedure generated by starterDD\n"
+            "* --------------------------------\n"
+            "*    INPUT & OUTPUT PARAMETERS\n"
+            "* --------------------------------\n"
+        )
+
+        # PARAMETER declaration
+        param_block = "PARAMETER"
+        for item in param_items:
+            param_block += f" {item}"
+        param_block += " ::\n"
+        # Linked-list declarations
+        for trk_ll, _ in track_names:
+            param_block += (
+                f"::: LINKED_LIST {trk_ll} ;\n"
+            )
+        # TDT vars are SEQ_ASCII (no linked-list decl)
+        param_block += ";\n"
+
+        # Variable input: anisotropy level
+        var_block = (
+            "INTEGER o_anis ;\n"
+            ":: >>o_anis<< ;\n"
+        )
+
+        # MODULE declaration
+        mod_block = "MODULE SALT: MCCGT: END: ;\n"
+
+        # SEQ_BINARY declarations
+        seq_bin_names = [tf for _, tf in track_names]
+        seq_block = wrap_cle2000_line(
+            "SEQ_BINARY " + " ".join(seq_bin_names) + " ;"
+        ) + "\n"
+
+        body = self.build_procedure_body()
+
+        footer = "END: ;\nQUIT .\n"
+
+        content = (
+            f"{header}{param_block}\n{var_block}\n"
+            f"{mod_block}\n{seq_block}\n{body}{footer}"
+        )
+
+        if path_to_procs and not os.path.exists(path_to_procs):
+            os.makedirs(path_to_procs)
+
+        filepath = os.path.join(
+            path_to_procs, f"{proc_name}.c2m"
+        )
+        with open(filepath, 'w') as f:
+            f.write(content)
+
+        print(f"[TRK] Wrote procedure to {filepath}")
+        return filepath

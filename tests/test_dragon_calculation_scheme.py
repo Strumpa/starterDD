@@ -610,9 +610,13 @@ class TestCalculationStep:
             name="FLUX_MOC", step_type="flux",
             spatial_method="MOC",
             tracking="TSPC",
+            polar_angles_quadrature="GAUS",
+            number_of_polar_angles=4,
         )
         assert step.spatial_method == "MOC"
         assert step.tracking == "TSPC"
+        assert step.polar_angles_quadrature == "GAUS"
+        assert step.number_of_polar_angles == 4
 
     def test_sectorization_query_disabled(self):
         step = CalculationStep(
@@ -742,6 +746,8 @@ class TestDragonCalculationScheme:
             name="FLUX_L2", step_type="flux",
             spatial_method="MOC",
             tracking="TSPC", flux_level=2,
+            polar_angles_quadrature="GAUS",
+            number_of_polar_angles=4,
         )
         scheme.add_step(ssh)
         scheme.add_step(flux2)  # Add L2 first
@@ -914,6 +920,11 @@ class TestFromYAML:
                         "radial_scheme": "automatic",
                         "radial_params": {"num_radial_zones": 3},
                         "export_macros": True,
+                        "num_angles_2d": 24,
+                        "line_density": 40.0,
+                        "anisotropy_level": 4,
+                        "polar_angles_quadrature": "GAUS",
+                        "number_of_polar_angles": 4,
                         "sectorization": {
                             "enabled": True,
                             "windmill": True,
@@ -1060,6 +1071,8 @@ class TestFromYAML:
                         "spatial_method": "MOC",
                         "tracking": "TSPC",
                         "radial_scheme": "Santamarina",
+                        "polar_angles_quadrature": "GAUS",
+                        "number_of_polar_angles": 4,
                         "sectorization": {
                             "enabled": True,
                             "windmill": True,
@@ -1109,6 +1122,8 @@ class TestFromYAML:
                         "spatial_method": "MOC",
                         "tracking": "TSPC",
                         "radial_scheme": "Santamarina",
+                        "polar_angles_quadrature": "GAUS",
+                        "number_of_polar_angles": 4,
                         "sectorization": {
                             "enabled": True,
                             "water_rods": {

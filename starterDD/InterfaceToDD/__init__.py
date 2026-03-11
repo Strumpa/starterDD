@@ -1,6 +1,11 @@
 """InterfaceToDD module - Dragon module call generation."""
 
-from .dragon_module_calls import LIB, MAC, EDI, COMPO, EDI_COMPO
+from .dragon_module_calls import LIB, MAC, EDI, COMPO, EDI_COMPO, SALT, MCCGT, TRK
+from .CLE2000 import (
+    CLE2000_MAX_LINE, CLE2000_MAX_VARNAME,
+    validate_varname, wrap_cle2000_line,
+    CLE2000_procedure, main_procedure, sub_procedure,
+)
 from .Serpent2_exports import (
     # Constants and utilities
     REACTION_TO_MT_NUMBER,
@@ -33,7 +38,17 @@ __all__ = ["LIB",
            "MAC", 
            "EDI", 
            "COMPO", 
-           "EDI_COMPO", 
+           "EDI_COMPO",
+           "SALT",
+           "MCCGT",
+           "TRK",
+           "CLE2000_MAX_LINE",
+           "CLE2000_MAX_VARNAME",
+           "validate_varname",
+           "wrap_cle2000_line",
+           "CLE2000_procedure",
+           "main_procedure",
+           "sub_procedure",
            "REACTION_TO_MT_NUMBER",
            "DRAGON_REAC_TO_REACTION_NAME",
            "ELEMENT_TO_Z",
