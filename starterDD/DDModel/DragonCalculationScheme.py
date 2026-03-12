@@ -903,6 +903,260 @@ class CalculationStep:
 
 
 # ---------------------------------------------------------------------------
+# CalculationBranch – parameter variation for branch calculations
+# ---------------------------------------------------------------------------
+
+VALID_BRANCH_TYPES = (
+    "coolant_density", "fuel_temperature",
+    "coolant_temperature", "burnup",
+)
+
+# Default ordering of branch loops (outermost → innermost)
+DEFAULT_BRANCH_LOOP_ORDER = [
+    "fuel_temperature", "coolant_temperature", "coolant_density",
+]
+
+# Map branch type → COMPO PARA name (CLE2000 ≤ 12 chars)
+BRANCH_TYPE_TO_PARA_NAME = {
+    "fuel_temperature":    "TFuel",
+    "coolant_temperature": "TCool",
+    "coolant_density":     "DCool",
+    "burnup":              "Burnup",
+}
+
+# Map branch type → COMPO PARA keyword
+BRANCH_TYPE_TO_PARA_KEYWORD = {
+    "fuel_temperature":    "VALU REAL",
+    "coolant_temperature": "VALU REAL",
+    "coolant_density":     "VALU REAL",
+    "burnup":              "IRRA",
+}
+
+# Map branch type → CLE2000 UTL: array name (≤ 12 chars)
+BRANCH_TYPE_TO_ARRAY_NAME = {
+    "fuel_temperature":    "fuel_temp",
+    "coolant_temperature": "cool_temp",
+    "coolant_density":     "cool_dens",
+    "burnup":              "burnup_pts",
+}
+
+# Map branch type → CLE2000 counter variable (≤ 12 chars)
+BRANCH_TYPE_TO_COUNTER = {
+    "fuel_temperature":    "i_Tfuel",
+    "coolant_temperature": "i_Tcool",
+    "coolant_density":     "i_DCool",
+    "burnup":              "i_BU",
+}
+
+# Map branch type → CLE2000 count variable (≤ 12 chars)
+BRANCH_TYPE_TO_COUNT_VAR = {
+    "fuel_temperature":    "n_Tfuel",
+    "coolant_temperature": "n_Tcool",
+    "coolant_density":     "n_DCool",
+    "burnup":              "n_BU",
+}
+
+
+class CalculationBranch:
+    """
+    A parameter variation axis for branch calculations.
+
+    Represents one dimension in the multi-parameter space over which
+    DRAGON calculations are tabulated (e.g. coolant density at 5 void
+    fractions, fuel temperature at 3 values, etc.).
+
+    Attributes
+    ----------
+    name : str
+        Human-readable label, e.g. ``"Coolant density variation"``.
+    type : str
+        One of ``"coolant_density"``, ``"fuel_temperature"``,
+        ``"coolant_temperature"``, ``"burnup"``.
+    values : list[float]
+        Parameter values to iterate over.
+    """
+
+    def __init__(self, name, branch_type, values):
+        if branch_type not in VALID_BRANCH_TYPES:
+            raise ValueError(
+                f"Invalid branch type '{branch_type}'. "
+                f"Valid types: {VALID_BRANCH_TYPES}"
+            )
+        if branch_type == "burnup" and len(values) > 1:
+            raise NotImplementedError(
+                "Depletion branches (burnup with multiple values) "
+                "are not yet supported. Use a single burnup value "
+                "(e.g. [0.0]) for fresh-fuel calculations."
+            )
+        self.name = name
+        self.type = branch_type
+        self.values = list(values)
+
+    @property
+    def para_name(self):
+        """CLE2000 COMPO PARA name for this branch type."""
+        return BRANCH_TYPE_TO_PARA_NAME[self.type]
+
+    @property
+    def para_keyword(self):
+        """CLE2000 COMPO PARA keyword for this branch type."""
+        return BRANCH_TYPE_TO_PARA_KEYWORD[self.type]
+
+    @property
+    def array_name(self):
+        """CLE2000 UTL: CREA array name."""
+        return BRANCH_TYPE_TO_ARRAY_NAME[self.type]
+
+    @property
+    def counter_var(self):
+        """CLE2000 WHILE loop counter variable name."""
+        return BRANCH_TYPE_TO_COUNTER[self.type]
+
+    @property
+    def count_var(self):
+        """CLE2000 INTEGER variable holding the number of points."""
+        return BRANCH_TYPE_TO_COUNT_VAR[self.type]
+
+    def __repr__(self):
+        return (
+            f"CalculationBranch(name='{self.name}', "
+            f"type='{self.type}', "
+            f"values={self.values})"
+        )
+
+    @classmethod
+    def from_yaml_entry(cls, entry):
+        """Parse a single branch entry from YAML.
+
+        Parameters
+        ----------
+        entry : dict
+            ``{"name": ..., "type": ..., "values": [...]}``.
+
+        Returns
+        -------
+        CalculationBranch
+        """
+        return cls(
+            name=entry["name"],
+            branch_type=entry["type"],
+            values=entry["values"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# CalculationOutput – specification for an EDI/COMPO output
+# ---------------------------------------------------------------------------
+
+class CalculationOutput:
+    """
+    Specification for a single EDI → COMPO output volume.
+
+    Each output defines the spatial integration, energy condensation,
+    isotope list, and the subset of state points at which to generate
+    the edition.
+
+    Attributes
+    ----------
+    name : str
+        COMPO directory / EDI ``SAVE ON`` name (≤ 12 chars for CLE2000).
+    comment : str
+        Human-readable description.
+    isotopes : list[str]
+        Isotopes tracked (``MICR`` / ``ISOT`` keywords).
+    spatial_integration_mode : str
+        ``"FUEL"``, ``"ALL"``, ``"by_pin"``, etc.
+    energy_bounds : list[float] | None | str
+        ``None`` or ``"None"`` → no COND (keep all groups).
+        ``[]`` → COND (collapse to 1 group).
+        ``[0.625]`` → COND 0.625 (2-group).
+    state_points : str | dict
+        ``"ALL"`` — tabulate at every branch combination.
+        ``dict`` — selective: ``{branch_type: [value, ...]}`` listing
+        the specific values at which this output is generated.
+    """
+
+    def __init__(self, name, comment, isotopes,
+                 spatial_integration_mode, energy_bounds,
+                 state_points):
+        self.name = name
+        self.comment = comment
+        self.isotopes = list(isotopes)
+        self.spatial_integration_mode = spatial_integration_mode
+
+        # Normalise energy_bounds
+        if energy_bounds is None or energy_bounds == "None":
+            self.energy_bounds = None
+        else:
+            self.energy_bounds = list(energy_bounds)
+
+        # Normalise state_points
+        if isinstance(state_points, str) and state_points.upper() == "ALL":
+            self.state_points = "ALL"
+        elif isinstance(state_points, dict):
+            self.state_points = {
+                k: list(v) for k, v in state_points.items()
+            }
+        else:
+            self.state_points = "ALL"
+
+    def applies_to(self, statepoint_dict):
+        """Check whether this output should be generated at a given statepoint.
+
+        Parameters
+        ----------
+        statepoint_dict : dict
+            ``{branch_type: current_value}`` for each active branch,
+            e.g. ``{"coolant_density": 0.736, "fuel_temperature": 900.0, ...}``.
+
+        Returns
+        -------
+        bool
+        """
+        if self.state_points == "ALL":
+            return True
+        for branch_type, required_values in self.state_points.items():
+            current = statepoint_dict.get(branch_type)
+            if current is None:
+                continue
+            if current not in required_values:
+                return False
+        return True
+
+    def __repr__(self):
+        return (
+            f"CalculationOutput(name='{self.name}', "
+            f"mode='{self.spatial_integration_mode}', "
+            f"bounds={self.energy_bounds}, "
+            f"state_points={self.state_points})"
+        )
+
+    @classmethod
+    def from_yaml_entry(cls, entry):
+        """Parse a single output entry from YAML.
+
+        Parameters
+        ----------
+        entry : dict
+
+        Returns
+        -------
+        CalculationOutput
+        """
+        return cls(
+            name=entry["name"],
+            comment=entry.get("comment", ""),
+            isotopes=entry.get("isotopes", []),
+            spatial_integration_mode=entry.get(
+                "spatial_integration_mode",
+                entry.get("spatial_intergation_mode", "FUEL"),
+            ),
+            energy_bounds=entry.get("energy_bounds", None),
+            state_points=entry.get("state_points", "ALL"),
+        )
+
+
+# ---------------------------------------------------------------------------
 # DragonCalculationScheme – ordered collection of CalculationSteps
 # ---------------------------------------------------------------------------
 
@@ -935,6 +1189,9 @@ class DragonCalculationScheme:
     def __init__(self, name="default"):
         self.name = name
         self.steps = []
+        self.branches = []   # list[CalculationBranch]
+        self.outputs = []    # list[CalculationOutput]
+        self.branch_loop_order = list(DEFAULT_BRANCH_LOOP_ORDER)
 
     # ------------------------------------------------------------------
     # Step management
@@ -983,6 +1240,49 @@ class DragonCalculationScheme:
         flux = [s for s in self.steps if s.step_type == "flux"]
         flux.sort(key=lambda s: (s.flux_level or 0))
         return flux
+
+    # ------------------------------------------------------------------
+    # Branch / output helpers
+    # ------------------------------------------------------------------
+
+    def has_branches(self):
+        """Return ``True`` if calculation branches are defined."""
+        return len(self.branches) > 0
+
+    def get_branch(self, branch_type):
+        """Return the ``CalculationBranch`` for *branch_type*, or ``None``."""
+        for b in self.branches:
+            if b.type == branch_type:
+                return b
+        return None
+
+    def get_ordered_branches(self):
+        """Return branches in the configured loop order (outermost first).
+
+        Branches whose type is not in ``branch_loop_order`` are appended
+        at the end in their original order.
+        """
+        by_type = {b.type: b for b in self.branches}
+        ordered = []
+        for btype in self.branch_loop_order:
+            if btype in by_type:
+                ordered.append(by_type.pop(btype))
+        # Append any remaining branches not in the configured order
+        for b in self.branches:
+            if b.type in by_type:
+                ordered.append(by_type.pop(b.type))
+        return ordered
+
+    def get_total_statepoints(self):
+        """Return the total number of statepoint combinations.
+
+        This is the product of the number of values in each branch.
+        Returns 1 when no branches are defined (single statepoint).
+        """
+        total = 1
+        for b in self.branches:
+            total *= len(b.values)
+        return total
 
     # ------------------------------------------------------------------
     # YAML construction
@@ -1060,13 +1360,53 @@ class DragonCalculationScheme:
         with open(yaml_path, "r") as f:
             data = yaml.safe_load(f)
 
-        scheme_data = data.get("DRAGON_CALCULATION_SCHEME", data)
+        # Accept multiple top-level key names for the flux scheme
+        scheme_data = (
+            data.get("DRAGON_CALCULATION_SCHEME")
+            or data.get("FLUX_CALCULATION_SCHEME")
+            or data
+        )
         scheme_name = scheme_data.get("name", "from_yaml")
         scheme = cls(name=scheme_name)
 
         for step_data in scheme_data.get("steps", []):
             step = cls._parse_step(step_data)
             scheme.add_step(step)
+
+        # --- Parse CALCULATION_BRANCHES ---
+        branches_data = (
+            data.get("CALCULATION_BRANCHES")
+            or scheme_data.get("CALCULATION_BRANCHES")
+            or []
+        )
+        # branches_data may be at the same level as FLUX_CALCULATION_SCHEME
+        # (top-level) or nested inside it (unified YAML).
+        if isinstance(branches_data, list):
+            for entry in branches_data:
+                scheme.branches.append(
+                    CalculationBranch.from_yaml_entry(entry)
+                )
+
+        # --- Parse CALCULATION_OUTPUTS ---
+        outputs_data = (
+            data.get("CALCULATION_OUTPUTS")
+            or scheme_data.get("CALCULATION_OUTPUTS")
+            or data.get("EDI_COMPO_OUTPUTS")
+            or []
+        )
+        if isinstance(outputs_data, list):
+            for entry in outputs_data:
+                scheme.outputs.append(
+                    CalculationOutput.from_yaml_entry(entry)
+                )
+
+        # --- Optional loop ordering ---
+        loop_order = (
+            data.get("BRANCH_LOOP_ORDER")
+            or scheme_data.get("BRANCH_LOOP_ORDER")
+        )
+        if loop_order:
+            scheme.branch_loop_order = list(loop_order)
 
         return scheme
 
@@ -1491,4 +1831,21 @@ class DragonCalculationScheme:
             lines.append(f"  Box disc:   {'enabled' if step.box_discretization and step.box_discretization.enabled else 'disabled'}")
             if step.box_discretization and step.box_discretization.enabled:
                 lines.append(f"    {step.box_discretization}")
+
+        if self.branches:
+            lines.append("\nCalculation Branches")
+            lines.append("-" * 50)
+            for b in self.branches:
+                lines.append(f"  {b.type}: {b.values}")
+            lines.append(f"  Total statepoints: {self.get_total_statepoints()}")
+            lines.append(f"  Loop order: {self.branch_loop_order}")
+
+        if self.outputs:
+            lines.append("\nCalculation Outputs")
+            lines.append("-" * 50)
+            for o in self.outputs:
+                lines.append(f"  {o.name}: mode={o.spatial_integration_mode}, "
+                             f"bounds={o.energy_bounds}, "
+                             f"state_points={o.state_points}")
+
         return "\n".join(lines)

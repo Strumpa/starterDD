@@ -66,7 +66,7 @@ class LIB:
         "SHEATH":      "TCTRL",
     }
 
-    def __init__(self, assembly_model):
+    def __init__(self, assembly_model, density_branch=False):
         """
         Initialize LIB procedure generator.
 
@@ -81,8 +81,13 @@ class LIB:
                (``identify_generating_and_daughter_mixes``).
             3. Optionally, TDT indices enforced
                (``enforce_material_mixture_indices_from_tdt``).
+        density_branch : bool
+            When ``True``, COOLANT and MODERATOR mix H1/O16 densities
+            are replaced by ``<<N_H>>`` / ``<<N_O>>`` CLE2000 variables
+            and the procedure receives two extra REAL input parameters.
         """
         self.assembly = assembly_model
+        self.density_branch = density_branch
 
         # Fuel self-shielding configuration
         self.self_shielded_fuel_isotopes = list(self.DEFAULT_SELF_SHIELDED_FUEL_ISOTOPES)
@@ -309,20 +314,39 @@ class LIB:
                  extra["composition"], extra["temp_var"])
             )
 
+        # Isotopes whose density is replaced by CLE2000 variables
+        # when coolant-density branching is active.
+        _WATER_ISO_MAPPING = {
+            "H1": "N_H", "H2": "N_H",
+            "O16": "N_O", "O17": "N_O",
+        }
+        # Materials affected by coolant-density branching
+        _WATER_MATERIALS = {"COOLANT", "MODERATOR"}
+
         lines = ""
         for mat_name, idx, composition, temp_var in entries:
             iso_comp = composition.get_isotope_name_composition()
-            inrs_map = self.non_fuel_inrs.get(mat_name, {})
+            inrs_map = self.non_fuel_inrs.get(mat_name, self.default_non_fuel_inrs)
             depletable = getattr(composition, 'depletable', False)
             if depletable:
                 lines += f"    MIX {idx} <<{temp_var}>>\n"
             else:
                 lines += f"    MIX {idx} <<{temp_var}>> NOEV\n"
+
+            use_density_vars = (
+                self.density_branch
+                and mat_name in _WATER_MATERIALS
+            )
+
             for isotope, density in iso_comp.items():
                 lib_name = self.isotope_aliases.get(
                     (mat_name, isotope), isotope
                 )
-                line = f"    {isotope} = {lib_name} {density:.5E}"
+                if use_density_vars and isotope in _WATER_ISO_MAPPING:
+                    var_name = _WATER_ISO_MAPPING[isotope]
+                    line = f"    {isotope} = {lib_name} <<{var_name}>>"
+                else:
+                    line = f"    {isotope} = {lib_name} {density:.5E}"
                 if isotope in inrs_map:
                     line += f" {inrs_map[isotope]}"
                 lines += line + "\n"
@@ -492,6 +516,15 @@ class LIB:
         str
             Relative path of the written file.
         """
+        # Extra REAL parameters for coolant density branch
+        if self.density_branch:
+            density_param_block = (
+                "REAL N_H N_O ;\n"
+                ":: >>N_H<< >>N_O<< ;\n"
+            )
+        else:
+            density_param_block = ""
+
         header = (
             f"*PROCEDURE {proc_name}.c2m\n"
             "* --------------------------------\n"
@@ -512,6 +545,7 @@ class LIB:
             ":: >>tran_correc<< ; ! Transport correction option\n"
             "REAL TFUEL TBOX TCLAD TCOOL TMODE TCTRL ;\n"
             ":: >>TFUEL<< >>TBOX<< >>TCLAD<< >>TCOOL<< >>TMODE<< >>TCTRL<< ;\n"
+            f"{density_param_block}"
             "\n"
             "* -------------------------------\n"
             "*    STRUCTURES AND MODULES\n"
@@ -796,15 +830,19 @@ class EDI:
         -------
         str
         """
+        from .CLE2000 import wrap_cle2000_line
+
         iso_str = " ".join(self.isotopes)
         vector = self.build_merg_mix_vector()
         merg_mix = self._format_merg_mix_vector(vector)
         cond = self.build_cond_option()
 
+        micr_line = f"  MICR {len(self.isotopes)} {iso_str}"
+
         call = (
             "EDIRATES := EDI: FLUX LIBRARY2 TRACK ::\n"
             f"   EDIT {self.edit_level}\n"
-            f"  MICR {len(self.isotopes)} {iso_str}\n"
+            f"{wrap_cle2000_line(micr_line)}\n"
             "   MERG MIX\n"
             f"  {merg_mix}\n"
         )
@@ -824,6 +862,10 @@ class COMPO:
     as keys in the output COMPO heterogeneous list.  Each directory stores
     reaction rates and cross-section data computed by an ``EDI:`` call.
 
+    When *branches* are provided the initialization block includes
+    ``MAXCAL``, ``PARA`` keywords and the store block passes the current
+    parameter values (AT10 multi-physics pattern).
+
     Usage
     -----
     ::
@@ -836,8 +878,16 @@ class COMPO:
         print(compo.build_compo_store("EDIHOM_COND"))
     """
 
-    def __init__(self):
+    def __init__(self, branches=None):
+        """
+        Parameters
+        ----------
+        branches : list[CalculationBranch] or None
+            When provided, COMPO initialization will include ``PARA``
+            keywords and ``MAXCAL``.
+        """
         self.directories = []  # list of (name, comment, isotopes)
+        self.branches = branches or []
 
     def add_directory(self, name, comment, isotopes):
         """
@@ -858,16 +908,31 @@ class COMPO:
         """
         Build the ``COMPO := COMPO: :: STEP UP ... INIT ;`` initialization block.
 
+        When branches are configured, includes ``MAXCAL`` and ``PARA``
+        keywords for the parameter tree.
+
         Returns
         -------
         str
         """
         lines = "COMPO := COMPO: ::\n"
+        lines += "   EDIT 0\n"
         for name, comment, isotopes in self.directories:
             iso_str = " ".join(isotopes)
             lines += f"   STEP UP '{name}'\n"
+            if self.branches:
+                # Compute MAXCAL from product of branch sizes
+                total = 1
+                for b in self.branches:
+                    total *= len(b.values)
+                lines += f"       MAXCAL {total}\n"
             lines += f"       COMM '{comment}' ENDC\n"
-            lines += f"      ISOT {len(isotopes)} {iso_str}\n"
+            if self.branches:
+                for b in self.branches:
+                    lines += f"       PARA '{b.para_name}' {b.para_keyword}\n"
+            isot_line = f"      ISOT {len(isotopes)} {iso_str}"
+            from .CLE2000 import wrap_cle2000_line as _wrap_isot
+            lines += f"{_wrap_isot(isot_line)}\n"
             lines += "   INIT\n"
         lines += ";\n"
         return lines
@@ -876,6 +941,9 @@ class COMPO:
         """
         Build a ``COMPO := COMPO: COMPO EDIRATES LIBRARY2 :: STEP UP <name> ;``
         store block.
+
+        When branches are configured, passes current parameter values
+        using CLE2000 variable references ``<<TFuel>>``, etc.
 
         Parameters
         ----------
@@ -886,12 +954,22 @@ class COMPO:
         -------
         str
         """
-        call = (
-            "COMPO := COMPO: COMPO EDIRATES LIBRARY2 ::\n"
-            f"   EDIT 1\n"
-            f"    STEP UP {directory_name}\n"
-            ";\n"
-        )
+        if self.branches:
+            call = (
+                "COMPO := COMPO: COMPO EDIRATES LIBRARY2 ::\n"
+                f"   EDIT 1\n"
+                f"    STEP UP '{directory_name}'\n"
+            )
+            for b in self.branches:
+                call += f"    '{b.para_name}' <<{b.para_name}>>\n"
+            call += ";\n"
+        else:
+            call = (
+                "COMPO := COMPO: COMPO EDIRATES LIBRARY2 ::\n"
+                f"   EDIT 1\n"
+                f"    STEP UP {directory_name}\n"
+                ";\n"
+            )
         return call
 
 
@@ -906,6 +984,11 @@ class EDI_COMPO:
     2. An ``EDIRATES := EDI: ...`` call.
     3. A ``COMPO := COMPO: COMPO EDIRATES LIBRARY2 :: STEP UP <name> ;`` store.
     4. An ``EDIRATES := DELETE: EDIRATES ;`` cleanup.
+
+    When branches and outputs are configured, editions are built from
+    ``CalculationOutput`` specifications and the COMPO initialization
+    includes ``PARA`` / ``MAXCAL`` keywords.  Selective state-point
+    outputs generate CLE2000 ``IF`` guards in the procedure body.
 
     The generated ``.c2m`` file structure matches the layout of a standard
     DRAGON5 EDI/COMPO procedure (see ``EDICPO_R.c2m`` for reference).
@@ -939,20 +1022,49 @@ class EDI_COMPO:
         edi_compo.write_to_c2m("./procs", "EDICPO_GE14")
     """
 
-    def __init__(self, assembly_model):
+    def __init__(self, assembly_model, branches=None, outputs=None):
         """
         Parameters
         ----------
         assembly_model : CartesianAssemblyModel
             Assembly model with numbered material mixtures and (optionally)
             TDT-enforced indices.
+        branches : list[CalculationBranch] or None
+            When provided, COMPO init includes PARA/MAXCAL and
+            stores pass parameter values.
+        outputs : list[CalculationOutput] or None
+            When provided, editions are built from these specs
+            via ``add_editions_from_outputs()``.
         """
         self.assembly = assembly_model
-        self.compo = COMPO()
+        self.branches = branches or []
+        self.compo = COMPO(branches=self.branches)
         self.editions = []  # list of EDI objects
+        self._output_specs = []  # parallel list of CalculationOutput (or None)
+
+        if outputs:
+            self.add_editions_from_outputs(outputs)
+
+    def add_editions_from_outputs(self, outputs):
+        """Build EDI objects from ``CalculationOutput`` specifications.
+
+        Parameters
+        ----------
+        outputs : list[CalculationOutput]
+        """
+        for out in outputs:
+            self.add_edition(
+                name=out.name,
+                comment=out.comment,
+                isotopes=out.isotopes,
+                spatial_mode=out.spatial_integration_mode,
+                energy_bounds=out.energy_bounds,
+                output_spec=out,
+            )
 
     def add_edition(self, name, comment, isotopes, spatial_mode,
-                    energy_bounds=None, custom_map=None):
+                    energy_bounds=None, custom_map=None,
+                    output_spec=None):
         """
         Add an edition (EDI + COMPO store pair).
 
@@ -971,12 +1083,15 @@ class EDI_COMPO:
             ``None`` → no COND; ``[]`` → COND; ``[0.625]`` → COND 0.625.
         custom_map : dict, optional
             Required when ``spatial_mode="custom"``.
+        output_spec : CalculationOutput or None
+            When provided, used for selective state-point filtering.
         """
         edi = EDI(name, self.assembly)
         edi.set_isotopes(isotopes)
         edi.set_spatial_homogenization(spatial_mode, custom_map=custom_map)
         edi.set_energy_condensation(energy_bounds)
         self.editions.append(edi)
+        self._output_specs.append(output_spec)
         self.compo.add_directory(name, comment, isotopes)
 
     def build_procedure_body(self):
@@ -984,35 +1099,127 @@ class EDI_COMPO:
         Build the body of the CLE-2000 procedure (everything between header
         and footer).
 
+        When branches are present and an output has selective
+        ``state_points``, the EDI+COMPO block is wrapped in a CLE2000
+        ``IF`` guard that checks whether the current parameter values
+        match the requested subset.
+
         Returns
         -------
         str
         """
         body = ""
 
-        # COMPO initialization
-        body += "* --------------------------------\n"
-        body += "*   COMPO INITIALIZATION\n"
-        body += "* --------------------------------\n"
-        body += self.compo.build_compo_init()
+        # COMPO initialization — only when there are NO branches.
+        # When branches are present the COMPO init is emitted in
+        # the main x2m (before the loops) so we skip it here.
+        if not self.branches:
+            body += "* --------------------------------\n"
+            body += "*   COMPO INITIALIZATION\n"
+            body += "* --------------------------------\n"
+            body += self.compo.build_compo_init()
 
         # EDI + COMPO pairs
-        for edi in self.editions:
-            body += "* --------------------------------\n"
-            body += f"*    EDI: CALL FOR {edi.name}\n"
-            body += "* --------------------------------\n"
-            body += edi.build_edi_call()
-            body += "* --------------------------------\n"
-            body += f"*    COMPO: CALL FOR {edi.name}\n"
-            body += "* --------------------------------\n"
-            body += self.compo.build_compo_store(edi.name)
-            body += "EDIRATES := DELETE: EDIRATES ;\n"
+        for idx, edi in enumerate(self.editions):
+            output_spec = (
+                self._output_specs[idx]
+                if idx < len(self._output_specs)
+                else None
+            )
+            needs_guard = (
+                self.branches
+                and output_spec is not None
+                and output_spec.state_points != "ALL"
+            )
+
+            if needs_guard:
+                guard = self._build_statepoint_guard(output_spec)
+                body += guard
+                indent = "    "
+            else:
+                indent = ""
+
+            body += f"{indent}* --------------------------------\n"
+            body += f"{indent}*    EDI: CALL FOR {edi.name}\n"
+            body += f"{indent}* --------------------------------\n"
+            # Indent the EDI call block
+            from .CLE2000 import wrap_cle2000_line as _wrap_body
+            for line in edi.build_edi_call().splitlines():
+                body += _wrap_body(f"{indent}{line}") + "\n"
+            body += f"{indent}* --------------------------------\n"
+            body += f"{indent}*    COMPO: CALL FOR {edi.name}\n"
+            body += f"{indent}* --------------------------------\n"
+            for line in self.compo.build_compo_store(edi.name).splitlines():
+                body += _wrap_body(f"{indent}{line}") + "\n"
+            body += f"{indent}EDIRATES := DELETE: EDIRATES ;\n"
+
+            if needs_guard:
+                body += "ENDIF ;\n"
 
         return body
+
+    def _build_statepoint_guard(self, output_spec):
+        """Build a CLE2000 IF condition for selective state-point outputs.
+
+        Generates conditions like::
+
+            IF DCool 0.73669000 = TCool 600.0 = * TFuel 900.0 = * * THEN
+
+        using CLE2000 reverse-Polish notation.
+
+        Parameters
+        ----------
+        output_spec : CalculationOutput
+
+        Returns
+        -------
+        str
+            CLE2000 ``IF ... THEN`` line.
+        """
+        from ..DDModel.DragonCalculationScheme import (
+            BRANCH_TYPE_TO_PARA_NAME,
+        )
+
+        conditions = []
+        sp = output_spec.state_points
+        if isinstance(sp, dict):
+            for branch_type, values in sp.items():
+                para = BRANCH_TYPE_TO_PARA_NAME.get(branch_type)
+                if para is None:
+                    continue
+                # Build OR over the allowed values for this branch type
+                # CLE2000 RPN: val1 var = val2 var = + val3 var = + ...
+                # (sum > 0 means at least one matched)
+                if len(values) == 1:
+                    conditions.append(f"{para} {values[0]} =")
+                else:
+                    parts = []
+                    for v in values:
+                        parts.append(f"{para} {v} =")
+                    # Combine with OR (+ in RPN, then check > 0)
+                    combined = " ".join(parts)
+                    combined += " " + "+ " * (len(parts) - 1)
+                    combined += "0 >"
+                    conditions.append(combined)
+
+        if not conditions:
+            return ""
+
+        # AND all conditions together
+        cond_str = " ".join(conditions)
+        if len(conditions) > 1:
+            cond_str += " " + "* " * (len(conditions) - 1)
+
+        from .CLE2000 import wrap_cle2000_line as _wrap_guard
+        return _wrap_guard(f"IF {cond_str} THEN") + "\n"
 
     def write_to_c2m(self, path_to_procs, proc_name):
         """
         Write the complete EDI/COMPO procedure to a ``.c2m`` file.
+
+        When branches are present, the procedure receives additional
+        REAL input parameters for the current statepoint values
+        (e.g. ``TFuel``, ``TCool``, ``DCool``).
 
         Parameters
         ----------
@@ -1026,43 +1233,86 @@ class EDI_COMPO:
         str
             Relative path of the written file.
         """
-        header = (
-            f"* PROCEDURE {proc_name}.c2m : calls to EDI: and COMPO: modules\n"
-            "* --------------------------------\n"
-            "* Procedure generated by starterDD\n"
-            "* Author: R. Guasch\n"
-            "* --------------------------------\n"
-            "*    INPUT & OUTPUT PARAMETERS\n"
-            "* --------------------------------\n"
-            "PARAMETER FLUX LIBRARY2 TRACK ::\n"
-            "::: LINKED_LIST FLUX ;\n"
-            "::: LINKED_LIST LIBRARY2 ;\n"
-            "::: LINKED_LIST TRACK ; ;\n"
-            "STRING name_cpo ;\n"
-            ":: >>name_cpo<< ; "
-            "* --------------------------------\n"
-            "*    MODULES DEFINITION\n"
-            "* --------------------------------\n"
-            "MODULE EDI: COMPO: DELETE: END: ;\n"
-            "* --------------------------------\n"
-            "*    LOCAL VARIABLES DEFINITION\n"
-            "* --------------------------------\n"
-            "LINKED_LIST EDIRATES COMPO ;\n"
-            "* --------------------------------\n"
-            "*    COMPO FILE NAME FOR EXPORT\n"
-            "* --------------------------------\n"
-            "SEQ_ASCII _COMPO :: FILE <<name_cpo>> ;\n"
-        )
+        # Build parameter variable recovery block for branch params
+        branch_var_decl = ""
+        if self.branches:
+            para_names = [b.para_name for b in self.branches]
+            branch_var_decl = (
+                "REAL " + " ".join(para_names) + " ;\n"
+                ":: " + " ".join(f">>{p}<<" for p in para_names)
+                + " ;\n"
+            )
+
+        if self.branches:
+            # COMPO is an input/output parameter from x2m
+            header = (
+                f"* PROCEDURE {proc_name}.c2m : calls to EDI: and COMPO: modules\n"
+                "* --------------------------------\n"
+                "* Procedure generated by starterDD\n"
+                "* Author: R. Guasch\n"
+                "* --------------------------------\n"
+                "*    INPUT & OUTPUT PARAMETERS\n"
+                "* --------------------------------\n"
+                "PARAMETER FLUX LIBRARY2 TRACK COMPO ::\n"
+                "::: LINKED_LIST FLUX ;\n"
+                "::: LINKED_LIST LIBRARY2 ;\n"
+                "::: LINKED_LIST TRACK ;\n"
+                "::: LINKED_LIST COMPO ; ;\n"
+                "STRING name_cpo ;\n"
+                ":: >>name_cpo<< ;\n"
+                f"{branch_var_decl}"
+                "* --------------------------------\n"
+                "*    MODULES DEFINITION\n"
+                "* --------------------------------\n"
+                "MODULE EDI: COMPO: DELETE: END: ;\n"
+                "* --------------------------------\n"
+                "*    LOCAL VARIABLES DEFINITION\n"
+                "* --------------------------------\n"
+                "LINKED_LIST EDIRATES ;\n"
+            )
+        else:
+            header = (
+                f"* PROCEDURE {proc_name}.c2m : calls to EDI: and COMPO: modules\n"
+                "* --------------------------------\n"
+                "* Procedure generated by starterDD\n"
+                "* Author: R. Guasch\n"
+                "* --------------------------------\n"
+                "*    INPUT & OUTPUT PARAMETERS\n"
+                "* --------------------------------\n"
+                "PARAMETER FLUX LIBRARY2 TRACK ::\n"
+                "::: LINKED_LIST FLUX ;\n"
+                "::: LINKED_LIST LIBRARY2 ;\n"
+                "::: LINKED_LIST TRACK ; ;\n"
+                "STRING name_cpo ;\n"
+                ":: >>name_cpo<< ;\n"
+                "* --------------------------------\n"
+                "*    MODULES DEFINITION\n"
+                "* --------------------------------\n"
+                "MODULE EDI: COMPO: DELETE: END: ;\n"
+                "* --------------------------------\n"
+                "*    LOCAL VARIABLES DEFINITION\n"
+                "* --------------------------------\n"
+                "LINKED_LIST EDIRATES COMPO ;\n"
+                "* --------------------------------\n"
+                "*    COMPO FILE NAME FOR EXPORT\n"
+                "* --------------------------------\n"
+                "SEQ_ASCII _COMPO :: FILE <<name_cpo>> ;\n"
+            )
 
         body = self.build_procedure_body()
 
-        footer = (
-            "* --------------------------------\n"
-            "*    EXPORT COMPO TO ASCII FILE\n"
-            "* --------------------------------\n"
-            "_COMPO := COMPO ;\n"
-            "END: ;\n"
-        )
+        if self.branches:
+            # When branches are present, COMPO init and export
+            # are handled in the main x2m procedure.
+            footer = "END: ;\n"
+        else:
+            footer = (
+                "* --------------------------------\n"
+                "*    EXPORT COMPO TO ASCII FILE\n"
+                "* --------------------------------\n"
+                "_COMPO := COMPO ;\n"
+                "END: ;\n"
+            )
 
         content = f"{header}{body}{footer}"
 

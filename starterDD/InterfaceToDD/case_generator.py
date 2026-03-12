@@ -11,13 +11,28 @@ from .CLE2000 import (
 from .dragon_module_calls import LIB, EDI_COMPO, TRK
 from ..DDModel.DragonCalculationScheme import (
     DragonCalculationScheme,
+    BRANCH_TYPE_TO_PARA_NAME,
 )
 from ..DDModel.helpers import associate_material_to_rod_ID
 from ..MaterialProperties.material_mixture import (
     parse_all_compositions_from_yaml,
+    compute_water_iso_densities_at_densities,
+)
+from ..GeometryAnalysis.tdt_parser import (
+    read_material_mixture_indices_from_tdt_file,
 )
 
 import os
+
+# Optional glow dependency — only needed when call_glow=True.
+# glow requires the SALOME platform (typically run via Docker).
+try:
+    from ..GeometryBuilder.glow_builder import (
+        build_full_assembly_geometry,
+    )
+    GLOW_AVAILABLE = True
+except ImportError:
+    GLOW_AVAILABLE = False
 
 
 class DragonCase:
@@ -41,7 +56,8 @@ class DragonCase:
 
     def __init__(self, case_name, call_glow,
                  draglibs_names_to_alias, config_yamls,
-                 enable_g2s=False, output_path=None):
+                 enable_g2s=False, output_path=None,
+                 tdt_path=None, tdt_base_name=None):
         """
         Parameters
         ----------
@@ -61,6 +77,15 @@ class DragonCase:
         output_path : str or None
             Directory for generated CLE2000 files.  Defaults
             to ``"./cle2000_procs/<case_name>"``.
+        tdt_path : str or None
+            Directory where TDT ``.dat`` files are located
+            (or will be written when ``call_glow=True``).
+            Defaults to ``output_path``.
+        tdt_base_name : str or None
+            Base name prefix for TDT file names.  The full
+            TDT file name is built as
+            ``<tdt_base_name>_<step>_<method>``.
+            Defaults to ``case_name``.
         """
         self.case_name = case_name
         self.call_glow = call_glow
@@ -70,6 +95,8 @@ class DragonCase:
         self.output_path = output_path or os.path.join(
             "cle2000_procs", case_name,
         )
+        self.tdt_path = tdt_path or self.output_path
+        self.tdt_base_name = tdt_base_name or case_name
         self._validate_config_yamls()
 
     # -----------------------------------------------------------
@@ -156,7 +183,53 @@ class DragonCase:
         ssh_step.apply_radii(assembly)
         assembly.number_fuel_material_mixtures_by_pin()
 
-        # 4. Identify generating / daughter mixes
+        # 4. Build geometry (if call_glow) and read TDT files
+        #    for each calculation step.  The TDT file provides
+        #    the definitive material-mixture-index numbering
+        #    (assigned by glow/SALOME) for both fuel and
+        #    non-fuel materials.
+        for step in scheme.steps:
+            tdt_file_name = (
+                f"{self.tdt_base_name}_{step.name}"
+                f"_{step.spatial_method}"
+            )
+
+            # 4a. Optionally build geometry with glow
+            if self.call_glow:
+                if not GLOW_AVAILABLE:
+                    raise ImportError(
+                        "call_glow=True but glow is not "
+                        "importable.  glow requires the "
+                        "SALOME platform (typically run "
+                        "via Docker)."
+                    )
+                build_full_assembly_geometry(
+                    assembly_model=assembly,
+                    calculation_step=step,
+                    output_path=self.tdt_path,
+                    output_file_name=tdt_file_name,
+                )
+
+            # 4b. Read TDT and enforce material indices
+            #     (for the SSH step — it defines the LIB
+            #     numbering used by all subsequent steps)
+            if step.step_type == "self_shielding":
+                tdt_indices = (
+                    read_material_mixture_indices_from_tdt_file(
+                        tdt_file_path=self.tdt_path,
+                        tdt_file_name=tdt_file_name,
+                        tracking_option=step.tracking,
+                        include_macros=step.export_macros,
+                        material_names=None,
+                    )
+                )
+                assembly.enforce_material_mixture_indices_from_tdt(
+                    tdt_indices
+                )
+
+        # 5. Identify generating / daughter mixes
+        #    (must happen after TDT enforcement so that
+        #    indices are final)
         assembly.identify_generating_and_daughter_mixes()
 
         # Determine the first draglib alias
@@ -167,7 +240,11 @@ class DragonCase:
         # ----- MIX.c2m (LIB procedure) -----
         mix_proc_name = f"MIX_{self.case_name}"
         validate_varname(mix_proc_name[:12])
-        lib = LIB(assembly)
+        has_density = (
+            scheme.has_branches()
+            and scheme.get_branch("coolant_density") is not None
+        )
+        lib = LIB(assembly, density_branch=has_density)
         mix_path = lib.write_to_c2m(
             self.output_path, mix_proc_name,
         )
@@ -181,29 +258,44 @@ class DragonCase:
 
         # ----- EDIR.c2m (EDI/COMPO) -----
         edir_proc_name = f"EDIR_{self.case_name}"
-        edi_compo = EDI_COMPO(assembly)
-        # Default edition: homogenised condensed
-        edi_compo.add_edition(
-            name="EDIHOM_COND",
-            comment="Condensed, homogenized over fuel",
-            isotopes=[
-                "U235", "U238", "U234",
-                "Gd155", "Gd157",
-            ],
-            spatial_mode="FUEL",
-            energy_bounds=[],
-        )
+        if scheme.has_branches():
+            edi_compo = EDI_COMPO(
+                assembly,
+                branches=scheme.branches,
+                outputs=scheme.outputs,
+            )
+        else:
+            edi_compo = EDI_COMPO(assembly)
+            # Default edition: homogenised condensed
+            edi_compo.add_edition(
+                name="EDIHOM_COND",
+                comment="Condensed, homogenized over fuel",
+                isotopes=[
+                    "U235", "U238", "U234",
+                    "Gd155", "Gd157",
+                ],
+                spatial_mode="FUEL",
+                energy_bounds=[],
+            )
         edir_path = edi_compo.write_to_c2m(
             self.output_path, edir_proc_name,
         )
 
         # ----- main x2m -----
-        x2m_path = self._build_main_x2m(
-            scheme, trk, lib, edi_compo,
-            mix_proc_name, trk_proc_name,
-            edir_proc_name, draglib_alias,
-            ssh_step,
-        )
+        if scheme.has_branches():
+            x2m_path = self._build_main_x2m_with_branches(
+                scheme, trk, lib, edi_compo,
+                mix_proc_name, trk_proc_name,
+                edir_proc_name, draglib_alias,
+                ssh_step,
+            )
+        else:
+            x2m_path = self._build_main_x2m(
+                scheme, trk, lib, edi_compo,
+                mix_proc_name, trk_proc_name,
+                edir_proc_name, draglib_alias,
+                ssh_step,
+            )
 
         return {
             "x2m": x2m_path,
@@ -213,7 +305,7 @@ class DragonCase:
         }
 
     # -----------------------------------------------------------
-    # Main x2m builder
+    # Main x2m builder (single statepoint, backward compat)
     # -----------------------------------------------------------
 
     def _build_main_x2m(self, scheme, trk, lib, edi_compo,
@@ -435,4 +527,476 @@ class DragonCase:
 
         return proc.write_to_x2m(self.output_path)
 
-    
+    # -----------------------------------------------------------
+    # Main x2m builder with branch loops (multi-statepoint)
+    # -----------------------------------------------------------
+
+    def _build_main_x2m_with_branches(
+        self, scheme, trk, lib, edi_compo,
+        mix_proc_name, trk_proc_name,
+        edir_proc_name, draglib_alias,
+        ssh_step,
+    ):
+        """Assemble and write the main .x2m with WHILE loops over branches.
+
+        This generates the AT10-style multi-physics iteration pattern:
+        UTL: parameter arrays → COMPO init → nested WHILE loops →
+        LIB → USS → ASM → FLU → EDIR → cleanup.
+        """
+        from .CLE2000 import wrap_cle2000_line
+
+        proc = main_procedure(self.case_name)
+        proc.enable_g2s = self.enable_g2s
+
+        # --- Modules ---
+        modules = [
+            "LIB", "G2S", "SALT", "MCCGT",
+            "USS", "ASM", "FLU", "EDI",
+            "SPH", "GREP", "UTL", "COMPO",
+            "DELETE", "END",
+        ]
+        for m in modules:
+            proc.add_module_call(m)
+
+        # --- Sub-procedures ---
+        sub_mix = sub_procedure(mix_proc_name)
+        sub_trk = sub_procedure(trk_proc_name)
+        sub_edir = sub_procedure(edir_proc_name)
+        for sp in (sub_mix, sub_trk, sub_edir):
+            proc.add_sub_procedure(sp)
+
+        # --- Data structures ---
+        proc.add_linked_list("LIBRARY")
+        proc.add_linked_list("LIBRARY2")
+        for trk_ll, _ in trk.get_track_names():
+            proc.add_linked_list(trk_ll)
+        proc.add_linked_list("SYS")
+        proc.add_linked_list("FLUX")
+        proc.add_linked_list("PARAMS")
+
+        for _, trkfil in trk.get_track_names():
+            proc.add_seq_binary(trkfil)
+
+        # --- Variables ---
+        aniso = ssh_step.anisotropy_level
+        proc.add_variable("o_anis", "INTEGER", aniso)
+        proc.add_variable(
+            "name_compo", "STRING",
+            f"_CPO_{self.case_name}",
+        )
+        proc.add_variable(
+            "Draglib", "STRING", draglib_alias,
+        )
+
+        # Ordered branches for loop generation
+        ordered_branches = scheme.get_ordered_branches()
+
+        # Branch count and counter variables
+        for branch in ordered_branches:
+            proc.add_variable(
+                branch.count_var, "INTEGER",
+                len(branch.values),
+            )
+            proc.add_variable(
+                branch.counter_var, "INTEGER", 0,
+            )
+
+        # Branch parameter REAL variables (current values)
+        for branch in ordered_branches:
+            proc.add_variable(
+                branch.para_name, "REAL",
+            )
+
+        # Coolant density isotopic density variables
+        density_branch = scheme.get_branch("coolant_density")
+        if density_branch:
+            proc.add_variable("N_H", "REAL")
+            proc.add_variable("N_O", "REAL")
+
+        # keff
+        proc.add_variable("keff", "REAL")
+
+        # --- TDT file SEQ_ASCII imports ---
+        tdt_map = trk.get_tdt_file_mapping()
+        for var, fname in tdt_map.items():
+            proc.add_seq_ascii(var, fname)
+
+        # COMPO export file
+        proc.add_seq_ascii(
+            "_COMPO",
+            f"_CPO_{self.case_name}",
+        )
+
+        # --- G2S block ---
+        if proc.enable_g2s:
+            proc.add_body_block(
+                proc.build_g2s_block(tdt_map)
+            )
+
+        # --- TRK sub-procedure call ---
+        track_names = trk.get_track_names()
+        tdt_vars = list(tdt_map.keys())
+        lhs = " ".join(
+            f"{ll} {bf}" for ll, bf in track_names
+        )
+        rhs_tdts = " ".join(tdt_vars)
+
+        trk_call = wrap_cle2000_line(
+            f"{lhs} := {trk_proc_name} "
+            f"{rhs_tdts} :: <<o_anis>> ;"
+        )
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* Tracking sub-procedure call")
+        proc.add_body_line("*" * 50)
+        proc.add_body_line(trk_call)
+        proc.add_body_line("")
+
+        # ===================================================
+        # UTL: parameter array declaration
+        # ===================================================
+        proc.add_body_line("*" * 50)
+        proc.add_body_line(
+            "* Parameter arrays for branch calculations"
+        )
+        proc.add_body_line("*" * 50)
+
+        utl_block = "PARAMS := UTL: ::\n"
+        for branch in ordered_branches:
+            vals_str = " ".join(
+                f"{v}" for v in branch.values
+            )
+            utl_block += (
+                f"    CREA\n"
+                f"        {branch.array_name} "
+                f"<<{branch.count_var}>> =\n"
+                f"            {vals_str}\n"
+            )
+        utl_block += ";\n"
+        proc.add_body_block(utl_block)
+
+        # Pre-compute N_H and N_O arrays for coolant density branch
+        if density_branch:
+            iso_densities = compute_water_iso_densities_at_densities(
+                density_branch.values
+            )
+            nh_vals = " ".join(
+                f"{d['H1']:.8E}" for d in iso_densities
+            )
+            no_vals = " ".join(
+                f"{d['O16']:.8E}" for d in iso_densities
+            )
+            n_dens = len(density_branch.values)
+            proc.add_variable("n_dens", "INTEGER", n_dens)
+
+            nh_utl = (
+                f"PARAMS := UTL: PARAMS ::\n"
+                f"    CREA\n"
+                f"        N_H_arr <<n_dens>> =\n"
+                f"            {nh_vals}\n"
+                f"    CREA\n"
+                f"        N_O_arr <<n_dens>> =\n"
+                f"            {no_vals}\n"
+                f";\n"
+            )
+            proc.add_body_block(nh_utl)
+
+        proc.add_body_line("")
+
+        # ===================================================
+        # COMPO initialization (outside the loops)
+        # ===================================================
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* COMPO initialization")
+        proc.add_body_line("*" * 50)
+        proc.add_body_block(
+            edi_compo.compo.build_compo_init()
+        )
+        proc.add_body_line("")
+
+        # ===================================================
+        # Nested WHILE loops
+        # ===================================================
+        proc.add_body_line("*" * 50)
+        proc.add_body_line(
+            "* Main loop over branch statepoints"
+        )
+        proc.add_body_line("*" * 50)
+
+        # Open loops (outermost first)
+        for depth, branch in enumerate(ordered_branches):
+            indent = "    " * depth
+            proc.add_body_line(
+                f"{indent}WHILE {branch.counter_var} "
+                f"{branch.count_var} < DO"
+            )
+            proc.add_body_line(
+                f"{indent}    EVALUATE {branch.counter_var} "
+                f":= {branch.counter_var} 1 + ;"
+            )
+            # GREP parameter value
+            proc.add_body_line(
+                wrap_cle2000_line(
+                    f"{indent}    GREP: PARAMS :: "
+                    f"GETVAL '{branch.array_name}' "
+                    f"<<{branch.counter_var}>> "
+                    f">>{branch.para_name}<< ;"
+                )
+            )
+            # If this is the coolant density branch, also GREP N_H, N_O
+            if branch.type == "coolant_density":
+                proc.add_body_line(
+                    wrap_cle2000_line(
+                        f"{indent}    GREP: PARAMS :: "
+                        f"GETVAL 'N_H_arr' "
+                        f"<<{branch.counter_var}>> "
+                        f">>N_H<< ;"
+                    )
+                )
+                proc.add_body_line(
+                    wrap_cle2000_line(
+                        f"{indent}    GREP: PARAMS :: "
+                        f"GETVAL 'N_O_arr' "
+                        f"<<{branch.counter_var}>> "
+                        f">>N_O<< ;"
+                    )
+                )
+
+        # Inner body (deepest indentation)
+        inner_indent = "    " * len(ordered_branches)
+
+        # Echo current statepoint
+        echo_parts = " ".join(
+            f'"{b.para_name}= "{b.para_name}'
+            for b in ordered_branches
+        )
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f'{inner_indent}ECHO "SP:"'
+                f'{echo_parts} ;'
+            )
+        )
+
+        # --- Map branch values to MIX temperature variables ---
+        # The branch loop GREPs into TFuel / TCool / DCool;
+        # the MIX procedure expects TFUEL / TCOOL / TMODE.
+        if scheme.get_branch("fuel_temperature"):
+            proc.add_body_line(
+                f"{inner_indent}EVALUATE TFUEL "
+                f":= TFuel ;"
+            )
+        if scheme.get_branch("coolant_temperature"):
+            proc.add_body_line(
+                f"{inner_indent}EVALUATE TCOOL "
+                f":= TCool ;"
+            )
+            proc.add_body_line(
+                f"{inner_indent}EVALUATE TMODE "
+                f":= TCool ;"
+            )
+        proc.add_body_line("")
+
+        # --- MIX sub-procedure call ---
+        ssh_method = ssh_step.self_shielding_method or "RSE"
+
+        # Build MIX call — pass N_H N_O if density branch exists
+        if density_branch:
+            mix_call_line = (
+                f"LIBRARY := {mix_proc_name} :: "
+                f"<<Draglib>> '{ssh_method}' <<o_anis>> "
+                f"'NONE' "
+                f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
+                f"<<TCOOL>> <<TMODE>> <<TCTRL>> "
+                f"<<N_H>> <<N_O>> ;"
+            )
+        else:
+            mix_call_line = (
+                f"LIBRARY := {mix_proc_name} :: "
+                f"<<Draglib>> '{ssh_method}' <<o_anis>> "
+                f"'NONE' "
+                f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
+                f"<<TCOOL>> <<TMODE>> <<TCTRL>> ;"
+            )
+        proc.add_body_line(
+            f"{inner_indent}* LIB: creation"
+        )
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}{mix_call_line}"
+            )
+        )
+        proc.add_body_line("")
+
+        # --- USS call ---
+        ssh_trk, ssh_trkfil = track_names[0]
+        proc.add_body_line(
+            f"{inner_indent}* USS: self-shielding"
+        )
+        uss_line = (
+            f"LIBRARY2 := USS: LIBRARY "
+            f"{ssh_trk} {ssh_trkfil} ::"
+        )
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}{uss_line}"
+            )
+        )
+        proc.add_body_line(
+            f"{inner_indent}    EDIT 1 ARM"
+        )
+        proc.add_body_line(f"{inner_indent};")
+        proc.add_body_line("")
+
+        # --- ASM + FLU on flux step ---
+        flux_steps = scheme.get_flux_steps()
+        if flux_steps:
+            flux_step = flux_steps[0]
+            flux_trk, flux_trkfil = track_names[-1]
+
+            proc.add_body_line(
+                f"{inner_indent}* ASM: + FLU:"
+            )
+            asm_line = (
+                f"SYS := ASM: LIBRARY2 "
+                f"{flux_trk} {flux_trkfil} ::"
+            )
+            proc.add_body_line(
+                wrap_cle2000_line(
+                    f"{inner_indent}{asm_line}"
+                )
+            )
+            proc.add_body_line(
+                f"{inner_indent}    EDIT 1 ARM"
+            )
+            proc.add_body_line(f"{inner_indent};")
+            proc.add_body_line("")
+
+            flu_line = (
+                f"FLUX := FLU: SYS LIBRARY2 "
+                f"{flux_trk} {flux_trkfil} ::"
+            )
+            proc.add_body_line(
+                wrap_cle2000_line(
+                    f"{inner_indent}{flu_line}"
+                )
+            )
+            proc.add_body_line(
+                f"{inner_indent}    EDIT 1 TYPE K"
+            )
+            proc.add_body_line(f"{inner_indent};")
+
+            # GREP keff
+            proc.add_body_line(
+                wrap_cle2000_line(
+                    f"{inner_indent}GREP: FLUX :: GETVAL "
+                    f"'K-EFFECTIVE' 1 1 1 "
+                    f">>keff<< ;"
+                )
+            )
+            proc.add_body_line(
+                f'{inner_indent}ECHO '
+                f'"{self.case_name} keff=" keff ;'
+            )
+            proc.add_body_line("")
+
+            # --- EDIR sub-procedure call ---
+            proc.add_body_line(
+                f"{inner_indent}* EDI/COMPO call"
+            )
+            # Build the EDIR call with branch params
+            # COMPO is passed as I/O data structure
+            para_args = " ".join(
+                f"<<{b.para_name}>>"
+                for b in ordered_branches
+            )
+            edir_call = (
+                f"COMPO := {edir_proc_name} FLUX LIBRARY2 "
+                f"{flux_trk} COMPO :: <<name_compo>> "
+                f"{para_args} ;"
+            )
+            proc.add_body_line(
+                wrap_cle2000_line(
+                    f"{inner_indent}{edir_call}"
+                )
+            )
+            proc.add_body_line("")
+
+            # --- Cleanup ---
+            proc.add_body_line(
+                f"{inner_indent}* Cleanup"
+            )
+            proc.add_body_line(
+                wrap_cle2000_line(
+                    f"{inner_indent}LIBRARY LIBRARY2 := "
+                    f"DELETE: LIBRARY LIBRARY2 ;"
+                )
+            )
+            proc.add_body_line(
+                f"{inner_indent}FLUX := DELETE: FLUX ;"
+            )
+            proc.add_body_line(
+                f"{inner_indent}SYS := DELETE: SYS ;"
+            )
+
+        # Close loops (innermost first → outermost last)
+        for depth in range(
+            len(ordered_branches) - 1, -1, -1
+        ):
+            indent = "    " * depth
+            branch = ordered_branches[depth]
+            proc.add_body_line(
+                f"{indent}ENDWHILE ;"
+            )
+            # Reset counter for next iteration of outer loop
+            if depth > 0:
+                proc.add_body_line(
+                    f"{indent}EVALUATE "
+                    f"{branch.counter_var} := 0 ;"
+                )
+
+        proc.add_body_line("")
+
+        # ===================================================
+        # COMPO export (after all loops)
+        # ===================================================
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* Export COMPO to file")
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("_COMPO := COMPO ;")
+
+        # Map temperature branch values to assembly temps
+        # for the non-loop temperature variables (structural etc.)
+        temp_mapping = {
+            "TBOX": "structural_temperature",
+            "TCLAD": "gap_temperature",
+            "TCTRL": "structural_temperature",
+        }
+        # For branch-driven temps, use default values as fallback
+        # (they will be overridden in the loop via GREP)
+        fuel_temp_branch = scheme.get_branch(
+            "fuel_temperature"
+        )
+        cool_temp_branch = scheme.get_branch(
+            "coolant_temperature"
+        )
+        proc.add_variable(
+            "TFUEL", "REAL",
+            fuel_temp_branch.values[0]
+            if fuel_temp_branch else 900.0,
+        )
+        proc.add_variable(
+            "TCOOL", "REAL",
+            cool_temp_branch.values[0]
+            if cool_temp_branch else 600.0,
+        )
+        proc.add_variable(
+            "TMODE", "REAL",
+            cool_temp_branch.values[0]
+            if cool_temp_branch else 600.0,
+        )
+        for tname, attr in temp_mapping.items():
+            temp_val = getattr(
+                self.assembly, attr, 600.0
+            )
+            proc.add_variable(tname, "REAL", temp_val)
+
+        return proc.write_to_x2m(self.output_path)    

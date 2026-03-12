@@ -503,3 +503,26 @@ def DensToIsoDens_water(density):
     N_O = N_MAT
     N_H = 2.0 * N_MAT
     return {"H1": N_H, "O16": N_O}
+
+
+def compute_water_iso_densities_at_densities(densities):
+    """Compute H and O isotopic number densities for light water at
+    multiple mass densities.
+
+    Parameters
+    ----------
+    densities : list[float]
+        Mass densities in g/cm³.
+
+    Returns
+    -------
+    list[dict]
+        One ``{"H1": N_H, "O16": N_O}`` dict per density, in
+        atoms/barn·cm.
+    """
+    M_H2O = 15.9994 + 2.0 * 1.00794
+    results = []
+    for rho in densities:
+        N_MAT = rho * AVOGADRO / (M_H2O * CM2_TO_BARN)
+        results.append({"H1": 2.0 * N_MAT, "O16": N_MAT})
+    return results

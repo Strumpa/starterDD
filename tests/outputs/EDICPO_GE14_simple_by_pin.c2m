@@ -10,7 +10,8 @@ PARAMETER FLUX LIBRARY2 TRACK ::
 ::: LINKED_LIST LIBRARY2 ;
 ::: LINKED_LIST TRACK ; ;
 STRING name_cpo ;
-:: >>name_cpo<< ; * --------------------------------
+:: >>name_cpo<< ;
+* --------------------------------
 *    MODULES DEFINITION
 * --------------------------------
 MODULE EDI: COMPO: DELETE: END: ;
@@ -26,6 +27,7 @@ SEQ_ASCII _COMPO :: FILE <<name_cpo>> ;
 *   COMPO INITIALIZATION
 * --------------------------------
 COMPO := COMPO: ::
+   EDIT 0
    STEP UP 'EDIHOM_COND'
        COMM 'Condensed, Homogenized over all fuel cells' ENDC
       ISOT 5 U235 U238 U234 Gd155 Gd157
