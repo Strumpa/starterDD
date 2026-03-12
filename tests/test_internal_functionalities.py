@@ -820,7 +820,7 @@ class TestDragonCalcSchemeSummary:
         """Verify summary() returns a non-empty string."""
         from starterDD.DDModel.DragonCalculationScheme import DragonCalculationScheme
         PATH_TO_CALC_SCHEME = str(
-            DATA_DIR / "BWRProgressionProblems" / "GE14" / "inputs" / "CALC_SCHEME_GE14.yaml"
+            DATA_DIR / "BWRProgressionProblems" / "GE14_inputs" / "ASSEMBLY" / "CALC_SCHEME_GE14.yaml"
         )
         scheme = DragonCalculationScheme.from_yaml(PATH_TO_CALC_SCHEME)
         s = scheme.summary()

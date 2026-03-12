@@ -42,4 +42,3 @@ EDI_COMPO_OUTPUTS:
         fuel_temperature: [900.0]
         coolant_temperature: [600.0]
         burnup: [0.0]
-      

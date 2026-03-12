@@ -30,7 +30,9 @@ try:
     from ..GeometryBuilder.glow_builder import (
         build_full_assembly_geometry,
     )
+    from glow.support.types import GeometryType, PropertyType
     GLOW_AVAILABLE = True
+    
 except ImportError:
     GLOW_AVAILABLE = False
 
@@ -90,13 +92,45 @@ class DragonCase:
         self.case_name = case_name
         self.call_glow = call_glow
         self.draglibs_names_to_alias = draglibs_names_to_alias
-        self.config_yamls = config_yamls
         self.enable_g2s = enable_g2s
-        self.output_path = output_path or os.path.join(
+        self.tdt_base_name = tdt_base_name or case_name
+
+        # ----------------------------------------------------------
+        # Resolve all paths to absolute so the case is
+        # independent of later CWD changes.
+        # ----------------------------------------------------------
+        from pathlib import Path
+
+        cwd = Path.cwd()
+
+        # Config yamls — resolve each value
+        self.config_yamls = {
+            key: str(Path(val).resolve())
+            if not os.path.isabs(val)
+            else val
+            for key, val in config_yamls.items()
+        }
+
+        # Output path (for generated CLE2000 procedures)
+        raw_output = output_path or os.path.join(
             "cle2000_procs", case_name,
         )
-        self.tdt_path = tdt_path or self.output_path
-        self.tdt_base_name = tdt_base_name or case_name
+        self.output_path = str(
+            (cwd / raw_output).resolve()
+            if not os.path.isabs(raw_output)
+            else Path(raw_output).resolve()
+        )
+
+        # TDT path (where .dat files live / will be written)
+        if tdt_path is not None:
+            self.tdt_path = str(
+                (cwd / tdt_path).resolve()
+                if not os.path.isabs(tdt_path)
+                else Path(tdt_path).resolve()
+            )
+        else:
+            self.tdt_path = self.output_path
+
         self._validate_config_yamls()
 
     # -----------------------------------------------------------
@@ -148,6 +182,62 @@ class DragonCase:
         assembly.analyze_lattice_description(build_pins=True)
         assembly.set_material_compositions(compositions)
         return assembly, compositions
+
+    # -----------------------------------------------------------
+    # Case execution
+    # -----------------------------------------------------------
+
+    def run(
+        self,
+        dragon_executable=None,
+        draglib_paths=None,
+        results_root="./results",
+        num_threads=1,
+        create_latest_symlink=True,
+        dry_run=False,
+    ):
+        """Generate CLE2000 procedures and execute the Dragon case.
+
+        This is a convenience method that chains procedure
+        generation with execution via ``DragonRunner``.
+
+        Parameters
+        ----------
+        dragon_executable : str or None
+            Path to the Dragon binary.  If ``None``, resolved
+            from ``$dragon_exec`` or ``$DRAGON_EXEC``.
+        draglib_paths : dict or None
+            ``{draglib_name: absolute_path}``.  If ``None``,
+            resolved from the ``$DRAGLIBS`` directory.
+        results_root : str
+            Root directory for result storage.
+        num_threads : int
+            OpenMP thread count.
+        create_latest_symlink : bool
+            Maintain a ``latest`` symlink to the most recent run.
+        dry_run : bool
+            If ``True``, stage inputs and write manifest but
+            do not execute Dragon.
+
+        Returns
+        -------
+        RunResult
+        """
+        from .dragon_runner import DragonRunner
+
+        # Generate procedures if not already done
+        if not hasattr(self, "scheme") or self.scheme is None:
+            self.generate_cle2000_procedures()
+
+        runner = DragonRunner(
+            dragon_case=self,
+            dragon_executable=dragon_executable,
+            draglib_paths=draglib_paths,
+            results_root=results_root,
+            num_threads=num_threads,
+            create_latest_symlink=create_latest_symlink,
+        )
+        return runner.run(dry_run=dry_run)
 
     # -----------------------------------------------------------
     # Main entry point
@@ -203,20 +293,46 @@ class DragonCase:
                         "SALOME platform (typically run "
                         "via Docker)."
                     )
-                build_full_assembly_geometry(
+                lattice, assembly_box = build_full_assembly_geometry(
                     assembly_model=assembly,
                     calculation_step=step,
                     output_path=self.tdt_path,
                     output_file_name=tdt_file_name,
                 )
+                lattice.show(
+                    geometry_type_to_show=GeometryType.SECTORIZED,
+                    property_type_to_show=PropertyType.MATERIAL,
+                )
+                if step.export_macros:
+                    lattice.show(
+                        geometry_type_to_show=GeometryType.SECTORIZED,
+                        property_type_to_show=PropertyType.MACRO,
+                    )
 
             # 4b. Read TDT and enforce material indices
             #     (for the SSH step — it defines the LIB
             #     numbering used by all subsequent steps)
             if step.step_type == "self_shielding":
+                tdt_file_path = self.tdt_path
+                tdt_full = os.path.join(
+                    tdt_file_path,
+                    f"{tdt_file_name}_{step.tracking}"
+                    + ("_MACRO" if step.export_macros else "")
+                    + ".dat",
+                )
+                if not os.path.isfile(tdt_full):
+                    raise FileNotFoundError(
+                        f"TDT file not found: {tdt_full}\n"
+                        f"  tdt_path = {tdt_file_path}\n"
+                        f"When call_glow=False, the TDT .dat "
+                        f"file must already exist.  Pass an "
+                        f"explicit tdt_path= to DragonCase "
+                        f"pointing at the directory that "
+                        f"contains the file."
+                    )
                 tdt_indices = (
                     read_material_mixture_indices_from_tdt_file(
-                        tdt_file_path=self.tdt_path,
+                        tdt_file_path=tdt_file_path,
                         tdt_file_name=tdt_file_name,
                         tracking_option=step.tracking,
                         include_macros=step.export_macros,

@@ -17,21 +17,21 @@ CORE_GEOMETRY:
     GE14_10%:
       - axial_region: "DOM"
         axial_bounds: [0.0, 222.0595]
-        assembly_geometry_file: "GEOM_GE14_DOM.yaml"
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM.yaml"
       - axial_region: "VAN"
         axial_bounds: [222.0595, 347.1291]
-        assembly_geometry_file: "GEOM_GE14_VAN.yaml"
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN.yaml"
     GE14_20%:
       - axial_region: "DOM"
         axial_bounds: [0.0, 222.0595]
-        assembly_geometry_file: "GEOM_GE14_DOM.yaml"
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM.yaml"
       - axial_region: "VAN"
         axial_bounds: [222.0595, 347.1291]
-        assembly_geometry_file: "GEOM_GE14_VAN.yaml"
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN.yaml"
     GE14_30%:
       - axial_region: "DOM"
         axial_bounds: [0.0, 222.0595]
-        assembly_geometry_file: "GEOM_GE14_DOM.yaml"
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM.yaml"
       - axial_region: "VAN"
         axial_bounds: [222.0595, 347.1291]
-        assembly_geometry_file: "GEOM_GE14_VAN.yaml"
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN.yaml"

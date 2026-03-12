@@ -12,6 +12,7 @@ from glow.main import TdtSetup, analyse_and_generate_tdt
 from glow.interface.geom_interface import *
 from glow.support.types import *
 from .helpers import computeSantamarinaradii
+import os
 # Note: CartesianAssemblyModel and FuelPinModel are imported inside functions to avoid circular imports
 
 
@@ -453,6 +454,16 @@ def export_glow_geom(output_path, output_file_name, lattice, tracking_option, ex
     tracking_option : str
         Tracking option, either ``"TISO"`` or ``"TSPC"``
     """
+    # check of output path exists and create if not
+    print(f"Exporting geometry to {output_path} with raw name {output_file_name} with tracking option '{tracking_option}' and export_macro={export_macro}")
+    cwd = os.getcwd()
+    print(f"Current working directory: {cwd}")
+    if not os.path.isabs(output_path):
+        output_path = os.path.join(cwd, output_path)
+    if not os.path.exists(output_path):
+        print(output_path + " does not exist, creating it.")
+        os.makedirs(output_path)
+        
     if export_macro:
         properties_to_export = [PropertyType.MATERIAL, PropertyType.MACRO]
         output_file_name = f"{output_file_name}_{tracking_option}_MACRO"
@@ -460,17 +471,19 @@ def export_glow_geom(output_path, output_file_name, lattice, tracking_option, ex
         properties_to_export = [PropertyType.MATERIAL]
         output_file_name = f"{output_file_name}_{tracking_option}"
 
+    full_tdt_path = os.path.join(output_path, output_file_name)
+
     if tracking_option == "TISO":
         lattice.type_geo = LatticeGeometryType.ISOTROPIC
         analyse_and_generate_tdt(
-            [lattice], f"{output_path}/{output_file_name}", TdtSetup(GeometryType.SECTORIZED,
+            [lattice], full_tdt_path, TdtSetup(GeometryType.SECTORIZED,
                                              property_types=properties_to_export,
                                              type_geo=LatticeGeometryType.ISOTROPIC,
                                              symmetry_type=SymmetryType.FULL))
     elif tracking_option == "TSPC":
         lattice.type_geo = LatticeGeometryType.RECTANGLE_SYM    
         analyse_and_generate_tdt(
-            [lattice], f"{output_path}/{output_file_name}", TdtSetup(GeometryType.SECTORIZED,
+            [lattice], full_tdt_path, TdtSetup(GeometryType.SECTORIZED,
                                              property_types=properties_to_export,
                                              type_geo=LatticeGeometryType.RECTANGLE_SYM,
                                              symmetry_type=SymmetryType.FULL))
@@ -2907,24 +2920,28 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
     ordered_cells = generate_fuel_cells(
         assembly_model, calculation_step=calculation_step
     )
+    if ap > pin_pitch * n_cols:
+        # Step 3: Build assembly box
+        assembly_box_cell = build_assembly_box(assembly_model, center=center)
 
-    # Step 3: Build assembly box
-    assembly_box_cell = build_assembly_box(assembly_model, center=center)
-
-    # Step 4: Subdivide assembly box if needed
-    #   - IC + macros  → per-pin-row/column MACRO regions
-    #   - MOC + box_discretization enabled → fine grid for MOC tracking
-    if (calculation_step.spatial_method == "IC"
-            and calculation_step.export_macros):
-        assembly_box_cell = subdivide_box_into_macros(
-            assembly_box_cell, assembly_model
-        )
-    elif (calculation_step.box_discretization is not None
-              and calculation_step.box_discretization.enabled):
-        assembly_box_cell = discretize_box(
-            assembly_box_cell, assembly_model,
-            calculation_step.box_discretization,
-        )
+        # Step 4: Subdivide assembly box if needed
+        #   - IC + macros  → per-pin-row/column MACRO regions
+        #   - MOC + box_discretization enabled → fine grid for MOC tracking
+        if (calculation_step.spatial_method == "IC"
+                and calculation_step.export_macros):
+            assembly_box_cell = subdivide_box_into_macros(
+                assembly_box_cell, assembly_model
+            )
+        elif (calculation_step.box_discretization is not None
+                and calculation_step.box_discretization.enabled):
+            assembly_box_cell = discretize_box(
+                assembly_box_cell, assembly_model,
+                calculation_step.box_discretization,
+            )
+    else:        
+        print(f"Assembly pitch {ap} is not larger than pin lattice "
+            f"footprint {pin_pitch * n_cols}; skipping assembly box.")
+        assembly_box_cell = None
 
     # Step 5: Build lattice and add cells
     lattice = Lattice(
@@ -2942,8 +2959,9 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
             translation=translation,
             calculation_step=calculation_step,
         )
-
-    lattice.lattice_box = assembly_box_cell
+    
+    if assembly_box_cell is not None:
+        lattice.lattice_box = assembly_box_cell
 
     # Step 6: Export TDT
     export_glow_geom(
