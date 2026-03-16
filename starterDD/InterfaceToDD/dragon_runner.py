@@ -4,6 +4,8 @@
 #
 # R.Guasch — 12/03/2026
 
+import gzip
+import logging
 import os
 import re
 import shutil
@@ -16,6 +18,8 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
+
+log = logging.getLogger(__name__)
 
 
 # -------------------------------------------------------------------
@@ -250,19 +254,16 @@ class DragonRunner:
                     )
                     continue
 
-            # 2. $DRAGLIBS directory (also check $DRAGLIB_DIR)
-            draglibs_dir = (
-                os.environ.get("DRAGLIBS")
-                or os.environ.get("DRAGLIB_DIR")
+            # 2. Search well-known env vars: DRAGLIBS_DIR, DRAGLIB_DIR, DRAGLIBS
+            _ENV_VARS = ("DRAGLIBS_DIR", "DRAGLIB_DIR", "DRAGLIBS")
+            draglibs_dir = next(
+                (os.environ[v] for v in _ENV_VARS if v in os.environ),
+                None,
             )
             if draglibs_dir and os.path.isdir(draglibs_dir):
-                candidate = os.path.join(
-                    draglibs_dir, draglib_name
-                )
+                candidate = os.path.join(draglibs_dir, draglib_name)
                 if os.path.isfile(candidate):
-                    resolved[draglib_name] = os.path.abspath(
-                        candidate
-                    )
+                    resolved[draglib_name] = os.path.abspath(candidate)
                     continue
                 if os.path.isfile(candidate + ".gz"):
                     resolved[draglib_name] = os.path.abspath(
@@ -270,11 +271,13 @@ class DragonRunner:
                     )
                     continue
 
+            env_vals = {v: os.environ.get(v, "(not set)") for v in _ENV_VARS}
             raise FileNotFoundError(
                 f"Cannot find draglib '{draglib_name}'. "
                 f"Provide it via draglib_paths= argument, "
-                f"or place it in $DRAGLIB_DIR directory. "
-                f"DRAGLIB_DIR={os.environ.get('DRAGLIB_DIR', '(not set)')}"
+                f"or place it (optionally gzip-compressed) in the directory "
+                f"pointed to by one of: {', '.join(f'${v}' for v in _ENV_VARS)}. "
+                f"Current values: {env_vals}"
             )
 
         return resolved
@@ -407,29 +410,100 @@ class DragonRunner:
         if not skip_draglibs:
             self._stage_draglibs(staging_dir)
 
-    def _stage_draglibs(self, staging_dir):
-        """Symlink or decompress draglib files into the staging
-        directory.  Called separately so that dry_run can skip it."""
-        for draglib_name, draglib_path in self.draglib_paths.items():
-            print(f"Staging draglib '{draglib_name}' from '{draglib_path}'")
-            draglib_path = str(draglib_path)
-            if draglib_path.endswith(".gz"):
-                import gzip
-                decompressed = os.path.join(
-                    staging_dir, draglib_name
+    @staticmethod
+    def _ensure_decompressed(draglib_path):
+        """Return a path to an uncompressed copy of *draglib_path*.
+
+        If *draglib_path* ends with ``.gz``, the file is decompressed
+        to a persistent sibling path (the same name without the
+        ``.gz`` suffix).  Decompression is skipped when the sibling
+        already exists **and** is at least as new as the archive, so
+        subsequent runs reuse the cached copy without re-reading the
+        full archive.
+
+        Parameters
+        ----------
+        draglib_path : str
+            Absolute path to the draglib file, possibly gzip-compressed.
+
+        Returns
+        -------
+        str
+            Absolute path to the uncompressed draglib file.
+        """
+        draglib_path = str(draglib_path)
+
+        if not draglib_path.endswith(".gz"):
+            return draglib_path
+
+        unzipped_path = draglib_path[:-3]  # strip ".gz"
+
+        # Reuse cached decompressed file if it is fresh enough.
+        if os.path.isfile(unzipped_path):
+            gz_mtime = os.path.getmtime(draglib_path)
+            uz_mtime = os.path.getmtime(unzipped_path)
+            if uz_mtime >= gz_mtime:
+                log.info(
+                    "Draglib cache hit: reusing '%s'", unzipped_path
                 )
-                with gzip.open(draglib_path, "rb") as f_in:
-                    with open(decompressed, "wb") as f_out:
-                        shutil.copyfileobj(f_in, f_out)
-            else:
-                dst = os.path.join(staging_dir, self.case.draglibs_names_to_alias[draglib_name])
-                if not os.path.exists(dst):
-                    os.symlink(
-                        os.path.abspath(draglib_path), dst
-                    )
-            print(f"Staged draglib '{draglib_name}' from '{draglib_path}'")
-            print(f"  -> {os.path.join(staging_dir, draglib_name)}")
-            print(os.listdir(staging_dir))
+                return unzipped_path
+            log.info(
+                "Draglib cache stale (archive newer): re-decompressing '%s'",
+                draglib_path,
+            )
+        else:
+            log.info("Decompressing draglib '%s' ...", draglib_path)
+
+        tmp_path = unzipped_path + ".tmp"
+        try:
+            with gzip.open(draglib_path, "rb") as f_in:
+                with open(tmp_path, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            os.replace(tmp_path, unzipped_path)
+        except Exception:
+            # Remove partial file so a retry starts clean.
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
+
+        log.info("Decompressed draglib to '%s'", unzipped_path)
+        return unzipped_path
+
+    def _stage_draglibs(self, staging_dir):
+        """Symlink draglib files into the staging directory.
+
+        For gzip-compressed draglibs, decompression is handled by
+        :meth:`_ensure_decompressed`, which caches the result next to
+        the archive so subsequent runs skip re-decompression.
+
+        The CLE2000 alias symlink always points to the uncompressed
+        file, never to the ``.gz`` archive.
+        """
+        for draglib_name, draglib_path in self.draglib_paths.items():
+            log.info(
+                "Staging draglib '%s' from '%s'",
+                draglib_name, draglib_path,
+            )
+            unzipped_path = self._ensure_decompressed(draglib_path)
+
+            alias = self.case.draglibs_names_to_alias[draglib_name]
+            dst = os.path.join(staging_dir, alias)
+
+            if not os.path.exists(dst):
+                os.symlink(os.path.abspath(unzipped_path), dst)
+
+            # Validate that the symlink resolves to a readable file.
+            if not os.path.exists(dst):
+                raise FileNotFoundError(
+                    f"Draglib symlink '{dst}' -> '{unzipped_path}' "
+                    f"does not resolve. Check that the file exists "
+                    f"and is readable."
+                )
+
+            log.info(
+                "Staged draglib '%s' as alias '%s' -> '%s'",
+                draglib_name, alias, unzipped_path,
+            )
 
     # -----------------------------------------------------------
     # Config YAML archival

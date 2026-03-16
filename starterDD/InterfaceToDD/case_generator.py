@@ -894,12 +894,10 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(
                 f'{inner_indent}ECHO "State Point:" ; \n'
-                #f'{inner_indent}ECHO {echo_parts} ; \n'
             )
         )
         proc.add_body_line(
             wrap_cle2000_line(
-                #f'{inner_indent}ECHO "State Point:" ; \n'
                 f'{inner_indent}ECHO {echo_parts} ; \n'
             )
         )

@@ -1463,6 +1463,7 @@ class SALT:
     AVAILABLE_QUADRATURES = (
         "GAUS", "CACA", "CACB", "LCMD", "OPP1", "OGAU",
     )
+    AVAILABLE_TSPC_ANGLES = (2, 6, 8, 12, 14, 18, 20, 24, 30)
 
     def __init__(self, calculation_step, tdt_var_name,
                  track_name=None, title=None, batch=None):

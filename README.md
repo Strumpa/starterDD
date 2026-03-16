@@ -41,9 +41,15 @@ a python package aiming to help get a more user friendly experience with using D
     - Support for rounded corner BWR assemblies.
     - Support for control crosses.
 
+- InterfaceToDD : allows users to interface the starterDD functionalities to the Version5 (Donjon&Dragon) environment. As of 16/03/2026 Dragon can be executed directly from starterDD. 
+    - Specify a path to a Dragon executable in file or as a "dragon_exec" environment varaible,
+    - Specify a path to draglibs in zipped or unzipped in file or as a "DRAGLIBS_DIR" envionment variable,
+    - Execute the Dragon case and save time stamped results.
+    - Only a direct self-shielding + MOC calculation scheme is supoprted for now, more schemes will be implemented.
 
-## To be implemented [03/03/2026] : 
+
+## To be implemented [16/03/2026] : 
 - full "abstract" reactor model to support multi-physics.
-- full reactor database creation with DRAGON to support DONJON full core calculations.
+- full reactor database creation with DRAGON to support DONJON full core calculations : need to implement support for burnup calculations.
 - Support for colorsets / minicore 2D geometries for Dragon.
 - python to CLE-2000 generator : create a full Dragon&Donjon case from the python model and generate equivalent CLE-2000 instructions to run. 
