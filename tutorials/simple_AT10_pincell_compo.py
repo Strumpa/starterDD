@@ -98,6 +98,8 @@ run_result = AT10_compo_test_case.run(
     results_root="./results",
     num_threads=1,
 )
+print(f"Draglibs path used: {DRAGLIBS_PATH / 'draglibJeff3p1p1SHEM295_v5p1'}")
+print("Dragon run completed.")
 print(f"Success: {run_result.success}")
 print(f"keff:    {run_result.keff}")
 print(f"Time:    {run_result.wall_time_seconds:.1f}s")

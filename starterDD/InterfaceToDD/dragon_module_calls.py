@@ -961,7 +961,10 @@ class COMPO:
                 f"    STEP UP '{directory_name}'\n"
             )
             for b in self.branches:
-                call += f"    '{b.para_name}' <<{b.para_name}>>\n"
+                if b.para_name == "Burnup":
+                    call += f"    SET <<TIME>> DAY \n"
+                else:
+                    call += f"    '{b.para_name}' <<{b.para_name}>>\n"
             call += ";\n"
         else:
             call = (
@@ -1253,14 +1256,14 @@ class EDI_COMPO:
                 "* --------------------------------\n"
                 "*    INPUT & OUTPUT PARAMETERS\n"
                 "* --------------------------------\n"
-                "PARAMETER FLUX LIBRARY2 TRACK COMPO ::\n"
+                "PARAMETER COMPO FLUX LIBRARY2 TRACK ::\n"
+                "::: LINKED_LIST COMPO ; \n"
                 "::: LINKED_LIST FLUX ;\n"
                 "::: LINKED_LIST LIBRARY2 ;\n"
-                "::: LINKED_LIST TRACK ;\n"
-                "::: LINKED_LIST COMPO ; ;\n"
+                "::: LINKED_LIST TRACK ; ;\n"
                 "STRING name_cpo ;\n"
                 ":: >>name_cpo<< ;\n"
-                f"{branch_var_decl}"
+                f"{branch_var_decl}\n"
                 "* --------------------------------\n"
                 "*    MODULES DEFINITION\n"
                 "* --------------------------------\n"
@@ -1270,6 +1273,9 @@ class EDI_COMPO:
                 "* --------------------------------\n"
                 "LINKED_LIST EDIRATES ;\n"
             )
+            header += "REAL spec_pow := 38.6 ; ! W/g\n"
+            if "Burnup" in [b.para_name for b in self.branches]:
+                header += "REAL TIME := Burnup spec_pow / ; \n"
         else:
             header = (
                 f"* PROCEDURE {proc_name}.c2m : calls to EDI: and COMPO: modules\n"
@@ -1680,6 +1686,7 @@ class TRK:
             validate_varname(trk_ll)
             validate_varname(trkfil)
             param_items.append(trk_ll)
+            param_items.append(trkfil)
         for tdt_var in tdt_map:
             validate_varname(tdt_var)
             param_items.append(tdt_var)
@@ -1699,9 +1706,10 @@ class TRK:
             param_block += f" {item}"
         param_block += " ::\n"
         # Linked-list declarations
-        for trk_ll, _ in track_names:
+        for trk_ll, trk_bin in track_names:
             param_block += (
                 f"::: LINKED_LIST {trk_ll} ;\n"
+                f"::: SEQ_BINARY {trk_bin} ;\n"
             )
         # TDT vars are SEQ_ASCII (no linked-list decl)
         param_block += ";\n"
@@ -1715,19 +1723,13 @@ class TRK:
         # MODULE declaration
         mod_block = "MODULE SALT: MCCGT: END: ;\n"
 
-        # SEQ_BINARY declarations
-        seq_bin_names = [tf for _, tf in track_names]
-        seq_block = wrap_cle2000_line(
-            "SEQ_BINARY " + " ".join(seq_bin_names) + " ;"
-        ) + "\n"
-
         body = self.build_procedure_body()
 
         footer = "END: ;\nQUIT .\n"
 
         content = (
             f"{header}{param_block}\n{var_block}\n"
-            f"{mod_block}\n{seq_block}\n{body}{footer}"
+            f"{mod_block}\n{body}{footer}"
         )
 
         if path_to_procs and not os.path.exists(path_to_procs):

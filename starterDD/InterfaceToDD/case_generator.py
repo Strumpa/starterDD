@@ -51,9 +51,9 @@ class DragonCase:
     3. Generates four CLE2000 files:
 
        - **<case>.x2m** — main procedure with USS/ASM/FLU calls.
-       - **MIX_<case>.c2m** — material library (LIB:).
-       - **TRK_<case>.c2m** — tracking (SALT:/MCCGT:).
-       - **EDIR_<case>.c2m** — editions/COMPO export.
+       - **MIX.c2m** — material library (LIB:).
+       - **TRK.c2m** — tracking (SALT:/MCCGT:).
+       - **EDIR.c2m** — editions/COMPO export.
     """
 
     def __init__(self, case_name, call_glow,
@@ -228,7 +228,7 @@ class DragonCase:
         # Generate procedures if not already done
         if not hasattr(self, "scheme") or self.scheme is None:
             self.generate_cle2000_procedures()
-
+        print(f"In dragon case run : draglib_paths = {draglib_paths}")
         runner = DragonRunner(
             dragon_case=self,
             dragon_executable=dragon_executable,
@@ -354,8 +354,9 @@ class DragonCase:
         )[0]
 
         # ----- MIX.c2m (LIB procedure) -----
-        mix_proc_name = f"MIX_{self.case_name}"
+        mix_proc_name = f"MIX"
         validate_varname(mix_proc_name[:12])
+        print(f"Generating MIX procedure '{mix_proc_name}' with LIB: ...")
         has_density = (
             scheme.has_branches()
             and scheme.get_branch("coolant_density") is not None
@@ -366,14 +367,14 @@ class DragonCase:
         )
 
         # ----- TRK.c2m -----
-        trk_proc_name = f"TRK_{self.case_name}"
+        trk_proc_name = f"TRK"
         trk = TRK(scheme, self.case_name)
         trk_path = trk.write_to_c2m(
             self.output_path, trk_proc_name,
         )
 
         # ----- EDIR.c2m (EDI/COMPO) -----
-        edir_proc_name = f"EDIR_{self.case_name}"
+        edir_proc_name = f"EDIR"
         if scheme.has_branches():
             edi_compo = EDI_COMPO(
                 assembly,
@@ -456,6 +457,7 @@ class DragonCase:
             proc.add_linked_list(trk_ll)
         proc.add_linked_list("SYS")
         proc.add_linked_list("FLUX")
+        proc.add_linked_list("COMPO")
 
         for _, trkfil in trk.get_track_names():
             proc.add_seq_binary(trkfil)
@@ -675,6 +677,9 @@ class DragonCase:
             proc.add_module_call(m)
 
         # --- Sub-procedures ---
+        print(f"Generating main x2m with branches. Sub-procedures: "
+                f"{mix_proc_name}, {trk_proc_name}, "
+                f"{edir_proc_name}")
         sub_mix = sub_procedure(mix_proc_name)
         sub_trk = sub_procedure(trk_proc_name)
         sub_edir = sub_procedure(edir_proc_name)
@@ -688,6 +693,7 @@ class DragonCase:
             proc.add_linked_list(trk_ll)
         proc.add_linked_list("SYS")
         proc.add_linked_list("FLUX")
+        proc.add_linked_list("COMPO")
         proc.add_linked_list("PARAMS")
 
         for _, trkfil in trk.get_track_names():
@@ -882,13 +888,19 @@ class DragonCase:
 
         # Echo current statepoint
         echo_parts = " ".join(
-            f'"{b.para_name}= "{b.para_name}'
+            f'"{b.para_name}=" {b.para_name}'
             for b in ordered_branches
         )
         proc.add_body_line(
             wrap_cle2000_line(
-                f'{inner_indent}ECHO "SP:"'
-                f'{echo_parts} ;'
+                f'{inner_indent}ECHO "State Point:" ; \n'
+                #f'{inner_indent}ECHO {echo_parts} ; \n'
+            )
+        )
+        proc.add_body_line(
+            wrap_cle2000_line(
+                #f'{inner_indent}ECHO "State Point:" ; \n'
+                f'{inner_indent}ECHO {echo_parts} ; \n'
             )
         )
 
@@ -965,7 +977,6 @@ class DragonCase:
         # --- ASM + FLU on flux step ---
         flux_steps = scheme.get_flux_steps()
         if flux_steps:
-            flux_step = flux_steps[0]
             flux_trk, flux_trkfil = track_names[-1]
 
             proc.add_body_line(

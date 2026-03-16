@@ -411,6 +411,7 @@ class DragonRunner:
         """Symlink or decompress draglib files into the staging
         directory.  Called separately so that dry_run can skip it."""
         for draglib_name, draglib_path in self.draglib_paths.items():
+            print(f"Staging draglib '{draglib_name}' from '{draglib_path}'")
             draglib_path = str(draglib_path)
             if draglib_path.endswith(".gz"):
                 import gzip
@@ -421,11 +422,14 @@ class DragonRunner:
                     with open(decompressed, "wb") as f_out:
                         shutil.copyfileobj(f_in, f_out)
             else:
-                dst = os.path.join(staging_dir, draglib_name)
+                dst = os.path.join(staging_dir, self.case.draglibs_names_to_alias[draglib_name])
                 if not os.path.exists(dst):
                     os.symlink(
                         os.path.abspath(draglib_path), dst
                     )
+            print(f"Staged draglib '{draglib_name}' from '{draglib_path}'")
+            print(f"  -> {os.path.join(staging_dir, draglib_name)}")
+            print(os.listdir(staging_dir))
 
     # -----------------------------------------------------------
     # Config YAML archival
@@ -630,15 +634,15 @@ class DragonRunner:
                 ),
                 "mix": os.path.join(
                     self.case.output_path,
-                    f"MIX_{self.case.case_name}.c2m",
+                    f"MIX.c2m",
                 ),
                 "trk": os.path.join(
                     self.case.output_path,
-                    f"TRK_{self.case.case_name}.c2m",
+                    f"TRK.c2m",
                 ),
                 "edir": os.path.join(
                     self.case.output_path,
-                    f"EDIR_{self.case.case_name}.c2m",
+                    f"EDIR.c2m",
                 ),
             }
 
