@@ -1687,7 +1687,7 @@ class TRK:
         """
         result = []
         for step in self.scheme.get_trackable_steps():
-            tag = step.name.upper()
+            tag = step.name[:12].upper()
             result.append((f"TRK{tag}", f"TRKFIL{tag}"))
         return result
 
