@@ -92,7 +92,6 @@ class CoreModel:
         self.core_2D_layout = geometric_data.get("core_2D_layout", []) # list of lists representing the 2D layout of the core, with each entry corresponding to an assembly ID
         self.assembly_axial_layouts = geometric_data.get("assembly_axial_layouts", []) # list of lists representing the axial layout of the core, with each entry corresponding to an assembly ID and
         # the axial extent of the assembly in the core (if axial variation is present in the core description)
-        print(self.core_2D_layout)
         number_of_assemblies = sum(len(row) for row in self.core_2D_layout)
         print(f"CoreModel: Parsed core description YAML for core '{self.name}' with {number_of_assemblies} assemblies.")
         self.assembly_axial_layouts = geometric_data.get("assembly_axial_layouts", {}) # dictionary mapping assembly IDs to their axial layouts, if axial variation is present in the core description

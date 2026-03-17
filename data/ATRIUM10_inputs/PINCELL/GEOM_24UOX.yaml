@@ -1,0 +1,22 @@
+# Geometry description for the ATRIUM-10 BWR fuel bundle.
+# This file describes the geometry of the pincell, including the fuel radius, gap radius, clad radius, and the number of fuel zones. 
+# This information is used to build the pincell geometry.
+
+PIN_GEOMETRY:
+  fuel_radius: 0.4435
+  gap_radius: 0.4520
+  clad_radius: 0.5140
+  pin_pitch: 1.295
+  self_shielding_option: "Santamarina"
+
+ASSEMBLY_GEOMETRY:
+  lattice_type: "cartesian"
+  reactor_type: "BWR"
+  lattice_description:
+    - ["ROD1"]
+
+  assembly_pitch: 1.295
+  gap_wide: 0.0
+  channel_box_thickness: 0.0
+  corner_inner_radius_of_curvature: 0
+

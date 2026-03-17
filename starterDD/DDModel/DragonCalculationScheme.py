@@ -1,6 +1,6 @@
 # Classes defining a DRAGON calculation scheme for starterDD.
 # A calculation scheme orchestrates the sequence of DRAGON calculation steps
-# (self-shielding, flux, depletion) and their respective geometry
+# (self-shielding, flux) and their respective geometry
 # discretization options (radial subdivision, azimuthal sectorization).
 #
 # R.Guasch
@@ -14,7 +14,7 @@ from copy import deepcopy
 # Valid option constants
 # ---------------------------------------------------------------------------
 
-VALID_STEP_TYPES = ("self_shielding", "flux")
+VALID_STEP_TYPES = ("self_shielding", "flux", "edition_between_levels")
 VALID_SELF_SHIELDING_MODULES = ("USS", "SHI")  # USS: unresolved resonance, SHI: Stammler
 VALID_SELF_SHIELDING_METHODS = ("RSE", "PT")  # RSE: subgroup+equivalence, PT: probability tables
 VALID_SPATIAL_METHODS = ("CP", "IC", "MOC")
@@ -72,7 +72,8 @@ class SectorConfig:
     """
 
     def __init__(self, sectors=None, angles=None, windmill=False,
-                 splits=None, additional_radial_splits_in_moderator=1):
+                 splits=None, additional_radial_splits_in_moderator=None,
+                 subdivisions_coolant_corners=None):
         self.sectors = sectors or []
         self.angles = angles or []
         self.windmill = windmill
@@ -80,6 +81,7 @@ class SectorConfig:
         self.additional_radial_splits_in_moderator = (
             additional_radial_splits_in_moderator
         )
+        self.subdivisions_coolant_corners = subdivisions_coolant_corners
 
     # ------------------------------------------------------------------
     # Radial-split helpers (circular water rods)
@@ -181,18 +183,18 @@ class SectorConfig:
 
 
 # ---------------------------------------------------------------------------
-# WingSubmeshConfig – sub-meshing options for the control cross wings
+# ControlCrossSubmeshConfig – sub-meshing options for the control cross wings
 # ---------------------------------------------------------------------------
 
-class WingSubmeshConfig:
+class ControlCrossSubmeshConfig:
     """
     Configuration for sub-meshing the control cross wing regions.
 
     Each wing arm is decomposed into three axial zones (perpendicular to
     the arm axis):
 
-    1. **Corner zone** — the ``bt/2 × bt/2`` square where both arms
-       overlap at the cross centre.
+    1. **Control-cross corner zone** — the ``bt/2 × bt/2`` square where
+       both arms overlap at the cross centre.
     2. **Central-structure-to-absorber zone** — the span from the corner
        zone edge to the first absorber tube boundary.
     3. **Absorber-pin zone** — the span containing the absorber tubes
@@ -205,9 +207,10 @@ class WingSubmeshConfig:
     Attributes
     ----------
     enabled : bool
-        Whether wing sub-meshing is active.
-    corner_splits : tuple[int, int] or None
-        ``(n_along_arm, n_across_arm)`` grid for the corner zone.
+        Whether control-cross sub-meshing is active.
+    control_cross_corner_splits : tuple[int, int] or None
+        ``(n_along_arm, n_across_arm)`` grid for the control-cross
+        corner zone (the ``bt/2 × bt/2`` square at the cross centre).
         ``None`` → ``(1, 1)`` (no sub-division).
     central_structure_splits : tuple[int, int] or None
         ``(n_along_arm, n_across_arm)`` grid for the CS-to-absorber zone.
@@ -221,22 +224,23 @@ class WingSubmeshConfig:
         the arm axis.  Default ``False``.
     """
 
-    # Default values used when ``wing_submesh: true`` (bool shorthand)
+    # Default values used when ``control_cross_submesh: true`` (bool shorthand)
     _DEFAULTS = dict(
         enabled=True,
-        corner_splits=None,
+        control_cross_corner_splits=None,
         central_structure_splits=None,
         extend_splits_at_tube_boundaries=True,
         split_tubes_in_half=False,
     )
 
-    def __init__(self, enabled=True, corner_splits=None,
+    def __init__(self, enabled=True, control_cross_corner_splits=None,
                  central_structure_splits=None,
                  extend_splits_at_tube_boundaries=True,
                  split_tubes_in_half=False):
         self.enabled = enabled
-        self.corner_splits = (
-            tuple(corner_splits) if corner_splits else None
+        self.control_cross_corner_splits = (
+            tuple(control_cross_corner_splits)
+            if control_cross_corner_splits else None
         )
         self.central_structure_splits = (
             tuple(central_structure_splits)
@@ -248,7 +252,7 @@ class WingSubmeshConfig:
     @classmethod
     def from_yaml(cls, raw):
         """
-        Parse a ``wing_submesh`` YAML value.
+        Parse a ``control_cross_submesh`` YAML value.
 
         Accepts:
 
@@ -262,7 +266,7 @@ class WingSubmeshConfig:
 
         Returns
         -------
-        WingSubmeshConfig or None
+        ControlCrossSubmeshConfig or None
             ``None`` when disabled.
         """
         if isinstance(raw, bool):
@@ -270,7 +274,9 @@ class WingSubmeshConfig:
         if isinstance(raw, dict):
             return cls(
                 enabled=raw.get("enabled", True),
-                corner_splits=raw.get("corner_splits", None),
+                control_cross_corner_splits=raw.get(
+                    "control_cross_corner_splits", None
+                ),
                 central_structure_splits=raw.get(
                     "central_structure_splits", None
                 ),
@@ -280,13 +286,15 @@ class WingSubmeshConfig:
                 split_tubes_in_half=raw.get("split_tubes_in_half", False),
             )
         raise TypeError(
-            f"wing_submesh must be a bool or dict, got {type(raw).__name__}"
+            f"control_cross_submesh must be a bool or dict, got "
+            f"{type(raw).__name__}"
         )
 
     def __repr__(self):
         return (
-            f"WingSubmeshConfig(enabled={self.enabled}, "
-            f"corner_splits={self.corner_splits}, "
+            f"ControlCrossSubmeshConfig(enabled={self.enabled}, "
+            f"control_cross_corner_splits="
+            f"{self.control_cross_corner_splits}, "
             f"central_structure_splits={self.central_structure_splits}, "
             f"extend_tube_boundaries={self.extend_splits_at_tube_boundaries}, "
             f"split_tubes_in_half={self.split_tubes_in_half})"
@@ -294,12 +302,13 @@ class WingSubmeshConfig:
 
 
 # ---------------------------------------------------------------------------
-# CrossDiscretizationConfig – sub-meshing options for cross-affected regions
+# CrossModeratorDiscretizationConfig – sub-meshing options for moderator
+# regions surrounding the control cross
 # ---------------------------------------------------------------------------
 
-class CrossDiscretizationConfig:
+class CrossModeratorDiscretizationConfig:
     """
-    Sub-meshing options for the peripheral regions affected by a control
+    Sub-meshing options for the moderator regions surrounding a control
     cross device, used within ``BoxDiscretizationConfig``.
 
     All split fields are optional.  When ``None``, splits are computed
@@ -315,43 +324,34 @@ class CrossDiscretizationConfig:
         ``n_parallel`` is along the lattice edge, ``n_perpendicular``
         is across the gap width.  Auto-permuted for horizontal vs
         vertical affected sides.
-    cross_corner_splits : tuple[int, int] or None
-        ``(nx, ny)`` grid for the small gap rectangle between the two
-        cross arms and the lattice corner.
+    moderator_at_cross_corner_splits : tuple[int, int] or None
+        ``(nx, ny)`` grid for the small moderator gap rectangle between
+        the two cross arms and the pin-lattice corner.
     stub_splits : tuple[int, int] or None
         ``(n_parallel, n_perpendicular)`` grid for the moderator stubs
         that sit in the blade-thickness zone beyond the arm tip extent.
         Auto-permuted for horizontal vs vertical stubs.
-    wing_submesh : WingSubmeshConfig or None
-        Configuration for sub-meshing the control cross wing regions.
-        ``None`` means no wing sub-meshing.  Accepts ``bool`` or
-        ``WingSubmeshConfig`` in the constructor for convenience.
     """
 
-    def __init__(self, narrow_gap_splits=None, cross_corner_splits=None,
-                 stub_splits=None, wing_submesh=False):
+    def __init__(self, narrow_gap_splits=None,
+                 moderator_at_cross_corner_splits=None,
+                 stub_splits=None):
         self.narrow_gap_splits = (
             tuple(narrow_gap_splits) if narrow_gap_splits else None
         )
-        self.cross_corner_splits = (
-            tuple(cross_corner_splits) if cross_corner_splits else None
+        self.moderator_at_cross_corner_splits = (
+            tuple(moderator_at_cross_corner_splits)
+            if moderator_at_cross_corner_splits else None
         )
         self.stub_splits = (
             tuple(stub_splits) if stub_splits else None
         )
-        # Normalise wing_submesh: accept bool, dict, WingSubmeshConfig or None
-        if isinstance(wing_submesh, WingSubmeshConfig):
-            self.wing_submesh = wing_submesh if wing_submesh.enabled else None
-        elif isinstance(wing_submesh, (bool, dict)):
-            self.wing_submesh = WingSubmeshConfig.from_yaml(wing_submesh)
-        else:
-            self.wing_submesh = wing_submesh  # None passthrough
 
     def resolve(self, gap_splits, lattice_pitch, wide_gap_width,
                 narrow_gap_width, cross_corner_dims, stub_dims):
         """
-        Return resolved ``(narrow_gap, cross_corner, stub)`` split tuples,
-        auto-computing from mesh density when a field is ``None``.
+        Return resolved ``(narrow_gap, moderator_corner, stub)`` split
+        tuples, auto-computing from mesh density when a field is ``None``.
 
         The reference density is derived from ``gap_splits`` applied to a
         strip of size ``lattice_pitch × wide_gap_width``:
@@ -371,7 +371,7 @@ class CrossDiscretizationConfig:
             Perpendicular extent of the narrow gap (blade edge to
             lattice edge).
         cross_corner_dims : tuple[float, float]
-            ``(width, height)`` of the cross-corner gap rectangle.
+            ``(width, height)`` of the moderator corner gap rectangle.
         stub_dims : tuple[float, float]
             ``(parallel_length, perpendicular_length)`` of a typical
             stub region.
@@ -380,8 +380,8 @@ class CrossDiscretizationConfig:
         -------
         narrow_gap : tuple[int, int]
             ``(n_parallel, n_perpendicular)`` for the narrow gap.
-        cross_corner : tuple[int, int]
-            ``(nx, ny)`` for the cross corner rectangle.
+        moderator_corner : tuple[int, int]
+            ``(nx, ny)`` for the moderator corner rectangle.
         stub : tuple[int, int]
             ``(n_parallel, n_perpendicular)`` for stub regions.
         """
@@ -399,11 +399,11 @@ class CrossDiscretizationConfig:
                 max(1, round(d_perp * narrow_gap_width)),
             )
 
-        # Cross corner
-        if self.cross_corner_splits is not None:
-            cross_corner = self.cross_corner_splits
+        # Moderator corner
+        if self.moderator_at_cross_corner_splits is not None:
+            moderator_corner = self.moderator_at_cross_corner_splits
         else:
-            cross_corner = (
+            moderator_corner = (
                 max(1, round(d_perp * cross_corner_dims[0])),
                 max(1, round(d_perp * cross_corner_dims[1])),
             )
@@ -417,15 +417,15 @@ class CrossDiscretizationConfig:
                 max(1, round(d_perp * stub_dims[1])),
             )
 
-        return narrow_gap, cross_corner, stub
+        return narrow_gap, moderator_corner, stub
 
     def __repr__(self):
         return (
-            f"CrossDiscretizationConfig("
+            f"CrossModeratorDiscretizationConfig("
             f"narrow_gap_splits={self.narrow_gap_splits}, "
-            f"cross_corner_splits={self.cross_corner_splits}, "
-            f"stub_splits={self.stub_splits}, "
-            f"wing_submesh={self.wing_submesh!r})"
+            f"moderator_at_cross_corner_splits="
+            f"{self.moderator_at_cross_corner_splits}, "
+            f"stub_splits={self.stub_splits})"
         )
 
 
@@ -450,9 +450,15 @@ class BoxDiscretizationConfig:
       horizontal strips use ``(n_par, n_perp)`` as ``(nx, ny)``,
       vertical strips use ``(n_perp, n_par)``.
 
-    When a control cross is present, ``cross_discretization`` provides
-    additional split parameters for the affected regions (narrow gap,
-    cross corner, stubs).
+    When a control cross is present, two optional sibling configs control
+    the sub-meshing of the surrounding moderator regions and the cross
+    structure itself:
+
+    * ``cross_moderator_discretization`` — split parameters for the
+      moderator regions affected by the cross (narrow gap, moderator
+      corner, stubs).
+    * ``control_cross_submesh`` — sub-meshing of the control cross
+      wings and corner zone.
 
     Attributes
     ----------
@@ -463,19 +469,37 @@ class BoxDiscretizationConfig:
     gap_splits : tuple[int, int] or None
         ``(n_parallel, n_perpendicular)`` grid subdivisions for
         gap side strips.  Defaults to ``(n_cols, 1)`` when ``None``.
-    cross_discretization : CrossDiscretizationConfig or None
-        Optional sub-meshing config for control-cross-affected regions.
+    cross_moderator_discretization : CrossModeratorDiscretizationConfig or None
+        Optional sub-meshing config for moderator regions surrounding
+        the control cross.
+    control_cross_submesh : ControlCrossSubmeshConfig or None
+        Optional sub-meshing config for the control cross wings and
+        corner zone.
+    reassign_materials : bool
+        When ``True`` (default), after the discretization partition an
+        explicit material re-assignment pass is performed using
+        geometric containment against the original reference shapes
+        (coolant boundary, channel box boundary, control cross shapes).
+        This guarantees correct materials on every sub-face regardless
+        of how glow's internal ``update_geometry_from_face`` propagates
+        properties across successive partitions.  Set to ``False`` to
+        skip this step and rely solely on property propagation (faster
+        but may produce incorrect materials on control-cross sub-faces).
     """
 
     def __init__(self, enabled=False, corner_splits=None,
-                 gap_splits=None, cross_discretization=None,
+                 gap_splits=None, cross_moderator_discretization=None,
+                 control_cross_submesh=None,
+                 reassign_materials=True,
                  # deprecated aliases kept for backward compatibility
                  side_x_splits=None, side_y_splits=None):
         import warnings
 
         self.enabled = enabled
         self.corner_splits = tuple(corner_splits) if corner_splits else (4, 4)
-        self.cross_discretization = cross_discretization
+        self.cross_moderator_discretization = cross_moderator_discretization
+        self.control_cross_submesh = control_cross_submesh
+        self.reassign_materials = reassign_materials
 
         # Handle deprecated aliases
         if gap_splits is not None:
@@ -527,7 +551,10 @@ class BoxDiscretizationConfig:
         return (f"BoxDiscretizationConfig(enabled={self.enabled}, "
                 f"corner_splits={self.corner_splits}, "
                 f"gap_splits={self.gap_splits}, "
-                f"cross_discretization={self.cross_discretization})")
+                f"cross_moderator_discretization="
+                f"{self.cross_moderator_discretization}, "
+                f"control_cross_submesh={self.control_cross_submesh}, "
+                f"reassign_materials={self.reassign_materials})")
 
 
 # ---------------------------------------------------------------------------
@@ -604,6 +631,8 @@ class CalculationStep:
         ``None``, no box discretization is applied.
     """
 
+    VALID_POLAR_QUADRATURES = ("GAUS", "CACA", "CACB", "LCMD", "OPP1", "OGAU")
+
     def __init__(
         self,
         name,
@@ -622,6 +651,11 @@ class CalculationStep:
         water_rod_sectors=None,
         export_macros=False,
         box_discretization=None,
+        num_angles_2d=8,
+        line_density=25.0,
+        anisotropy_level=1,
+        polar_angles_quadrature=None,
+        number_of_polar_angles=None,
     ):
         # --- Validate step type ---
         if step_type not in VALID_STEP_TYPES:
@@ -694,6 +728,23 @@ class CalculationStep:
                 f"Valid options: {VALID_RADIAL_SCHEMES}"
             )
 
+        # --- Validate tracking parameters ---
+        if spatial_method == "MOC":
+            if polar_angles_quadrature is None:
+                raise ValueError(
+                    "polar_angles_quadrature is required for MOC steps. "
+                    f"Valid options: {self.VALID_POLAR_QUADRATURES}"
+                )
+            if polar_angles_quadrature not in self.VALID_POLAR_QUADRATURES:
+                raise ValueError(
+                    f"Invalid polar_angles_quadrature '{polar_angles_quadrature}'. "
+                    f"Valid options: {self.VALID_POLAR_QUADRATURES}"
+                )
+            if number_of_polar_angles is None:
+                raise ValueError(
+                    "number_of_polar_angles is required for MOC steps."
+                )
+
         self.name = name
         self.step_type = step_type
         self.self_shielding_module = self_shielding_module
@@ -710,6 +761,11 @@ class CalculationStep:
         self.water_rod_sectors = water_rod_sectors
         self.export_macros = export_macros
         self.box_discretization = box_discretization
+        self.num_angles_2d = num_angles_2d
+        self.line_density = line_density
+        self.anisotropy_level = anisotropy_level
+        self.polar_angles_quadrature = polar_angles_quadrature
+        self.number_of_polar_angles = number_of_polar_angles
 
     # ------------------------------------------------------------------
     # Radii application
@@ -849,6 +905,326 @@ class CalculationStep:
 
 
 # ---------------------------------------------------------------------------
+# CalculationBranch – parameter variation for branch calculations
+# ---------------------------------------------------------------------------
+
+VALID_BRANCH_TYPES = (
+    "coolant_density", "fuel_temperature",
+    "coolant_temperature", "burnup",
+)
+
+# Default ordering of branch loops (outermost → innermost)
+DEFAULT_BRANCH_LOOP_ORDER = [
+    "fuel_temperature", "coolant_temperature", "coolant_density",
+]
+
+# Map branch type → COMPO PARA name (CLE2000 ≤ 12 chars)
+BRANCH_TYPE_TO_PARA_NAME = {
+    "fuel_temperature":    "TFuel",
+    "coolant_temperature": "TCool",
+    "coolant_density":     "DCool",
+    "burnup":              "Burnup",
+}
+
+# Map branch type → COMPO PARA keyword
+BRANCH_TYPE_TO_PARA_KEYWORD = {
+    "fuel_temperature":    "VALU REAL",
+    "coolant_temperature": "VALU REAL",
+    "coolant_density":     "VALU REAL",
+    "burnup":              "IRRA",
+}
+
+# Map branch type → CLE2000 UTL: array name (≤ 12 chars)
+BRANCH_TYPE_TO_ARRAY_NAME = {
+    "fuel_temperature":    "fuel_temp",
+    "coolant_temperature": "cool_temp",
+    "coolant_density":     "cool_dens",
+    "burnup":              "burnup_pts",
+}
+
+# Map branch type → CLE2000 counter variable (≤ 12 chars)
+BRANCH_TYPE_TO_COUNTER = {
+    "fuel_temperature":    "i_Tfuel",
+    "coolant_temperature": "i_Tcool",
+    "coolant_density":     "i_DCool",
+    "burnup":              "i_BU",
+}
+
+# Map branch type → CLE2000 count variable (≤ 12 chars)
+BRANCH_TYPE_TO_COUNT_VAR = {
+    "fuel_temperature":    "n_Tfuel",
+    "coolant_temperature": "n_Tcool",
+    "coolant_density":     "n_DCool",
+    "burnup":              "n_BU",
+}
+
+
+class CalculationBranch:
+    """
+    A parameter variation axis for branch calculations.
+
+    Represents one dimension in the multi-parameter space over which
+    DRAGON calculations are tabulated (e.g. coolant density at 5 void
+    fractions, fuel temperature at 3 values, etc.).
+
+    Attributes
+    ----------
+    name : str
+        Human-readable label, e.g. ``"Coolant density variation"``.
+    type : str
+        One of ``"coolant_density"``, ``"fuel_temperature"``,
+        ``"coolant_temperature"``, ``"burnup"``.
+    values : list[float]
+        Parameter values to iterate over.
+    """
+
+    def __init__(self, name, branch_type, values):
+        if branch_type not in VALID_BRANCH_TYPES:
+            raise ValueError(
+                f"Invalid branch type '{branch_type}'. "
+                f"Valid types: {VALID_BRANCH_TYPES}"
+            )
+        if branch_type == "burnup" and len(values) > 1:
+            raise NotImplementedError(
+                "Depletion branches (burnup with multiple values) "
+                "are not yet supported. Use a single burnup value "
+                "(e.g. [0.0]) for fresh-fuel calculations."
+            )
+        self.name = name
+        self.type = branch_type
+        self.values = list(values)
+
+    @property
+    def para_name(self):
+        """CLE2000 COMPO PARA name for this branch type."""
+        return BRANCH_TYPE_TO_PARA_NAME[self.type]
+
+    @property
+    def para_keyword(self):
+        """CLE2000 COMPO PARA keyword for this branch type."""
+        return BRANCH_TYPE_TO_PARA_KEYWORD[self.type]
+
+    @property
+    def array_name(self):
+        """CLE2000 UTL: CREA array name."""
+        return BRANCH_TYPE_TO_ARRAY_NAME[self.type]
+
+    @property
+    def counter_var(self):
+        """CLE2000 WHILE loop counter variable name."""
+        return BRANCH_TYPE_TO_COUNTER[self.type]
+
+    @property
+    def count_var(self):
+        """CLE2000 INTEGER variable holding the number of points."""
+        return BRANCH_TYPE_TO_COUNT_VAR[self.type]
+
+    def __repr__(self):
+        return (
+            f"CalculationBranch(name='{self.name}', "
+            f"type='{self.type}', "
+            f"values={self.values})"
+        )
+
+    @classmethod
+    def from_yaml_entry(cls, entry):
+        """Parse a single branch entry from YAML.
+
+        Parameters
+        ----------
+        entry : dict
+            ``{"name": ..., "type": ..., "values": [...]}``.
+
+        Returns
+        -------
+        CalculationBranch
+        """
+        return cls(
+            name=entry["name"],
+            branch_type=entry["type"],
+            values=entry["values"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# CalculationOutput – specification for an EDI/COMPO output
+# ---------------------------------------------------------------------------
+
+class CalculationOutput:
+    """
+    Specification for a single EDI → COMPO output volume.
+
+    Each output defines the spatial integration, energy condensation,
+    isotope list, and the subset of state points at which to generate
+    the edition.
+
+    Attributes
+    ----------
+    name : str
+        COMPO directory / EDI ``SAVE ON`` name (≤ 12 chars for CLE2000).
+    comment : str
+        Human-readable description.
+    isotopes : list[str]
+        Isotopes tracked (``MICR`` / ``ISOT`` keywords).
+    spatial_integration_mode : str
+        ``"FUEL"``, ``"ALL"``, ``"by_pin"``, etc.
+    energy_bounds : list[float] | None | str
+        ``None`` or ``"None"`` → no COND (keep all groups).
+        ``[]`` → COND (collapse to 1 group).
+        ``[0.625]`` → COND 0.625 (2-group).
+    state_points : str | dict
+        ``"ALL"`` — tabulate at every branch combination.
+        ``dict`` — selective: ``{branch_type: [value, ...]}`` listing
+        the specific values at which this output is generated.
+    """
+
+    def __init__(self, name, comment, isotopes,
+                 spatial_integration_mode, energy_bounds,
+                 state_points):
+        self.name = name
+        self.comment = comment
+        self.isotopes = list(isotopes)
+        self.spatial_integration_mode = spatial_integration_mode
+
+        # Normalise energy_bounds
+        if energy_bounds is None or energy_bounds == "None":
+            self.energy_bounds = None
+        else:
+            self.energy_bounds = list(energy_bounds)
+
+        # Normalise state_points
+        if isinstance(state_points, str) and state_points.upper() == "ALL":
+            self.state_points = "ALL"
+        elif isinstance(state_points, dict):
+            self.state_points = {
+                k: list(v) for k, v in state_points.items()
+            }
+        else:
+            self.state_points = "ALL"
+
+    def applies_to(self, statepoint_dict):
+        """Check whether this output should be generated at a given statepoint.
+
+        Parameters
+        ----------
+        statepoint_dict : dict
+            ``{branch_type: current_value}`` for each active branch,
+            e.g. ``{"coolant_density": 0.736, "fuel_temperature": 900.0, ...}``.
+
+        Returns
+        -------
+        bool
+        """
+        if self.state_points == "ALL":
+            return True
+        for branch_type, required_values in self.state_points.items():
+            current = statepoint_dict.get(branch_type)
+            if current is None:
+                continue
+            if current not in required_values:
+                return False
+        return True
+
+    def __repr__(self):
+        return (
+            f"CalculationOutput(name='{self.name}', "
+            f"mode='{self.spatial_integration_mode}', "
+            f"bounds={self.energy_bounds}, "
+            f"state_points={self.state_points})"
+        )
+
+    @classmethod
+    def from_yaml_entry(cls, entry):
+        """Parse a single output entry from YAML.
+
+        Parameters
+        ----------
+        entry : dict
+
+        Returns
+        -------
+        CalculationOutput
+        """
+        return cls(
+            name=entry["name"],
+            comment=entry.get("comment", ""),
+            isotopes=entry.get("isotopes", []),
+            spatial_integration_mode=entry.get(
+                "spatial_integration_mode",
+                entry.get("spatial_intergation_mode", "FUEL"),
+            ),
+            energy_bounds=entry.get("energy_bounds", None),
+            state_points=entry.get("state_points", "ALL"),
+        )
+
+
+# ---------------------------------------------------------------------------
+# EditionBetweenLevelsStep – energy condensation step between flux levels
+# ---------------------------------------------------------------------------
+
+class EditionBetweenLevelsStep:
+    """
+    Describes the energy condensation step between two flux levels in a
+    multi-level DRAGON calculation scheme.
+
+    This step does NOT involve geometry tracking of its own; it operates
+    on the flux and library structures produced by the preceding flux step.
+    It therefore does not inherit from ``CalculationStep`` and has no
+    spatial_method, tracking, or sectorization attributes.
+
+    The step drives:
+
+    * An ``EDI:`` module call to condense cross sections from the fine
+      group mesh to ``number_of_macro_groups`` coarse groups using the
+      boundaries listed in ``energy_groups_bounds``.
+    * An optional ``SPH:`` equivalence correction applied to the condensed
+      library up to group ``max_sph_group``.
+
+    Parameters
+    ----------
+    name : str
+        Human-readable step identifier.
+    number_of_macro_groups : int
+        Number of coarse energy groups to condense to (e.g. 26).
+    energy_groups_bounds : list[int]
+        Upper-group indices of each coarse energy group boundary used in
+        the ``COND`` keyword of ``EDI:``.  Typically ``number_of_macro_groups - 1``
+        values (the last group boundary is implicit).
+    sph_correction : bool
+        Whether to apply an SPH equivalence correction after condensation.
+        Default ``False``.
+    max_sph_group : int or None
+        Maximum coarse group index up to which SPH is applied
+        (``GRMAX`` keyword).  Required when ``sph_correction=True``.
+    """
+
+    step_type = "edition_between_levels"
+
+    def __init__(self, name, number_of_macro_groups,
+                 energy_groups_bounds, sph_correction=False,
+                 max_sph_group=None):
+        self.name = name
+        self.number_of_macro_groups = number_of_macro_groups
+        self.energy_groups_bounds = list(energy_groups_bounds)
+        self.sph_correction = bool(sph_correction)
+        self.max_sph_group = max_sph_group
+
+        if self.sph_correction and self.max_sph_group is None:
+            raise ValueError(
+                f"EditionBetweenLevelsStep '{name}': "
+                "max_sph_group is required when sph_correction=True."
+            )
+
+    def __repr__(self):
+        return (
+            f"EditionBetweenLevelsStep("
+            f"name='{self.name}', "
+            f"n_groups={self.number_of_macro_groups}, "
+            f"sph={self.sph_correction})"
+        )
+
+
+# ---------------------------------------------------------------------------
 # DragonCalculationScheme – ordered collection of CalculationSteps
 # ---------------------------------------------------------------------------
 
@@ -881,6 +1257,9 @@ class DragonCalculationScheme:
     def __init__(self, name="default"):
         self.name = name
         self.steps = []
+        self.branches = []   # list[CalculationBranch]
+        self.outputs = []    # list[CalculationOutput]
+        self.branch_loop_order = list(DEFAULT_BRANCH_LOOP_ORDER)
 
     # ------------------------------------------------------------------
     # Step management
@@ -888,14 +1267,17 @@ class DragonCalculationScheme:
 
     def add_step(self, step):
         """
-        Append a ``CalculationStep`` to the scheme.
+        Append a ``CalculationStep`` or ``EditionBetweenLevelsStep`` to the scheme.
 
         Parameters
         ----------
-        step : CalculationStep
+        step : CalculationStep or EditionBetweenLevelsStep
         """
-        if not isinstance(step, CalculationStep):
-            raise TypeError(f"Expected CalculationStep, got {type(step).__name__}")
+        if not isinstance(step, (CalculationStep, EditionBetweenLevelsStep)):
+            raise TypeError(
+                f"Expected CalculationStep or EditionBetweenLevelsStep, "
+                f"got {type(step).__name__}"
+            )
         self.steps.append(step)
 
     def get_step(self, name):
@@ -929,6 +1311,67 @@ class DragonCalculationScheme:
         flux = [s for s in self.steps if s.step_type == "flux"]
         flux.sort(key=lambda s: (s.flux_level or 0))
         return flux
+
+    def get_edition_between_levels_steps(self):
+        """Return all edition-between-levels steps (energy condensation)."""
+        return [s for s in self.steps
+                if s.step_type == "edition_between_levels"]
+
+    def is_two_level_scheme(self):
+        """Return ``True`` if the scheme contains an edition-between-levels step."""
+        return len(self.get_edition_between_levels_steps()) > 0
+
+    def get_trackable_steps(self):
+        """Return steps that require TDT geometry and tracking.
+
+        Excludes ``edition_between_levels`` steps, which operate on
+        existing tracking structures rather than their own geometry.
+        """
+        return [s for s in self.steps
+                if s.step_type != "edition_between_levels"]
+
+    # ------------------------------------------------------------------
+    # Branch / output helpers
+    # ------------------------------------------------------------------
+
+    def has_branches(self):
+        """Return ``True`` if calculation branches are defined."""
+        return len(self.branches) > 0
+
+    def get_branch(self, branch_type):
+        """Return the ``CalculationBranch`` for *branch_type*, or ``None``."""
+        for b in self.branches:
+            if b.type == branch_type:
+                return b
+        return None
+
+    def get_ordered_branches(self):
+        """Return branches in the configured loop order (outermost first).
+
+        Branches whose type is not in ``branch_loop_order`` are appended
+        at the end in their original order.
+        """
+        by_type = {b.type: b for b in self.branches}
+        ordered = []
+        for btype in self.branch_loop_order:
+            if btype in by_type:
+                ordered.append(by_type.pop(btype))
+        # Append any remaining branches not in the configured order
+        for b in self.branches:
+            if b.type in by_type:
+                ordered.append(by_type.pop(b.type))
+        return ordered
+
+    def get_total_statepoints(self):
+        """Return the total number of statepoint combinations.
+
+        This is the product of the number of values in each branch.
+        Returns 1 when no branches are defined (single statepoint).
+        """
+        total = 1
+        for b in self.branches:
+            total *= len(b.values)
+        return total
 
     # ------------------------------------------------------------------
     # YAML construction
@@ -980,17 +1423,17 @@ class DragonCalculationScheme:
                     gap_splits: [n_parallel, n_perpendicular]  # grid size for side strips, auto-permuted for H/V
                     # Deprecated aliases (still accepted):
                     # side_x_splits / side_y_splits
-                    cross_discretization:  # optional, for controlled assemblies
+                    cross_moderator_discretization:  # optional, moderator regions surrounding control cross
                       narrow_gap_splits: [n_par, n_perp]  # null = auto from gap_splits density
-                      cross_corner_splits: [nx, ny]       # null = auto
+                      moderator_at_cross_corner_splits: [nx, ny]  # null = auto
                       stub_splits: [n_par, n_perp]        # null = auto
-                      wing_submesh: false  # or true (defaults) or dict:
-                      #   wing_submesh:
-                      #     enabled: true
-                      #     corner_splits: [n_along, n_across]  # null = (1,1)
-                      #     central_structure_splits: [n_along, n_across]  # null = (1,1)
-                      #     extend_splits_at_tube_boundaries: true
-                      #     split_tubes_in_half: false
+                    control_cross_submesh: false  # or true (defaults) or dict:
+                    #   control_cross_submesh:
+                    #     enabled: true
+                    #     control_cross_corner_splits: [n_along, n_across]  # null = (1,1)
+                    #     central_structure_splits: [n_along, n_across]  # null = (1,1)
+                    #     extend_splits_at_tube_boundaries: true
+                    #     split_tubes_in_half: false
         
         Note : the sectorization config matches sectorization options in glow's ``Cell.sectorize()`` method.
                       
@@ -1006,7 +1449,12 @@ class DragonCalculationScheme:
         with open(yaml_path, "r") as f:
             data = yaml.safe_load(f)
 
-        scheme_data = data.get("DRAGON_CALCULATION_SCHEME", data)
+        # Accept multiple top-level key names for the flux scheme
+        scheme_data = (
+            data.get("DRAGON_CALCULATION_SCHEME")
+            or data.get("FLUX_CALCULATION_SCHEME")
+            or data
+        )
         scheme_name = scheme_data.get("name", "from_yaml")
         scheme = cls(name=scheme_name)
 
@@ -1014,11 +1462,57 @@ class DragonCalculationScheme:
             step = cls._parse_step(step_data)
             scheme.add_step(step)
 
+        # --- Parse CALCULATION_BRANCHES ---
+        branches_data = (
+            data.get("CALCULATION_BRANCHES")
+            or scheme_data.get("CALCULATION_BRANCHES")
+            or []
+        )
+        # branches_data may be at the same level as FLUX_CALCULATION_SCHEME
+        # (top-level) or nested inside it (unified YAML).
+        if isinstance(branches_data, list):
+            for entry in branches_data:
+                scheme.branches.append(
+                    CalculationBranch.from_yaml_entry(entry)
+                )
+
+        # --- Parse CALCULATION_OUTPUTS ---
+        outputs_data = (
+            data.get("CALCULATION_OUTPUTS")
+            or scheme_data.get("CALCULATION_OUTPUTS")
+            or data.get("EDI_COMPO_OUTPUTS")
+            or []
+        )
+        if isinstance(outputs_data, list):
+            for entry in outputs_data:
+                scheme.outputs.append(
+                    CalculationOutput.from_yaml_entry(entry)
+                )
+
+        # --- Optional loop ordering ---
+        loop_order = (
+            data.get("BRANCH_LOOP_ORDER")
+            or scheme_data.get("BRANCH_LOOP_ORDER")
+        )
+        if loop_order:
+            scheme.branch_loop_order = list(loop_order)
+
         return scheme
 
     @staticmethod
     def _parse_step(d):
-        """Parse a single step dict into a CalculationStep."""
+        """Parse a single step dict into a CalculationStep or EditionBetweenLevelsStep."""
+        # --- Early exit for edition_between_levels (no geometry/tracking attributes) ---
+        step_type = d.get("step_type")
+        if step_type == "edition_between_levels":
+            return EditionBetweenLevelsStep(
+                name=d["name"],
+                number_of_macro_groups=d["number_of_macro_groups"],
+                energy_groups_bounds=d["energy_groups_bounds"],
+                sph_correction=d.get("SPH_correction", False),
+                max_sph_group=d.get("max_SPH_group", None),
+            )
+
         # --- Sectorization ---
         sect = d.get("sectorization", {})
         sect_enabled = sect.get("enabled", False)
@@ -1048,8 +1542,9 @@ class DragonCalculationScheme:
                 wr_sectors = wr.get("sectors", [])
                 wr_angles = wr.get("angles", [])
                 wr_additional = wr.get(
-                    "additional_radial_splits_in_moderator", 1
+                    "additional_radial_splits_in_moderator", None
                 )
+                wr_corners = wr.get("subdivisions_coolant_corners", None)
 
                 # Warn if both circular (sectors/angles) and square
                 # (splits) keys are present — user should use one or
@@ -1071,6 +1566,7 @@ class DragonCalculationScheme:
                     windmill=sect.get("windmill", False),
                     splits=wr_splits,
                     additional_radial_splits_in_moderator=wr_additional,
+                    subdivisions_coolant_corners=wr_corners,
                 )
 
         # --- Radial overrides ---
@@ -1086,68 +1582,91 @@ class DragonCalculationScheme:
         box_disc_raw = d.get("box_discretization", {})
         box_disc = None
         if box_disc_raw.get("enabled", False):
-            # Parse optional cross_discretization sub-block
-            cross_disc = None
-            cross_raw = box_disc_raw.get("cross_discretization", {})
+            # Parse optional cross_moderator_discretization sub-block
+            cross_mod_disc = None
+            cross_raw = box_disc_raw.get(
+                "cross_moderator_discretization", {}
+            )
             if cross_raw:
-                wing_raw = cross_raw.get("wing_submesh", False)
-                cross_disc = CrossDiscretizationConfig(
+                cross_mod_disc = CrossModeratorDiscretizationConfig(
                     narrow_gap_splits=cross_raw.get("narrow_gap_splits"),
-                    cross_corner_splits=cross_raw.get("cross_corner_splits"),
+                    moderator_at_cross_corner_splits=cross_raw.get(
+                        "moderator_at_cross_corner_splits"
+                    ),
                     stub_splits=cross_raw.get("stub_splits"),
-                    wing_submesh=wing_raw,
                 )
+
+            # Parse optional control_cross_submesh sub-block (sibling)
+            ctrl_cross_raw = box_disc_raw.get(
+                "control_cross_submesh", False
+            )
+            if isinstance(ctrl_cross_raw, (bool, dict)):
+                ctrl_cross_cfg = ControlCrossSubmeshConfig.from_yaml(
+                    ctrl_cross_raw
+                )
+            else:
+                ctrl_cross_cfg = None
 
             box_disc = BoxDiscretizationConfig(
                 enabled=True,
                 corner_splits=box_disc_raw.get("corner_splits", None),
                 gap_splits=box_disc_raw.get("gap_splits", None),
-                cross_discretization=cross_disc,
+                cross_moderator_discretization=cross_mod_disc,
+                control_cross_submesh=ctrl_cross_cfg,
+                reassign_materials=box_disc_raw.get(
+                    "reassign_materials", True),
                 # deprecated aliases (backward compatibility)
                 side_x_splits=box_disc_raw.get("side_x_splits", None),
                 side_y_splits=box_disc_raw.get("side_y_splits", None),
             )
 
+        # --- Tracking parameters (common to all step types) ---
+        tracking_kwargs = dict(
+            num_angles_2d=d.get("num_angles_2d", 8),
+            line_density=d.get("line_density", 25.0),
+            anisotropy_level=d.get("anisotropy_level", 1),
+            polar_angles_quadrature=d.get(
+                "polar_angles_quadrature", None),
+            number_of_polar_angles=d.get(
+                "number_of_polar_angles", None),
+        )
+
         # --- Build CalculationStep with appropriate parameters ---
         step_type = d["step_type"]
-        
-        # Only include self_shielding_module and self_shielding_method for self_shielding steps
+
+        # Common kwargs shared by both branches
+        common_kwargs = dict(
+            tracking=d.get("tracking", "TISO"),
+            flux_level=d.get("flux_level", None),
+            radial_scheme=d.get("radial_scheme", "Santamarina"),
+            radial_params=d.get("radial_params", {}),
+            radial_overrides=radial_overrides,
+            sectorization_enabled=sect_enabled,
+            fuel_sectors=fuel_sectors,
+            gd_sectors=gd_sectors,
+            water_rod_sectors=water_rod_sectors,
+            export_macros=d.get("export_macros", False),
+            box_discretization=box_disc,
+            **tracking_kwargs,
+        )
+
         if step_type == "self_shielding":
             return CalculationStep(
                 name=d["name"],
                 step_type=step_type,
-                self_shielding_module=d.get("self_shielding_module", "USS"),
-                self_shielding_method=d.get("self_shielding_method", "RSE"),
+                self_shielding_module=d.get(
+                    "self_shielding_module", "USS"),
+                self_shielding_method=d.get(
+                    "self_shielding_method", "RSE"),
                 spatial_method=d.get("spatial_method", "CP"),
-                tracking=d.get("tracking", "TISO"),
-                flux_level=d.get("flux_level", None),
-                radial_scheme=d.get("radial_scheme", "Santamarina"),
-                radial_params=d.get("radial_params", {}),
-                radial_overrides=radial_overrides,
-                sectorization_enabled=sect_enabled,
-                fuel_sectors=fuel_sectors,
-                gd_sectors=gd_sectors,
-                water_rod_sectors=water_rod_sectors,
-                export_macros=d.get("export_macros", False),
-                box_discretization=box_disc,
+                **common_kwargs,
             )
         else:
-            # Flux steps: no self_shielding_module or self_shielding_method
             return CalculationStep(
                 name=d["name"],
                 step_type=step_type,
                 spatial_method=d.get("spatial_method", "CP"),
-                tracking=d.get("tracking", "TISO"),
-                flux_level=d.get("flux_level", None),
-                radial_scheme=d.get("radial_scheme", "Santamarina"),
-                radial_params=d.get("radial_params", {}),
-                radial_overrides=radial_overrides,
-                sectorization_enabled=sect_enabled,
-                fuel_sectors=fuel_sectors,
-                gd_sectors=gd_sectors,
-                water_rod_sectors=water_rod_sectors,
-                export_macros=d.get("export_macros", False),
-                box_discretization=box_disc,
+                **common_kwargs,
             )
 
     # ------------------------------------------------------------------
@@ -1238,6 +1757,11 @@ class DragonCalculationScheme:
             radial_scheme="Santamarina",
             sectorization_enabled=True,
             export_macros=False,
+            num_angles_2d=24,
+            line_density=40.0,
+            anisotropy_level=4,
+            polar_angles_quadrature="GAUS",
+            number_of_polar_angles=4,
             fuel_sectors=SectorConfig(
                 sectors=[8, 8, 8, 8, 8, 8, 8],
                 angles=[22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5],
@@ -1316,6 +1840,11 @@ class DragonCalculationScheme:
             radial_scheme="Santamarina",
             sectorization_enabled=True,
             export_macros=True,
+            num_angles_2d=24,
+            line_density=40.0,
+            anisotropy_level=4,
+            polar_angles_quadrature="GAUS",
+            number_of_polar_angles=4,
             fuel_sectors=SectorConfig(
                 sectors=[8, 8, 8, 8, 8, 8, 8],
                 angles=[22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5],
@@ -1380,6 +1909,13 @@ class DragonCalculationScheme:
         for i, step in enumerate(self.steps, 1):
             lines.append(f"\nStep {i}: {step.name}")
             lines.append(f"  Type:       {step.step_type}")
+            if step.step_type == "edition_between_levels":
+                lines.append(f"  Groups:     {step.number_of_macro_groups}")
+                lines.append(f"  Group bounds: {step.energy_groups_bounds}")
+                lines.append(f"  SPH:        {step.sph_correction}")
+                if step.sph_correction:
+                    lines.append(f"  GRMAX:      {step.max_sph_group}")
+                continue
             if step.step_type == "self_shielding":
                 lines.append(f"  SH module:  {step.self_shielding_module}")
                 lines.append(f"  SH method:  {step.self_shielding_method}")
@@ -1404,4 +1940,21 @@ class DragonCalculationScheme:
             lines.append(f"  Box disc:   {'enabled' if step.box_discretization and step.box_discretization.enabled else 'disabled'}")
             if step.box_discretization and step.box_discretization.enabled:
                 lines.append(f"    {step.box_discretization}")
+
+        if self.branches:
+            lines.append("\nCalculation Branches")
+            lines.append("-" * 50)
+            for b in self.branches:
+                lines.append(f"  {b.type}: {b.values}")
+            lines.append(f"  Total statepoints: {self.get_total_statepoints()}")
+            lines.append(f"  Loop order: {self.branch_loop_order}")
+
+        if self.outputs:
+            lines.append("\nCalculation Outputs")
+            lines.append("-" * 50)
+            for o in self.outputs:
+                lines.append(f"  {o.name}: mode={o.spatial_integration_mode}, "
+                             f"bounds={o.energy_bounds}, "
+                             f"state_points={o.state_points}")
+
         return "\n".join(lines)

@@ -11,8 +11,8 @@ from starterDD.DDModel.DragonCalculationScheme import (
     CalculationStep,
     SectorConfig,
     BoxDiscretizationConfig,
-    CrossDiscretizationConfig,
-    WingSubmeshConfig,
+    CrossModeratorDiscretizationConfig,
+    ControlCrossSubmeshConfig,
     VALID_STEP_TYPES,
     VALID_SELF_SHIELDING_MODULES,
     VALID_SELF_SHIELDING_METHODS,
@@ -118,7 +118,7 @@ class TestSectorConfig:
     def test_additional_radial_splits_default(self):
         """Default additional_radial_splits_in_moderator is 1 (no extra splits)."""
         sc = SectorConfig()
-        assert sc.additional_radial_splits_in_moderator == 1
+        assert sc.additional_radial_splits_in_moderator is None
 
     def test_additional_radial_splits_int(self):
         """Int value is stored as-is."""
@@ -306,119 +306,167 @@ class TestBoxDiscretizationConfig:
 
 
 # =====================================================================
-#  WingSubmeshConfig
+#  ControlCrossSubmeshConfig
 # =====================================================================
 
-class TestWingSubmeshConfig:
+class TestControlCrossSubmeshConfig:
     def test_defaults(self):
-        cfg = WingSubmeshConfig()
+        cfg = ControlCrossSubmeshConfig()
         assert cfg.enabled is True
-        assert cfg.corner_splits is None
+        assert cfg.control_cross_corner_splits is None
         assert cfg.central_structure_splits is None
         assert cfg.extend_splits_at_tube_boundaries is True
         assert cfg.split_tubes_in_half is False
 
     def test_custom(self):
-        cfg = WingSubmeshConfig(
+        cfg = ControlCrossSubmeshConfig(
             enabled=True,
-            corner_splits=[2, 3],
+            control_cross_corner_splits=[2, 3],
             central_structure_splits=[4, 2],
             extend_splits_at_tube_boundaries=False,
             split_tubes_in_half=True,
         )
-        assert cfg.corner_splits == (2, 3)
+        assert cfg.control_cross_corner_splits == (2, 3)
         assert cfg.central_structure_splits == (4, 2)
         assert cfg.extend_splits_at_tube_boundaries is False
         assert cfg.split_tubes_in_half is True
 
     def test_from_yaml_true(self):
-        cfg = WingSubmeshConfig.from_yaml(True)
+        cfg = ControlCrossSubmeshConfig.from_yaml(True)
         assert cfg is not None
         assert cfg.enabled is True
-        assert cfg.corner_splits is None
+        assert cfg.control_cross_corner_splits is None
         assert cfg.extend_splits_at_tube_boundaries is True
 
     def test_from_yaml_false(self):
-        cfg = WingSubmeshConfig.from_yaml(False)
+        cfg = ControlCrossSubmeshConfig.from_yaml(False)
         assert cfg is None
 
     def test_from_yaml_dict(self):
         raw = {
             "enabled": True,
-            "corner_splits": [2, 2],
+            "control_cross_corner_splits": [2, 2],
             "central_structure_splits": [3, 2],
             "extend_splits_at_tube_boundaries": False,
             "split_tubes_in_half": True,
         }
-        cfg = WingSubmeshConfig.from_yaml(raw)
+        cfg = ControlCrossSubmeshConfig.from_yaml(raw)
         assert cfg.enabled is True
-        assert cfg.corner_splits == (2, 2)
+        assert cfg.control_cross_corner_splits == (2, 2)
         assert cfg.central_structure_splits == (3, 2)
         assert cfg.extend_splits_at_tube_boundaries is False
         assert cfg.split_tubes_in_half is True
 
     def test_from_yaml_dict_defaults(self):
         raw = {"enabled": True}
-        cfg = WingSubmeshConfig.from_yaml(raw)
-        assert cfg.corner_splits is None
+        cfg = ControlCrossSubmeshConfig.from_yaml(raw)
+        assert cfg.control_cross_corner_splits is None
         assert cfg.central_structure_splits is None
         assert cfg.extend_splits_at_tube_boundaries is True
         assert cfg.split_tubes_in_half is False
 
     def test_from_yaml_invalid_type(self):
-        with pytest.raises(TypeError, match="wing_submesh must be"):
-            WingSubmeshConfig.from_yaml(42)
+        with pytest.raises(TypeError, match="control_cross_submesh must be"):
+            ControlCrossSubmeshConfig.from_yaml(42)
 
     def test_repr(self):
-        cfg = WingSubmeshConfig(corner_splits=[2, 2])
+        cfg = ControlCrossSubmeshConfig(control_cross_corner_splits=[2, 2])
         r = repr(cfg)
-        assert "WingSubmeshConfig" in r
+        assert "ControlCrossSubmeshConfig" in r
         assert "(2, 2)" in r
 
 
 # =====================================================================
-#  CrossDiscretizationConfig – wing_submesh integration
+#  CrossModeratorDiscretizationConfig – moderator region splits
 # =====================================================================
 
-class TestCrossDiscretizationConfig:
-    def test_wing_submesh_false(self):
-        cdc = CrossDiscretizationConfig(wing_submesh=False)
-        assert cdc.wing_submesh is None
+class TestCrossModeratorDiscretizationConfig:
+    def test_defaults(self):
+        cdc = CrossModeratorDiscretizationConfig()
+        assert cdc.narrow_gap_splits is None
+        assert cdc.moderator_at_cross_corner_splits is None
+        assert cdc.stub_splits is None
 
-    def test_wing_submesh_true(self):
-        cdc = CrossDiscretizationConfig(wing_submesh=True)
-        assert isinstance(cdc.wing_submesh, WingSubmeshConfig)
-        assert cdc.wing_submesh.enabled is True
+    def test_custom(self):
+        cdc = CrossModeratorDiscretizationConfig(
+            narrow_gap_splits=[4, 2],
+            moderator_at_cross_corner_splits=[3, 3],
+            stub_splits=[2, 1],
+        )
+        assert cdc.narrow_gap_splits == (4, 2)
+        assert cdc.moderator_at_cross_corner_splits == (3, 3)
+        assert cdc.stub_splits == (2, 1)
 
-    def test_wing_submesh_dict(self):
-        cdc = CrossDiscretizationConfig(wing_submesh={
-            "enabled": True,
-            "corner_splits": [3, 3],
-            "split_tubes_in_half": True,
-        })
-        assert isinstance(cdc.wing_submesh, WingSubmeshConfig)
-        assert cdc.wing_submesh.corner_splits == (3, 3)
-        assert cdc.wing_submesh.split_tubes_in_half is True
+    def test_resolve_auto(self):
+        cdc = CrossModeratorDiscretizationConfig()
+        ng, mc, st = cdc.resolve(
+            gap_splits=(10, 2),
+            lattice_pitch=10.0,
+            wide_gap_width=1.0,
+            narrow_gap_width=0.5,
+            cross_corner_dims=(0.5, 0.5),
+            stub_dims=(5.0, 0.25),
+        )
+        assert isinstance(ng, tuple) and len(ng) == 2
+        assert isinstance(mc, tuple) and len(mc) == 2
+        assert isinstance(st, tuple) and len(st) == 2
+        # All auto-computed values must be >= 1
+        assert all(v >= 1 for v in ng + mc + st)
 
-    def test_wing_submesh_config_object(self):
-        ws = WingSubmeshConfig(corner_splits=[1, 1])
-        cdc = CrossDiscretizationConfig(wing_submesh=ws)
-        assert cdc.wing_submesh is ws
+    def test_resolve_explicit(self):
+        cdc = CrossModeratorDiscretizationConfig(
+            narrow_gap_splits=[4, 2],
+            moderator_at_cross_corner_splits=[3, 3],
+            stub_splits=[2, 1],
+        )
+        ng, mc, st = cdc.resolve(
+            gap_splits=(10, 2),
+            lattice_pitch=10.0,
+            wide_gap_width=1.0,
+            narrow_gap_width=0.5,
+            cross_corner_dims=(0.5, 0.5),
+            stub_dims=(5.0, 0.25),
+        )
+        assert ng == (4, 2)
+        assert mc == (3, 3)
+        assert st == (2, 1)
 
-    def test_wing_submesh_disabled_config(self):
-        ws = WingSubmeshConfig(enabled=False)
-        cdc = CrossDiscretizationConfig(wing_submesh=ws)
-        assert cdc.wing_submesh is None
-
-    def test_repr_with_wing_submesh(self):
-        cdc = CrossDiscretizationConfig(wing_submesh=True)
+    def test_repr(self):
+        cdc = CrossModeratorDiscretizationConfig(
+            moderator_at_cross_corner_splits=[3, 3],
+        )
         r = repr(cdc)
-        assert "WingSubmeshConfig" in r
+        assert "CrossModeratorDiscretizationConfig" in r
+        assert "(3, 3)" in r
 
-    def test_repr_without_wing_submesh(self):
-        cdc = CrossDiscretizationConfig(wing_submesh=False)
-        r = repr(cdc)
-        assert "wing_submesh=None" in r
+
+# =====================================================================
+#  BoxDiscretizationConfig – control_cross_submesh integration
+# =====================================================================
+
+class TestBoxDiscretizationConfigControlCrossSubmesh:
+    def test_no_control_cross_submesh(self):
+        bdc = BoxDiscretizationConfig()
+        assert bdc.control_cross_submesh is None
+
+    def test_control_cross_submesh_config_object(self):
+        ccs = ControlCrossSubmeshConfig(control_cross_corner_splits=[2, 2])
+        bdc = BoxDiscretizationConfig(control_cross_submesh=ccs)
+        assert bdc.control_cross_submesh is ccs
+
+    def test_control_cross_submesh_with_cross_moderator(self):
+        cmd = CrossModeratorDiscretizationConfig(
+            moderator_at_cross_corner_splits=[3, 3],
+        )
+        ccs = ControlCrossSubmeshConfig(
+            control_cross_corner_splits=[2, 2],
+        )
+        bdc = BoxDiscretizationConfig(
+            cross_moderator_discretization=cmd,
+            control_cross_submesh=ccs,
+        )
+        assert bdc.cross_moderator_discretization is cmd
+        assert bdc.control_cross_submesh is ccs
 
 
 # =====================================================================
@@ -562,9 +610,13 @@ class TestCalculationStep:
             name="FLUX_MOC", step_type="flux",
             spatial_method="MOC",
             tracking="TSPC",
+            polar_angles_quadrature="GAUS",
+            number_of_polar_angles=4,
         )
         assert step.spatial_method == "MOC"
         assert step.tracking == "TSPC"
+        assert step.polar_angles_quadrature == "GAUS"
+        assert step.number_of_polar_angles == 4
 
     def test_sectorization_query_disabled(self):
         step = CalculationStep(
@@ -694,6 +746,8 @@ class TestDragonCalculationScheme:
             name="FLUX_L2", step_type="flux",
             spatial_method="MOC",
             tracking="TSPC", flux_level=2,
+            polar_angles_quadrature="GAUS",
+            number_of_polar_angles=4,
         )
         scheme.add_step(ssh)
         scheme.add_step(flux2)  # Add L2 first
@@ -866,6 +920,11 @@ class TestFromYAML:
                         "radial_scheme": "automatic",
                         "radial_params": {"num_radial_zones": 3},
                         "export_macros": True,
+                        "num_angles_2d": 24,
+                        "line_density": 40.0,
+                        "anisotropy_level": 4,
+                        "polar_angles_quadrature": "GAUS",
+                        "number_of_polar_angles": 4,
                         "sectorization": {
                             "enabled": True,
                             "windmill": True,
@@ -1012,6 +1071,8 @@ class TestFromYAML:
                         "spatial_method": "MOC",
                         "tracking": "TSPC",
                         "radial_scheme": "Santamarina",
+                        "polar_angles_quadrature": "GAUS",
+                        "number_of_polar_angles": 4,
                         "sectorization": {
                             "enabled": True,
                             "windmill": True,
@@ -1061,6 +1122,8 @@ class TestFromYAML:
                         "spatial_method": "MOC",
                         "tracking": "TSPC",
                         "radial_scheme": "Santamarina",
+                        "polar_angles_quadrature": "GAUS",
+                        "number_of_polar_angles": 4,
                         "sectorization": {
                             "enabled": True,
                             "water_rods": {
@@ -1123,7 +1186,7 @@ class TestFromYAML:
             scheme = DragonCalculationScheme.from_yaml(tmp_path)
             flux = scheme.get_step("FLUX")
             wr = flux.water_rod_sectors
-            assert wr.additional_radial_splits_in_moderator == 1
+            assert wr.additional_radial_splits_in_moderator is None
             assert wr.resolve_water_rod_radii(1.0) == []
             s, a = wr.expanded_sectors_and_angles(1.0)
             assert s == [1, 1, 8]
