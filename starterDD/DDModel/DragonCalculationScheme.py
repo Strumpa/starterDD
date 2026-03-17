@@ -72,7 +72,8 @@ class SectorConfig:
     """
 
     def __init__(self, sectors=None, angles=None, windmill=False,
-                 splits=None, additional_radial_splits_in_moderator=1):
+                 splits=None, additional_radial_splits_in_moderator=None,
+                 subdivisions_coolant_corners=None):
         self.sectors = sectors or []
         self.angles = angles or []
         self.windmill = windmill
@@ -80,6 +81,7 @@ class SectorConfig:
         self.additional_radial_splits_in_moderator = (
             additional_radial_splits_in_moderator
         )
+        self.subdivisions_coolant_corners = subdivisions_coolant_corners
 
     # ------------------------------------------------------------------
     # Radial-split helpers (circular water rods)
@@ -1540,8 +1542,9 @@ class DragonCalculationScheme:
                 wr_sectors = wr.get("sectors", [])
                 wr_angles = wr.get("angles", [])
                 wr_additional = wr.get(
-                    "additional_radial_splits_in_moderator", 1
+                    "additional_radial_splits_in_moderator", None
                 )
+                wr_corners = wr.get("subdivisions_coolant_corners", None)
 
                 # Warn if both circular (sectors/angles) and square
                 # (splits) keys are present — user should use one or
@@ -1563,6 +1566,7 @@ class DragonCalculationScheme:
                     windmill=sect.get("windmill", False),
                     splits=wr_splits,
                     additional_radial_splits_in_moderator=wr_additional,
+                    subdivisions_coolant_corners=wr_corners,
                 )
 
         # --- Radial overrides ---

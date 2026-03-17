@@ -118,7 +118,7 @@ class TestSectorConfig:
     def test_additional_radial_splits_default(self):
         """Default additional_radial_splits_in_moderator is 1 (no extra splits)."""
         sc = SectorConfig()
-        assert sc.additional_radial_splits_in_moderator == 1
+        assert sc.additional_radial_splits_in_moderator == None
 
     def test_additional_radial_splits_int(self):
         """Int value is stored as-is."""
@@ -1186,7 +1186,7 @@ class TestFromYAML:
             scheme = DragonCalculationScheme.from_yaml(tmp_path)
             flux = scheme.get_step("FLUX")
             wr = flux.water_rod_sectors
-            assert wr.additional_radial_splits_in_moderator == 1
+            assert wr.additional_radial_splits_in_moderator == None
             assert wr.resolve_water_rod_radii(1.0) == []
             s, a = wr.expanded_sectors_and_angles(1.0)
             assert s == [1, 1, 8]

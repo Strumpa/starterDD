@@ -12,6 +12,7 @@ from glow.main import TdtSetup, analyse_and_generate_tdt
 from glow.interface.geom_interface import *
 from glow.support.types import *
 from .helpers import computeSantamarinaradii
+import numpy as np
 import os
 # Note: CartesianAssemblyModel and FuelPinModel are imported inside functions to avoid circular imports
 
@@ -383,9 +384,10 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation=0.
             if calculation_step is not None:
                 wr_sectors = calculation_step.get_water_rod_sectorization()
                 if wr_sectors is not None:
-                    extra_radii = wr_sectors.resolve_water_rod_radii(
-                        water_rod_model.inner_radius
-                    )
+                    if wr_sectors.additional_radial_splits_in_moderator:
+                        extra_radii = wr_sectors.resolve_water_rod_radii(
+                            water_rod_model.inner_radius
+                        )
 
             # Add circles: extra moderator sub-rings, then inner, then outer
             for r in extra_radii:
@@ -423,6 +425,74 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation=0.
                 tmp_cell.sectorize(expanded_s, expanded_a, windmill=wr_sectors.windmill)
             elif windmill:
                 tmp_cell.sectorize([1, 1, 8], [0, 0, 0], windmill=True)
+            split_coolant_corners = wr_sectors.subdivisions_coolant_corners if wr_sectors is not None else False
+            if split_coolant_corners:
+                # circular water rods with sectorization : glow does not allow to sub mesh the coolant
+                # at the square corners further than the 16 angles of the .sectorize method.
+                # This leads to potentially large coolant regions in the coreners where no inner circle could be added.
+                # Need to add extra splitting faces : 
+                # compute base point where 16-sector splits intersects with the outer square boundary 
+                # add n splitting faces that split base point to corner evenly in parallel splits ?
+                # For top right corner :
+                alpha = 360.0 / 16.0 # angle of each sector
+                adj = water_rod_model.bounding_box_side_length / 2.0
+                top_right_corner = (adj, adj, 0.0)
+                opp = adj * np.tan(np.radians(alpha))
+                base_pt_1 = (opp, adj, 0.0)
+                distance_to_split = adj - opp
+                # symmetric along y=x
+                base_pt_1_sym = (adj, opp, 0.0)
+                n_corner_splits = wr_sectors.subdivisions_coolant_corners # this would be retrieved from calculation step config in a more complete implementation
+                delta_split = distance_to_split / n_corner_splits
+                splitting_faces = []
+                for i in range(n_corner_splits):
+                    split_pt_1 = (base_pt_1[0] + i * delta_split, adj, 0.0)
+                    split_pt_2 = (adj, base_pt_1_sym[1] + i * delta_split, 0.0)
+                    splitting_face = make_edge(
+                        make_vertex(split_pt_1),
+                        make_vertex(split_pt_2),
+                    )
+                    splitting_faces.append(splitting_face)
+                
+                    # split the top left corner now : reflect the split points across y axis
+                    split_pt_1 = (-base_pt_1[0] - i * delta_split, adj, 0.0)
+                    split_pt_2 = (-adj, base_pt_1_sym[1] + i * delta_split, 0.0)
+                    splitting_face = make_edge(
+                        make_vertex(split_pt_1),
+                        make_vertex(split_pt_2),
+                    )
+                    splitting_faces.append(splitting_face)
+                    
+                    # split the bottom right corner now : reflect the split points across x axis
+                    split_pt_1 = (base_pt_1[0] + i * delta_split, -adj, 0.0)
+                    split_pt_2 = (adj, -base_pt_1_sym[1] - i * delta_split, 0.0)
+                    splitting_face = make_edge(
+                        make_vertex(split_pt_1),
+                        make_vertex(split_pt_2),
+                    )
+                    splitting_faces.append(splitting_face)
+                    
+                    # split the bottom left corner now : reflect the split points across both axis
+                    split_pt_1 = (-base_pt_1[0] - i * delta_split, -adj, 0.0)
+                    split_pt_2 = (-adj, -base_pt_1_sym[1] - i * delta_split, 0.0)
+                    splitting_face = make_edge(
+                        make_vertex(split_pt_1),
+                        make_vertex(split_pt_2),
+                    )
+                    splitting_faces.append(splitting_face)
+                    
+                    
+                    
+                re_partitioned = make_partition(
+                        [tmp_cell.face],
+                        splitting_faces,
+                        shape_type=ShapeType.COMPOUND,
+                    )
+                tmp_cell.update_geometry_from_face(
+                        GeometryType.TECHNOLOGICAL, re_partitioned,
+                    )
+                    
+
         elif assembly_model.water_rod_type == "square":
             tmp_cell = _build_square_water_rod_cell(
                 water_rod_model, calculation_step=calculation_step,
@@ -2952,7 +3022,7 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
     lattice = add_cells_to_regular_lattice(
         lattice, ordered_cells, pin_pitch, translation=translation
     )
-
+    # Build optional water rods if present in the model and add to lattice
     if hasattr(assembly_model, "water_rods") and assembly_model.water_rods:
         lattice = create_and_add_water_rods_to_lattice(
             lattice, assembly_model,
