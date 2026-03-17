@@ -1435,6 +1435,43 @@ class MAC:
             
             file.write(";\n")
 
+class USS:
+    """
+    Generate DRAGON5 ``USS:`` module calls for the self shielding calculation step.
+    Support both IC and CP methods (ie ARM or PIJ kewords).
+    Need to develop options for self-shielding options from USS:
+
+    """
+
+    def __init__(self, calculation_step, track_name=None, title=None):
+        self.step = calculation_step
+        # check step type is self-shielding
+        if self.step.type != "self-shielding":
+            raise ValueError(f"USS module only applicable for self-shielding steps, but got step type '{self.step.type}'")
+        step_tag = self.step.name.upper()
+        self.track_name = track_name or f"TRK{step_tag}"
+        self.trkfil_name = f"TRKFIL{step_tag}"
+        self.solution_method = "PIJ" if self.step.spatial_method == "CP" else "ARM"
+        # Default names for libraries
+        self.self_shielded_library_name = "LIBRARY2"
+        self.library_name = "LIBRARY"
+
+    def build_uss_call(self):
+        """Return the full ``USS:`` call block as a string."""
+        s = self.step
+        lines = []
+        lines.append(
+            
+            f"{self.self_shielded_library_name} := USS:"
+        )
+        lines.append(
+            f" {self.track_name} {self.trkfil_name} {self.library_name} ::"
+        )
+        lines.append("    EDIT 1")
+        lines.append(f"    {self.solution_method}")
+        lines.append(";")
+        return "\n".join(lines) + "\n"
+
 
 class SALT:
     """
@@ -1482,6 +1519,12 @@ class SALT:
             self.batch = (
                 2000 if self.step.spatial_method == "MOC"
                 else 200
+            )
+
+        if self.step.tracking == "TSPC" and self.step.num_angles_2d not in self.AVAILABLE_TSPC_ANGLES:
+            raise ValueError(
+                f"TSPC tracking only supports {self.AVAILABLE_TSPC_ANGLES} angles, "
+                f"but got {self.step.num_angles_2d}."
             )
 
     def build_salt_call(self):
@@ -1605,8 +1648,8 @@ class TRK:
         self._build_tracking_objects()
 
     def _build_tracking_objects(self):
-        """Create SALT (and MCCGT) objects for each step."""
-        for step in self.scheme.steps:
+        """Create SALT (and MCCGT) objects for each trackable step."""
+        for step in self.scheme.get_trackable_steps():
             tdt_var = self._tdt_var_name(step)
             salt = SALT(step, tdt_var)
             self._salt_objects.append(salt)
@@ -1630,20 +1673,20 @@ class TRK:
 
     def get_tdt_file_mapping(self):
         """
-        ``{cle2000_var_name: physical_file_name}`` for every step.
+        ``{cle2000_var_name: physical_file_name}`` for every trackable step.
         Used by the main x2m to declare SEQ_ASCII imports.
         """
         return {
             self._tdt_var_name(s): self._tdt_file_name(s)
-            for s in self.scheme.steps
+            for s in self.scheme.get_trackable_steps()
         }
 
     def get_track_names(self):
         """
-        ``[(track_ll_name, trkfil_name)]`` per step (ordered).
+        ``[(track_ll_name, trkfil_name)]`` per trackable step (ordered).
         """
         result = []
-        for step in self.scheme.steps:
+        for step in self.scheme.get_trackable_steps():
             tag = step.name.upper()
             result.append((f"TRK{tag}", f"TRKFIL{tag}"))
         return result
@@ -1744,3 +1787,134 @@ class TRK:
 
         print(f"[TRK] Wrote procedure to {filepath}")
         return filepath
+
+
+class ASM:
+    """
+    Defintion of the ASM: module calls for Dragon calculations
+    Given a calculation step, determine the appropriate ASM: call and generate the corresponding c2m procedure.
+    """
+
+    def __init__(self, calculation_step, track_name=None, title=None):
+        self.step = calculation_step
+        step_tag = self.step.name.upper()
+        self.track_name = track_name or f"TRK{step_tag}"
+        self.solution_method = "PIJ" if self.step.spatial_method == "CP" else "ARM"
+        
+
+    def build_asm_call(self):
+        """Return the full ``ASM:`` call block as a string."""
+        s = self.step
+        lines = []
+        lines.append(
+            f"ASM: {self.track_name} ::"
+        )
+        lines.append("    EDIT 1")
+        lines.append(f"    {self.solution_method}")
+        lines.append(";")
+        return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# EDI_condensation – energy-group condensation between flux levels
+# ---------------------------------------------------------------------------
+
+class EDI_condensation:
+    """
+    Generate the ``EDI:`` call that condenses cross sections from the
+    fine energy mesh to a coarser one between two flux levels.
+
+    Produces two CLE-2000 lines:
+
+    1. ``EDITION := EDI: <flux> <lib> <trk> :: EDIT 0 MICR ALL MERG MIX
+       COND <bounds> SAVE ON COND<N> ;``
+    2. ``LIB<N>G := EDITION :: STEP UP COND<N> ;``
+
+    Parameters
+    ----------
+    edition_step : EditionBetweenLevelsStep
+        Carries ``number_of_macro_groups`` and ``energy_groups_bounds``.
+    """
+
+    def __init__(self, edition_step):
+        self.step = edition_step
+        n = edition_step.number_of_macro_groups
+        self.cond_name = f"COND{n}"
+        self.lib_name  = f"LIB{n}G"
+
+    def build_edi_call(self, flux_ll, lib_ll, trk_ll):
+        """Return the ``EDI:`` call block as a string.
+
+        Parameters
+        ----------
+        flux_ll : str
+            CLE-2000 name of the FLUX linked list (e.g. ``"FLUX"``).
+        lib_ll : str
+            CLE-2000 name of the self-shielded library (e.g. ``"LIBRARY2"``).
+        trk_ll : str
+            CLE-2000 name of the L1 tracking linked list.
+        """
+        groups_str = "  ".join(
+            str(g) for g in self.step.energy_groups_bounds
+        )
+        lines = [
+            f"EDITION := EDI: {flux_ll} {lib_ll} {trk_ll} ::",
+            "    EDIT 0",
+            "    MICR ALL",
+            "    MERG MIX",
+            f"    COND  {groups_str}",
+            f"    SAVE ON {self.cond_name}",
+            ";",
+        ]
+        return "\n".join(lines) + "\n"
+
+    def build_lib_extract(self):
+        """Return the ``STEP UP`` extraction line as a string."""
+        return (
+            f"{self.lib_name} := EDITION :: "
+            f"STEP UP {self.cond_name} ;\n"
+        )
+
+
+# ---------------------------------------------------------------------------
+# SPH_correction – SPH equivalence correction on the condensed library
+# ---------------------------------------------------------------------------
+
+class SPH_correction:
+    """
+    Generate the ``SPH:`` equivalence correction call applied to the
+    condensed library after a cross-section condensation step.
+
+    Produces:
+      ``LIB<N>G := SPH: LIB<N>G <trk> <trkfil> :: EDIT 1 GRMAX <n> ;``
+
+    Parameters
+    ----------
+    edition_step : EditionBetweenLevelsStep
+        Carries ``number_of_macro_groups`` and ``max_sph_group``.
+    """
+
+    def __init__(self, edition_step):
+        self.step = edition_step
+        n = edition_step.number_of_macro_groups
+        self.lib_name = f"LIB{n}G"
+
+    def build_sph_call(self, trk_ll, trkfil_ll):
+        """Return the ``SPH:`` call block as a string.
+
+        Parameters
+        ----------
+        trk_ll : str
+            CLE-2000 name of the L1 tracking linked list.
+        trkfil_ll : str
+            CLE-2000 name of the L1 binary tracking file (SEQ_BINARY).
+        """
+        lines = [
+            f"{self.lib_name} := SPH: {self.lib_name} "
+            f"{trk_ll} {trkfil_ll} ::",
+            "    EDIT 1",
+        ]
+        if self.step.max_sph_group is not None:
+            lines.append(f"    GRMAX {self.step.max_sph_group}")
+        lines.append(";")
+        return "\n".join(lines) + "\n"

@@ -34,15 +34,46 @@ FLUX_CALCULATION_SCHEME:
       export_macros: true
       sectorization:
         enabled: false
-
+    
     # ------------------------------------------------------------------
-    # Step 2: Flux calculation (single level)
+    # Step 2: Flux calculation (first level)
+    #   - IC spatial solution for the flux calculation
+    #   - TISO tracking (isotropic tracks, reflective boundary conditions)
+    #   - Santamarina radii (same subdivision as SSH)
+    #   - Windmill sectorization on coolant region
+    # ------------------------------------------------------------------
+    - name: "FLUXL1"
+      step_type: "flux"
+      spatial_method: "IC"
+      tracking: "TISO"
+      num_angles_2d: 8
+      line_density: 25.0
+      anisotropy_level: 4
+      radial_scheme: "Santamarina"
+      export_macros: True
+      sectorization:
+        enabled: True
+        windmill: True
+        fuel_pins:
+          # UOX pins: 4 Santamarina fuel zones + gap + clad + coolant = 7 regions
+          sectors: [1, 1, 1, 1, 1, 1, 8]
+          angles:  [0, 0, 0, 0, 0, 0, 22.5]
+
+    - name: "Energy condensation"
+      step_type: "edition_between_levels"
+      number_of_macro_groups: 26
+      energy_groups_bounds: [10,  14,  18,  26,  33,  40,  49,  56,  66, 84,
+       150, 210, 241, 244, 247, 252, 255, 258, 261, 268, 273, 277, 281, 286, 291]
+      SPH_correction: True
+      max_SPH_group: 19
+    # ------------------------------------------------------------------
+    # Step 3: Flux calculation (second level)
     #   - MOC spatial solution for the flux calculation
     #   - TSPC tracking (cyclic tracks, specular boundary conditions)
     #   - Santamarina radii (same subdivision as SSH)
     #   - Windmill sectorization on coolant region
     # ------------------------------------------------------------------
-    - name: "FLUX"
+    - name: "FLUXL2"
       step_type: "flux"
       spatial_method: "MOC"
       tracking: "TSPC"
@@ -70,7 +101,7 @@ CALCULATION_BRANCHES:
     type: "coolant_density"
     # Reference : BWR Progression Problem for GE14, Table 2 "Coolant density as a fuinction of void"
     #        0%            20%           40%         60%         80%
-    values: [0.73669000] #[0.73669000, 0.59685660, 0.45702320, 0.31718980, 0.17735640] # in g/cm3
+    values: [0.73669000, 0.59685660, 0.45702320, 0.31718980, 0.17735640] # in g/cm3
   - name: "Fuel temperature variation"
     type: "fuel_temperature"
     values: [750.0]   #[750.0, 900.0, 1500.0]

@@ -8,7 +8,7 @@ from .CLE2000 import (
     main_procedure, sub_procedure,
     validate_varname, wrap_cle2000_line,
 )
-from .dragon_module_calls import LIB, EDI_COMPO, TRK
+from .dragon_module_calls import LIB, EDI_COMPO, TRK, EDI_condensation, SPH_correction
 from ..DDModel.DragonCalculationScheme import (
     DragonCalculationScheme,
     BRANCH_TYPE_TO_PARA_NAME,
@@ -278,7 +278,7 @@ class DragonCase:
         #    the definitive material-mixture-index numbering
         #    (assigned by glow/SALOME) for both fuel and
         #    non-fuel materials.
-        for step in scheme.steps:
+        for step in scheme.get_trackable_steps():
             tdt_file_name = (
                 f"{self.tdt_base_name}_{step.name}"
                 f"_{step.spatial_method}"
@@ -399,7 +399,22 @@ class DragonCase:
         )
 
         # ----- main x2m -----
-        if scheme.has_branches():
+        if scheme.is_two_level_scheme():
+            if scheme.has_branches():
+                x2m_path = self._build_main_x2m_with_branches_2level(
+                    scheme, trk, lib, edi_compo,
+                    mix_proc_name, trk_proc_name,
+                    edir_proc_name, draglib_alias,
+                    ssh_step,
+                )
+            else:
+                x2m_path = self._build_main_x2m_2level(
+                    scheme, trk, lib, edi_compo,
+                    mix_proc_name, trk_proc_name,
+                    edir_proc_name, draglib_alias,
+                    ssh_step,
+                )
+        elif scheme.has_branches():
             x2m_path = self._build_main_x2m_with_branches(
                 scheme, trk, lib, edi_compo,
                 mix_proc_name, trk_proc_name,
@@ -560,17 +575,9 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(uss_line)
         )
-        proc.add_body_line("    EDIT 1 ARM")
+        asm_keyword = "PIJ" if scheme.step[0].spatial_method == "CP" else "ARM"
+        proc.add_body_line(f"    EDIT 1 {asm_keyword}")
         proc.add_body_line(";")
-        proc.add_body_line("")
-
-        # Clean up SSH tracking
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"{ssh_trk} {ssh_trkfil} := "
-                f"DELETE: {ssh_trk} {ssh_trkfil} ;"
-            )
-        )
         proc.add_body_line("")
 
         # --- ASM + FLU on flux step ---
@@ -595,7 +602,8 @@ class DragonCase:
             proc.add_body_line(
                 wrap_cle2000_line(asm_line)
             )
-            proc.add_body_line("    EDIT 1 ARM")
+            asm_keyword = "PIJ" if flux_step.spatial_method == "CP" else "ARM"
+            proc.add_body_line(f"    EDIT 1 {asm_keyword}")
             proc.add_body_line(";")
             proc.add_body_line("")
 
@@ -989,8 +997,9 @@ class DragonCase:
                     f"{inner_indent}{asm_line}"
                 )
             )
+            asm_keyword = "PIJ" if flux_steps[0].spatial_method == "CP" else "ARM"
             proc.add_body_line(
-                f"{inner_indent}    EDIT 1 ARM"
+                f"{inner_indent}    EDIT 1 {asm_keyword}"
             )
             proc.add_body_line(f"{inner_indent};")
             proc.add_body_line("")
@@ -1124,4 +1133,662 @@ class DragonCase:
             )
             proc.add_variable(tname, "REAL", temp_val)
 
-        return proc.write_to_x2m(self.output_path)    
+        return proc.write_to_x2m(self.output_path)
+
+    # -----------------------------------------------------------
+    # 2-level x2m builders
+    # -----------------------------------------------------------
+
+    def _build_main_x2m_2level(self, scheme, trk, lib, edi_compo,
+                               mix_proc_name, trk_proc_name,
+                               edir_proc_name, draglib_alias,
+                               ssh_step):
+        """Build the main .x2m for a 2-level calculation scheme
+        (no branch loops, single statepoint).
+
+        Sequence: TRK → MIX → USS → DELETE_SSH →
+                  ASM_L1 → FLU_L1 → EDI_cond → [SPH] → DELETE_L1 →
+                  ASM_L2 → FLU_L2 → EDIR
+        """
+        from .CLE2000 import wrap_cle2000_line
+
+        # Retrieve edition step for EDI/SPH helpers
+        edi_step = scheme.get_edition_between_levels_steps()[0]
+        edi_cond = EDI_condensation(edi_step)
+        sph_corr = SPH_correction(edi_step)
+
+        flux_steps = scheme.get_flux_steps()
+        l1_step = flux_steps[0]
+        l2_step = flux_steps[1]
+
+        proc = main_procedure(self.case_name)
+        proc.enable_g2s = self.enable_g2s
+
+        # --- Modules ---
+        for m in ["LIB", "G2S", "SALT", "MCCGT",
+                  "USS", "ASM", "FLU", "EDI",
+                  "SPH", "GREP", "DELETE", "END"]:
+            proc.add_module_call(m)
+
+        # --- Sub-procedures ---
+        for sp_name in (mix_proc_name, trk_proc_name, edir_proc_name):
+            proc.add_sub_procedure(sub_procedure(sp_name))
+
+        # --- Data structures ---
+        proc.add_linked_list("LIBRARY")
+        proc.add_linked_list("LIBRARY2")
+        for trk_ll, _ in trk.get_track_names():
+            proc.add_linked_list(trk_ll)
+        proc.add_linked_list("SYS")
+        proc.add_linked_list("FLUX")
+        proc.add_linked_list("EDITION")
+        proc.add_linked_list(edi_cond.lib_name)
+        proc.add_linked_list("COMPO")
+        for _, trkfil in trk.get_track_names():
+            proc.add_seq_binary(trkfil)
+
+        # --- Variables ---
+        aniso = ssh_step.anisotropy_level
+        proc.add_variable("o_anis", "INTEGER", aniso)
+        proc.add_variable("name_compo", "STRING",
+                          f"_CPO_{self.case_name}")
+        proc.add_variable("Draglib", "STRING", draglib_alias)
+        proc.add_variable("keffL1", "REAL")
+        proc.add_variable("keffL2", "REAL")
+
+        temp_mapping = {
+            "TFUEL": "fuel_temperature",
+            "TBOX": "structural_temperature",
+            "TCLAD": "gap_temperature",
+            "TCOOL": "coolant_temperature",
+            "TMODE": "moderator_temperature",
+            "TCTRL": "structural_temperature",
+        }
+        for tname, attr in temp_mapping.items():
+            proc.add_variable(tname, "REAL",
+                              getattr(self.assembly, attr, 600.0))
+
+        # --- TDT SEQ_ASCII imports ---
+        tdt_map = trk.get_tdt_file_mapping()
+        for var, fname in tdt_map.items():
+            proc.add_seq_ascii(var, fname)
+
+        # --- G2S block ---
+        if proc.enable_g2s:
+            proc.add_body_block(proc.build_g2s_block(tdt_map))
+
+        # ---- track name aliases ----
+        track_names = trk.get_track_names()
+        tdt_vars = list(tdt_map.keys())
+        ssh_trk,    ssh_trkfil    = track_names[0]
+        l1_trk,     l1_trkfil     = track_names[1]
+        l2_trk,     l2_trkfil     = track_names[2]
+
+        # --- TRK sub-procedure call ---
+        lhs = " ".join(f"{ll} {bf}" for ll, bf in track_names)
+        rhs_tdts = " ".join(tdt_vars)
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* Tracking sub-procedure call")
+        proc.add_body_line("*" * 50)
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{lhs} := {trk_proc_name} {rhs_tdts} :: <<o_anis>> ;"
+            )
+        )
+        proc.add_body_line("")
+
+        # --- MIX sub-procedure call ---
+        ssh_method = ssh_step.self_shielding_method or "RSE"
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* LIBRARY creation")
+        proc.add_body_line("*" * 50)
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"LIBRARY := {mix_proc_name} :: "
+                f"<<Draglib>> '{ssh_method}' <<o_anis>> "
+                f"'NONE' "
+                f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
+                f"<<TCOOL>> <<TMODE>> <<TCTRL>> ;"
+            )
+        )
+        proc.add_body_line("")
+
+        # --- USS call (SSH tracking) ---
+        uss_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* USS: self-shielding")
+        proc.add_body_line("*" * 50)
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"LIBRARY2 := USS: LIBRARY {ssh_trk} {ssh_trkfil} ::"
+            )
+        )
+        proc.add_body_line(f"    EDIT 1 {uss_keyword}")
+        proc.add_body_line(";")
+        proc.add_body_line("")
+
+        # --- ASM L1 + FLU L1 ---
+        l1_asm_keyword = "PIJ" if l1_step.spatial_method == "CP" else "ARM"
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* ASM: + FLU: — first level")
+        proc.add_body_line("*" * 50)
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"SYS := ASM: LIBRARY2 {l1_trk} {l1_trkfil} ::"
+            )
+        )
+        proc.add_body_line(f"    EDIT 1 {l1_asm_keyword}")
+        proc.add_body_line(";")
+        proc.add_body_line("")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"FLUX := FLU: SYS LIBRARY2 {l1_trk} {l1_trkfil} ::"
+            )
+        )
+        proc.add_body_line("    EDIT 1 TYPE K")
+        proc.add_body_line(";")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                "GREP: FLUX :: GETVAL 'K-EFFECTIVE' 1 1 1 >>keffL1<< ;"
+            )
+        )
+        proc.add_body_line(f'ECHO "{self.case_name} L1 keff=" keffL1 ;')
+        proc.add_body_line("")
+
+        # --- EDI condensation ---
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* EDI: energy condensation (L1 → coarse)")
+        proc.add_body_line("*" * 50)
+        proc.add_body_block(
+            edi_cond.build_edi_call("FLUX", "LIBRARY2", l1_trk)
+        )
+        proc.add_body_block(edi_cond.build_lib_extract())
+        proc.add_body_line("")
+
+        # --- SPH correction (optional) ---
+        if edi_step.sph_correction:
+            proc.add_body_line("*" * 50)
+            proc.add_body_line("* SPH: equivalence correction")
+            proc.add_body_line("*" * 50)
+            proc.add_body_block(
+                sph_corr.build_sph_call(l1_trk, l1_trkfil)
+            )
+            proc.add_body_line("")
+
+        # --- DELETE L1 objects ---
+        delete_l1 = (
+            f"FLUX SYS EDITION := "
+            f"DELETE: FLUX SYS EDITION ;"
+        )
+        proc.add_body_line(wrap_cle2000_line(delete_l1))
+        proc.add_body_line("")
+
+        # --- ASM L2 + FLU L2 ---
+        l2_asm_keyword = "PIJ" if l2_step.spatial_method == "CP" else "ARM"
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* ASM: + FLU: — second level")
+        proc.add_body_line("*" * 50)
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"SYS := ASM: {edi_cond.lib_name} {l2_trk} {l2_trkfil} ::"
+            )
+        )
+        proc.add_body_line(f"    {l2_asm_keyword} EDIT 1")
+        proc.add_body_line(";")
+        proc.add_body_line("")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"FLUX := FLU: {edi_cond.lib_name} SYS "
+                f"{l2_trk} {l2_trkfil} ::"
+            )
+        )
+        proc.add_body_line("    EDIT 1 TYPE K")
+        proc.add_body_line(";")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                "GREP: FLUX :: GETVAL 'K-EFFECTIVE' 1 1 1 >>keffL2<< ;"
+            )
+        )
+        proc.add_body_line(f'ECHO "{self.case_name} L2 keff=" keffL2 ;')
+        proc.add_body_line("")
+
+        # --- EDIR call (uses coarse library and L2 tracking) ---
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* EDI/COMPO sub-procedure call")
+        proc.add_body_line("*" * 50)
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{edir_proc_name} FLUX {edi_cond.lib_name} "
+                f"{l2_trk} :: <<name_compo>> ;"
+            )
+        )
+
+        return proc.write_to_x2m(self.output_path)
+
+    def _build_main_x2m_with_branches_2level(
+        self, scheme, trk, lib, edi_compo,
+        mix_proc_name, trk_proc_name,
+        edir_proc_name, draglib_alias,
+        ssh_step,
+    ):
+        """Build the main .x2m for a 2-level scheme with branch WHILE loops.
+
+        Wraps the 2L inner body (USS → ASM_L1/FLU_L1 → EDI/SPH →
+        DELETE_L1 → ASM_L2/FLU_L2 → EDIR → cleanup) in the same
+        nested WHILE loop pattern used by ``_build_main_x2m_with_branches``.
+        """
+        from .CLE2000 import wrap_cle2000_line
+
+        edi_step = scheme.get_edition_between_levels_steps()[0]
+        edi_cond = EDI_condensation(edi_step)
+        sph_corr = SPH_correction(edi_step)
+
+        flux_steps = scheme.get_flux_steps()
+        l1_step = flux_steps[0]
+        l2_step = flux_steps[1]
+
+        proc = main_procedure(self.case_name)
+        proc.enable_g2s = self.enable_g2s
+
+        # --- Modules ---
+        for m in ["LIB", "G2S", "SALT", "MCCGT",
+                  "USS", "ASM", "FLU", "EDI",
+                  "SPH", "GREP", "UTL", "COMPO",
+                  "DELETE", "END"]:
+            proc.add_module_call(m)
+
+        # --- Sub-procedures ---
+        for sp_name in (mix_proc_name, trk_proc_name, edir_proc_name):
+            proc.add_sub_procedure(sub_procedure(sp_name))
+
+        # --- Data structures ---
+        proc.add_linked_list("LIBRARY")
+        proc.add_linked_list("LIBRARY2")
+        for trk_ll, _ in trk.get_track_names():
+            proc.add_linked_list(trk_ll)
+        proc.add_linked_list("SYS")
+        proc.add_linked_list("FLUX")
+        proc.add_linked_list("EDITION")
+        proc.add_linked_list(edi_cond.lib_name)
+        proc.add_linked_list("COMPO")
+        proc.add_linked_list("PARAMS")
+        for _, trkfil in trk.get_track_names():
+            proc.add_seq_binary(trkfil)
+
+        # --- Variables ---
+        aniso = ssh_step.anisotropy_level
+        proc.add_variable("o_anis", "INTEGER", aniso)
+        proc.add_variable("name_compo", "STRING",
+                          f"_CPO_{self.case_name}")
+        proc.add_variable("Draglib", "STRING", draglib_alias)
+
+        ordered_branches = scheme.get_ordered_branches()
+        for branch in ordered_branches:
+            proc.add_variable(branch.count_var, "INTEGER",
+                              len(branch.values))
+            proc.add_variable(branch.counter_var, "INTEGER", 0)
+        for branch in ordered_branches:
+            proc.add_variable(branch.para_name, "REAL")
+
+        density_branch = scheme.get_branch("coolant_density")
+        if density_branch:
+            proc.add_variable("N_H", "REAL")
+            proc.add_variable("N_O", "REAL")
+
+        proc.add_variable("keffL1", "REAL")
+        proc.add_variable("keffL2", "REAL")
+
+        # --- TDT SEQ_ASCII imports ---
+        tdt_map = trk.get_tdt_file_mapping()
+        for var, fname in tdt_map.items():
+            proc.add_seq_ascii(var, fname)
+        proc.add_seq_ascii("_COMPO", f"_CPO_{self.case_name}")
+
+        # --- G2S block ---
+        if proc.enable_g2s:
+            proc.add_body_block(proc.build_g2s_block(tdt_map))
+
+        # ---- track name aliases ----
+        track_names = trk.get_track_names()
+        tdt_vars = list(tdt_map.keys())
+        ssh_trk, ssh_trkfil = track_names[0]
+        l1_trk,  l1_trkfil  = track_names[1]
+        l2_trk,  l2_trkfil  = track_names[2]
+
+        # --- TRK sub-procedure call (outside the loop) ---
+        lhs = " ".join(f"{ll} {bf}" for ll, bf in track_names)
+        rhs_tdts = " ".join(tdt_vars)
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* Tracking sub-procedure call")
+        proc.add_body_line("*" * 50)
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{lhs} := {trk_proc_name} {rhs_tdts} :: <<o_anis>> ;"
+            )
+        )
+        proc.add_body_line("")
+
+        # --- UTL: parameter arrays ---
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* Parameter arrays for branch calculations")
+        proc.add_body_line("*" * 50)
+        utl_block = "PARAMS := UTL: ::\n"
+        for branch in ordered_branches:
+            vals_str = " ".join(f"{v}" for v in branch.values)
+            utl_block += (
+                f"    CREA\n"
+                f"        {branch.array_name} "
+                f"<<{branch.count_var}>> =\n"
+                f"            {vals_str}\n"
+            )
+        utl_block += ";\n"
+        proc.add_body_block(utl_block)
+
+        if density_branch:
+            iso_densities = compute_water_iso_densities_at_densities(
+                density_branch.values
+            )
+            nh_vals = " ".join(
+                f"{d['H1']:.8E}" for d in iso_densities
+            )
+            no_vals = " ".join(
+                f"{d['O16']:.8E}" for d in iso_densities
+            )
+            n_dens = len(density_branch.values)
+            proc.add_variable("n_dens", "INTEGER", n_dens)
+            proc.add_body_block(
+                f"PARAMS := UTL: PARAMS ::\n"
+                f"    CREA\n"
+                f"        N_H_arr <<n_dens>> =\n"
+                f"            {nh_vals}\n"
+                f"    CREA\n"
+                f"        N_O_arr <<n_dens>> =\n"
+                f"            {no_vals}\n"
+                f";\n"
+            )
+
+        proc.add_body_line("")
+
+        # --- COMPO initialisation ---
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* COMPO initialization")
+        proc.add_body_line("*" * 50)
+        proc.add_body_block(edi_compo.compo.build_compo_init())
+        proc.add_body_line("")
+
+        # ===================================================
+        # Nested WHILE loops
+        # ===================================================
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* Main loop over branch statepoints")
+        proc.add_body_line("*" * 50)
+
+        for depth, branch in enumerate(ordered_branches):
+            indent = "    " * depth
+            proc.add_body_line(
+                f"{indent}WHILE {branch.counter_var} "
+                f"{branch.count_var} < DO"
+            )
+            proc.add_body_line(
+                f"{indent}    EVALUATE {branch.counter_var} "
+                f":= {branch.counter_var} 1 + ;"
+            )
+            proc.add_body_line(
+                wrap_cle2000_line(
+                    f"{indent}    GREP: PARAMS :: "
+                    f"GETVAL '{branch.array_name}' "
+                    f"<<{branch.counter_var}>> "
+                    f">>{branch.para_name}<< ;"
+                )
+            )
+            if branch.type == "coolant_density":
+                proc.add_body_line(
+                    wrap_cle2000_line(
+                        f"{indent}    GREP: PARAMS :: "
+                        f"GETVAL 'N_H_arr' "
+                        f"<<{branch.counter_var}>> >>N_H<< ;"
+                    )
+                )
+                proc.add_body_line(
+                    wrap_cle2000_line(
+                        f"{indent}    GREP: PARAMS :: "
+                        f"GETVAL 'N_O_arr' "
+                        f"<<{branch.counter_var}>> >>N_O<< ;"
+                    )
+                )
+
+        inner_indent = "    " * len(ordered_branches)
+
+        echo_parts = " ".join(
+            f'"{b.para_name}=" {b.para_name}' for b in ordered_branches
+        )
+        proc.add_body_line(
+            wrap_cle2000_line(f'{inner_indent}ECHO "State Point:" ;\n')
+        )
+        proc.add_body_line(
+            wrap_cle2000_line(f'{inner_indent}ECHO {echo_parts} ;\n')
+        )
+
+        if scheme.get_branch("fuel_temperature"):
+            proc.add_body_line(
+                f"{inner_indent}EVALUATE TFUEL := TFuel ;"
+            )
+        if scheme.get_branch("coolant_temperature"):
+            proc.add_body_line(
+                f"{inner_indent}EVALUATE TCOOL := TCool ;"
+            )
+            proc.add_body_line(
+                f"{inner_indent}EVALUATE TMODE := TCool ;"
+            )
+        proc.add_body_line("")
+
+        # --- MIX ---
+        ssh_method = ssh_step.self_shielding_method or "RSE"
+        if density_branch:
+            mix_line = (
+                f"LIBRARY := {mix_proc_name} :: "
+                f"<<Draglib>> '{ssh_method}' <<o_anis>> "
+                f"'NONE' "
+                f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
+                f"<<TCOOL>> <<TMODE>> <<TCTRL>> "
+                f"<<N_H>> <<N_O>> ;"
+            )
+        else:
+            mix_line = (
+                f"LIBRARY := {mix_proc_name} :: "
+                f"<<Draglib>> '{ssh_method}' <<o_anis>> "
+                f"'NONE' "
+                f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
+                f"<<TCOOL>> <<TMODE>> <<TCTRL>> ;"
+            )
+        proc.add_body_line(f"{inner_indent}* LIB: creation")
+        proc.add_body_line(
+            wrap_cle2000_line(f"{inner_indent}{mix_line}")
+        )
+        proc.add_body_line("")
+
+        # --- USS ---
+        uss_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
+        proc.add_body_line(f"{inner_indent}* USS: self-shielding")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}LIBRARY2 := USS: LIBRARY "
+                f"{ssh_trk} {ssh_trkfil} ::"
+            )
+        )
+        proc.add_body_line(f"{inner_indent}    EDIT 1 {uss_keyword}")
+        proc.add_body_line(f"{inner_indent};")
+        proc.add_body_line("")
+
+        # --- ASM L1 + FLU L1 ---
+        l1_asm_keyword = "PIJ" if l1_step.spatial_method == "CP" else "ARM"
+        proc.add_body_line(f"{inner_indent}* ASM: + FLU: — first level")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}SYS := ASM: LIBRARY2 "
+                f"{l1_trk} {l1_trkfil} ::"
+            )
+        )
+        proc.add_body_line(f"{inner_indent}    EDIT 1 {l1_asm_keyword}")
+        proc.add_body_line(f"{inner_indent};")
+        proc.add_body_line("")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}FLUX := FLU: SYS LIBRARY2 "
+                f"{l1_trk} {l1_trkfil} ::"
+            )
+        )
+        proc.add_body_line(f"{inner_indent}    EDIT 1 TYPE K")
+        proc.add_body_line(f"{inner_indent};")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}GREP: FLUX :: GETVAL "
+                f"'K-EFFECTIVE' 1 1 1 >>keffL1<< ;"
+            )
+        )
+        proc.add_body_line(
+            f'{inner_indent}ECHO "{self.case_name} L1 keff=" keffL1 ;'
+        )
+        proc.add_body_line("")
+
+        # --- EDI condensation ---
+        proc.add_body_line(
+            f"{inner_indent}* EDI: energy condensation (L1 → coarse)"
+        )
+
+        def _indent_block(block, indent):
+            return "".join(
+                f"{indent}{line}\n" if line.strip() else "\n"
+                for line in block.rstrip("\n").split("\n")
+            )
+
+        proc.add_body_block(
+            _indent_block(
+                edi_cond.build_edi_call("FLUX", "LIBRARY2", l1_trk),
+                inner_indent,
+            )
+        )
+        proc.add_body_block(
+            _indent_block(edi_cond.build_lib_extract(), inner_indent)
+        )
+        proc.add_body_line("")
+
+        # --- SPH correction (optional) ---
+        if edi_step.sph_correction:
+            proc.add_body_line(
+                f"{inner_indent}* SPH: equivalence correction"
+            )
+            proc.add_body_block(
+                _indent_block(
+                    sph_corr.build_sph_call(l1_trk, l1_trkfil),
+                    inner_indent,
+                )
+            )
+            proc.add_body_line("")
+
+        # --- DELETE L1 objects ---
+        proc.add_body_line(f"{inner_indent}* Cleanup L1")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}FLUX SYS EDITION := "
+                f"DELETE: FLUX SYS EDITION ;"
+            )
+        )
+        proc.add_body_line("")
+
+        # --- ASM L2 + FLU L2 ---
+        l2_asm_keyword = "PIJ" if l2_step.spatial_method == "CP" else "ARM"
+        proc.add_body_line(f"{inner_indent}* ASM: + FLU: — second level")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}SYS := ASM: {edi_cond.lib_name} "
+                f"{l2_trk} {l2_trkfil} ::"
+            )
+        )
+        proc.add_body_line(f"{inner_indent}    {l2_asm_keyword} EDIT 1")
+        proc.add_body_line(f"{inner_indent};")
+        proc.add_body_line("")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}FLUX := FLU: {edi_cond.lib_name} SYS "
+                f"{l2_trk} {l2_trkfil} ::"
+            )
+        )
+        proc.add_body_line(f"{inner_indent}    EDIT 1 TYPE K")
+        proc.add_body_line(f"{inner_indent};")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}GREP: FLUX :: GETVAL "
+                f"'K-EFFECTIVE' 1 1 1 >>keffL2<< ;"
+            )
+        )
+        proc.add_body_line(
+            f'{inner_indent}ECHO "{self.case_name} L2 keff=" keffL2 ;'
+        )
+        proc.add_body_line("")
+
+        # --- EDIR call (coarse library + L2 tracking) ---
+        proc.add_body_line(f"{inner_indent}* EDI/COMPO call")
+        para_args = " ".join(
+            f"<<{b.para_name}>>" for b in ordered_branches
+        )
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}COMPO := {edir_proc_name} FLUX "
+                f"{edi_cond.lib_name} "
+                f"{l2_trk} COMPO :: <<name_compo>> "
+                f"{para_args} ;"
+            )
+        )
+        proc.add_body_line("")
+
+        # --- Cleanup per statepoint ---
+        proc.add_body_line(f"{inner_indent}* Cleanup")
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{inner_indent}LIBRARY LIBRARY2 "
+                f"{edi_cond.lib_name} := "
+                f"DELETE: LIBRARY LIBRARY2 "
+                f"{edi_cond.lib_name} ;"
+            )
+        )
+        proc.add_body_line(
+            f"{inner_indent}FLUX := DELETE: FLUX ;"
+        )
+        proc.add_body_line(
+            f"{inner_indent}SYS := DELETE: SYS ;"
+        )
+
+        # Close loops (innermost first)
+        for depth in range(len(ordered_branches) - 1, -1, -1):
+            indent = "    " * depth
+            branch = ordered_branches[depth]
+            proc.add_body_line(f"{indent}ENDWHILE ;")
+            if depth > 0:
+                proc.add_body_line(
+                    f"{indent}EVALUATE {branch.counter_var} := 0 ;"
+                )
+
+        proc.add_body_line("")
+
+        # --- COMPO export ---
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("* Export COMPO to file")
+        proc.add_body_line("*" * 50)
+        proc.add_body_line("_COMPO := COMPO ;")
+
+        # Temperature variables (structural etc.)
+        temp_mapping = {
+            "TFUEL": "fuel_temperature",
+            "TBOX": "structural_temperature",
+            "TCLAD": "gap_temperature",
+            "TCOOL": "coolant_temperature",
+            "TMODE": "moderator_temperature",
+            "TCTRL": "structural_temperature",
+        }
+        for tname, attr in temp_mapping.items():
+            proc.add_variable(
+                tname, "REAL", getattr(self.assembly, attr, 600.0)
+            )
+
+        return proc.write_to_x2m(self.output_path)

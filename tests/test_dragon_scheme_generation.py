@@ -688,7 +688,7 @@ class TestEDICOMPOWithBranches:
             content = f.read()
 
         # COMPO should be in the PARAMETER block
-        assert "PARAMETER FLUX LIBRARY2 TRACK COMPO ::" in content
+        assert "PARAMETER COMPO FLUX LIBRARY2 TRACK ::" in content
         assert "::: LINKED_LIST COMPO" in content
         # Branch REAL variables should be declared
         assert "REAL DCool TFuel" in content
@@ -897,7 +897,7 @@ def test_edir_with_branches_has_compo_parameter(tmp_path):
         edir = f.read()
 
     # COMPO is in the PARAMETER block, not declared locally
-    assert "PARAMETER FLUX LIBRARY2 TRACK COMPO ::" in edir
+    assert "PARAMETER COMPO FLUX LIBRARY2 TRACK ::" in edir
     assert "::: LINKED_LIST COMPO" in edir
 
     # Branch parameter variables are declared and recovered

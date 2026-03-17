@@ -14,7 +14,7 @@ from copy import deepcopy
 # Valid option constants
 # ---------------------------------------------------------------------------
 
-VALID_STEP_TYPES = ("self_shielding", "flux")
+VALID_STEP_TYPES = ("self_shielding", "flux", "edition_between_levels")
 VALID_SELF_SHIELDING_MODULES = ("USS", "SHI")  # USS: unresolved resonance, SHI: Stammler
 VALID_SELF_SHIELDING_METHODS = ("RSE", "PT")  # RSE: subgroup+equivalence, PT: probability tables
 VALID_SPATIAL_METHODS = ("CP", "IC", "MOC")
@@ -1157,6 +1157,72 @@ class CalculationOutput:
 
 
 # ---------------------------------------------------------------------------
+# EditionBetweenLevelsStep – energy condensation step between flux levels
+# ---------------------------------------------------------------------------
+
+class EditionBetweenLevelsStep:
+    """
+    Describes the energy condensation step between two flux levels in a
+    multi-level DRAGON calculation scheme.
+
+    This step does NOT involve geometry tracking of its own; it operates
+    on the flux and library structures produced by the preceding flux step.
+    It therefore does not inherit from ``CalculationStep`` and has no
+    spatial_method, tracking, or sectorization attributes.
+
+    The step drives:
+
+    * An ``EDI:`` module call to condense cross sections from the fine
+      group mesh to ``number_of_macro_groups`` coarse groups using the
+      boundaries listed in ``energy_groups_bounds``.
+    * An optional ``SPH:`` equivalence correction applied to the condensed
+      library up to group ``max_sph_group``.
+
+    Parameters
+    ----------
+    name : str
+        Human-readable step identifier.
+    number_of_macro_groups : int
+        Number of coarse energy groups to condense to (e.g. 26).
+    energy_groups_bounds : list[int]
+        Upper-group indices of each coarse energy group boundary used in
+        the ``COND`` keyword of ``EDI:``.  Typically ``number_of_macro_groups - 1``
+        values (the last group boundary is implicit).
+    sph_correction : bool
+        Whether to apply an SPH equivalence correction after condensation.
+        Default ``False``.
+    max_sph_group : int or None
+        Maximum coarse group index up to which SPH is applied
+        (``GRMAX`` keyword).  Required when ``sph_correction=True``.
+    """
+
+    step_type = "edition_between_levels"
+
+    def __init__(self, name, number_of_macro_groups,
+                 energy_groups_bounds, sph_correction=False,
+                 max_sph_group=None):
+        self.name = name
+        self.number_of_macro_groups = number_of_macro_groups
+        self.energy_groups_bounds = list(energy_groups_bounds)
+        self.sph_correction = bool(sph_correction)
+        self.max_sph_group = max_sph_group
+
+        if self.sph_correction and self.max_sph_group is None:
+            raise ValueError(
+                f"EditionBetweenLevelsStep '{name}': "
+                "max_sph_group is required when sph_correction=True."
+            )
+
+    def __repr__(self):
+        return (
+            f"EditionBetweenLevelsStep("
+            f"name='{self.name}', "
+            f"n_groups={self.number_of_macro_groups}, "
+            f"sph={self.sph_correction})"
+        )
+
+
+# ---------------------------------------------------------------------------
 # DragonCalculationScheme – ordered collection of CalculationSteps
 # ---------------------------------------------------------------------------
 
@@ -1199,14 +1265,17 @@ class DragonCalculationScheme:
 
     def add_step(self, step):
         """
-        Append a ``CalculationStep`` to the scheme.
+        Append a ``CalculationStep`` or ``EditionBetweenLevelsStep`` to the scheme.
 
         Parameters
         ----------
-        step : CalculationStep
+        step : CalculationStep or EditionBetweenLevelsStep
         """
-        if not isinstance(step, CalculationStep):
-            raise TypeError(f"Expected CalculationStep, got {type(step).__name__}")
+        if not isinstance(step, (CalculationStep, EditionBetweenLevelsStep)):
+            raise TypeError(
+                f"Expected CalculationStep or EditionBetweenLevelsStep, "
+                f"got {type(step).__name__}"
+            )
         self.steps.append(step)
 
     def get_step(self, name):
@@ -1240,6 +1309,24 @@ class DragonCalculationScheme:
         flux = [s for s in self.steps if s.step_type == "flux"]
         flux.sort(key=lambda s: (s.flux_level or 0))
         return flux
+
+    def get_edition_between_levels_steps(self):
+        """Return all edition-between-levels steps (energy condensation)."""
+        return [s for s in self.steps
+                if s.step_type == "edition_between_levels"]
+
+    def is_two_level_scheme(self):
+        """Return ``True`` if the scheme contains an edition-between-levels step."""
+        return len(self.get_edition_between_levels_steps()) > 0
+
+    def get_trackable_steps(self):
+        """Return steps that require TDT geometry and tracking.
+
+        Excludes ``edition_between_levels`` steps, which operate on
+        existing tracking structures rather than their own geometry.
+        """
+        return [s for s in self.steps
+                if s.step_type != "edition_between_levels"]
 
     # ------------------------------------------------------------------
     # Branch / output helpers
@@ -1412,7 +1499,18 @@ class DragonCalculationScheme:
 
     @staticmethod
     def _parse_step(d):
-        """Parse a single step dict into a CalculationStep."""
+        """Parse a single step dict into a CalculationStep or EditionBetweenLevelsStep."""
+        # --- Early exit for edition_between_levels (no geometry/tracking attributes) ---
+        step_type = d.get("step_type")
+        if step_type == "edition_between_levels":
+            return EditionBetweenLevelsStep(
+                name=d["name"],
+                number_of_macro_groups=d["number_of_macro_groups"],
+                energy_groups_bounds=d["energy_groups_bounds"],
+                sph_correction=d.get("SPH_correction", False),
+                max_sph_group=d.get("max_SPH_group", None),
+            )
+
         # --- Sectorization ---
         sect = d.get("sectorization", {})
         sect_enabled = sect.get("enabled", False)
@@ -1807,6 +1905,13 @@ class DragonCalculationScheme:
         for i, step in enumerate(self.steps, 1):
             lines.append(f"\nStep {i}: {step.name}")
             lines.append(f"  Type:       {step.step_type}")
+            if step.step_type == "edition_between_levels":
+                lines.append(f"  Groups:     {step.number_of_macro_groups}")
+                lines.append(f"  Group bounds: {step.energy_groups_bounds}")
+                lines.append(f"  SPH:        {step.sph_correction}")
+                if step.sph_correction:
+                    lines.append(f"  GRMAX:      {step.max_sph_group}")
+                continue
             if step.step_type == "self_shielding":
                 lines.append(f"  SH module:  {step.self_shielding_module}")
                 lines.append(f"  SH method:  {step.self_shielding_method}")

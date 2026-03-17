@@ -307,15 +307,17 @@ class TestDraglibResolution:
         """Resolves from $DRAGLIBS directory."""
         libs_dir = tmp_path / "libs"
         libs_dir.mkdir()
-        draglib = libs_dir / "draglibendfb8r1SHEM295"
+        draglib = libs_dir / "draglibendfb8r1SHEM295_v5p1"
         draglib.write_text("fake draglib")
+        monkeypatch.delenv("DRAGLIBS_DIR", raising=False)
+        monkeypatch.delenv("DRAGLIB_DIR", raising=False)
         monkeypatch.setenv("DRAGLIBS", str(libs_dir))
 
         case = DragonCase(
             case_name="test",
             call_glow=False,
             draglibs_names_to_alias={
-                "draglibendfb8r1SHEM295": "endfb8r1_295",
+                "draglibendfb8r1SHEM295_v5p1": "endfb8r1_295",
             },
             config_yamls={
                 "MATS": GE14_COMPOSITIONS_YAML,
@@ -330,18 +332,20 @@ class TestDraglibResolution:
         runner = DragonRunner(dragon_case=case)
         resolved = runner._resolve_draglib_paths(None)
         assert resolved[
-            "draglibendfb8r1SHEM295"
+            "draglibendfb8r1SHEM295_v5p1"
         ] == str(draglib.resolve())
 
     def test_missing_draglib_raises(self, tmp_path, monkeypatch):
         """Missing draglib → FileNotFoundError."""
+        monkeypatch.delenv("DRAGLIBS_DIR", raising=False)
+        monkeypatch.delenv("DRAGLIB_DIR", raising=False)
         monkeypatch.delenv("DRAGLIBS", raising=False)
 
         case = DragonCase(
             case_name="test",
             call_glow=False,
             draglibs_names_to_alias={
-                "draglibendfb8r1SHEM295": "endfb8r1_295",
+                "draglibendfb8r1SHEM295_v5p1": "endfb8r1_295",
             },
             config_yamls={
                 "MATS": GE14_COMPOSITIONS_YAML,
@@ -361,7 +365,7 @@ class TestDraglibResolution:
         """A .gz compressed draglib is resolved."""
         libs_dir = tmp_path / "libs"
         libs_dir.mkdir()
-        draglib_gz = libs_dir / "draglibendfb8r1SHEM295.gz"
+        draglib_gz = libs_dir / "draglibendfb8r1SHEM295_v5p1.gz"
         draglib_gz.write_text("fake compressed")
         monkeypatch.setenv("DRAGLIBS", str(libs_dir))
 
@@ -369,7 +373,7 @@ class TestDraglibResolution:
             case_name="test",
             call_glow=False,
             draglibs_names_to_alias={
-                "draglibendfb8r1SHEM295": "endfb8r1_295",
+                "draglibendfb8r1SHEM295_v5p1": "endfb8r1_295",
             },
             config_yamls={
                 "MATS": GE14_COMPOSITIONS_YAML,
@@ -384,7 +388,7 @@ class TestDraglibResolution:
         runner = DragonRunner(dragon_case=case)
         resolved = runner._resolve_draglib_paths(None)
         assert resolved[
-            "draglibendfb8r1SHEM295"
+            "draglibendfb8r1SHEM295_v5p1"
         ].endswith(".gz")
 
 
@@ -399,7 +403,7 @@ class TestRunDirectory:
         """Create a DragonRunner with fake executable and draglib."""
         exe = tmp_path / "dragon_exe"
         exe.write_text("#!/bin/sh\n")
-        draglib = tmp_path / "draglibendfb8r1SHEM295"
+        draglib = tmp_path / "draglibendfb8r1SHEM295_v5p1"
         draglib.write_text("fake")
         monkeypatch.setenv("dragon_exec", str(exe))
 
@@ -407,7 +411,7 @@ class TestRunDirectory:
             case_name="GE14_DOM",
             call_glow=False,
             draglibs_names_to_alias={
-                "draglibendfb8r1SHEM295": "endfb8r1_295",
+                "draglibendfb8r1SHEM295_v5p1": "endfb8r1_295",
             },
             config_yamls={
                 "MATS": GE14_COMPOSITIONS_YAML,
@@ -686,9 +690,9 @@ class TestInputStaging:
 
         staged_files = os.listdir(staging_dir)
         assert "GE14_DOM.x2m" in staged_files
-        assert "MIX_GE14_DOM.c2m" in staged_files
-        assert "TRK_GE14_DOM.c2m" in staged_files
-        assert "EDIR_GE14_DOM.c2m" in staged_files
+        assert "MIX.c2m" in staged_files
+        assert "TRK.c2m" in staged_files
+        assert "EDIR.c2m" in staged_files
 
     def test_procedures_archived_in_run_dir(
         self, tmp_path, monkeypatch
@@ -739,9 +743,9 @@ class TestInputStaging:
         runner._stage_inputs(run_dir, staging_dir)
 
         staged_files = os.listdir(staging_dir)
-        assert "draglibendfb8r1SHEM295" in staged_files
+        assert "endfb8r1_295" in staged_files
         assert os.path.islink(
-            os.path.join(staging_dir, "draglibendfb8r1SHEM295")
+            os.path.join(staging_dir, "endfb8r1_295")
         )
 
 

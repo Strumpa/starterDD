@@ -16,6 +16,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from ..DDModel.DragonCalculationScheme import EditionBetweenLevelsStep
 
 import yaml
 
@@ -575,21 +576,27 @@ class DragonRunner:
         scheme = self._scheme
         steps_info = []
         for s in scheme.steps:
-            step_dict = {
-                "name": s.name,
-                "type": s.step_type,
-                "method": s.spatial_method,
-                "tracking": s.tracking,
-            }
-            if s.step_type == "self_shielding":
-                step_dict["ssh_module"] = (
-                    s.self_shielding_module
-                )
-                step_dict["ssh_method"] = (
-                    s.self_shielding_method
-                )
-            if s.flux_level is not None:
-                step_dict["flux_level"] = s.flux_level
+            if isinstance(s, EditionBetweenLevelsStep):
+                step_dict = {
+                    "name": s.name,
+                    "type": s.step_type,
+                    "number_of_macro_groups": s.number_of_macro_groups,
+                    "energy_groups_bounds": s.energy_groups_bounds,
+                    "sph_correction": s.sph_correction,
+                    "max_sph_group": s.max_sph_group,
+                }
+            else:  # CalculationStep
+                step_dict = {
+                    "name": s.name,
+                    "type": s.step_type,
+                    "method": s.spatial_method,
+                    "tracking": s.tracking,
+                }
+                if s.step_type == "self_shielding":
+                    step_dict["ssh_module"] = s.self_shielding_module
+                    step_dict["ssh_method"] = s.self_shielding_method
+                if s.flux_level is not None:
+                    step_dict["flux_level"] = s.flux_level
             steps_info.append(step_dict)
 
         branches_info = {}

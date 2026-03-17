@@ -1,6 +1,6 @@
-# Example of a simple DRAGON 1 level flux calulation scheme with starterDD
+# Example of a simple DRAGON 2-levels flux calulation scheme with starterDD
 # Generate a glow geometry with a single AT10 pincell,
-# Run dragon with a RSE+IC self shielding step + 
+# Run dragon with a RSE+IC self shielding step + first level IC on 295g + second level 26g MOC flux calculation.
 
 # Date : 11/03/2026
 # R.Guasch
@@ -38,7 +38,7 @@ DRAGLIBS_PATH = Path(os.environ.get('DRAGLIB_DIR', "/path/to/draglibs"))
 
 # glow_data sits next to the starterDD project root
 GLOW_DATA = PROJECT_ROOT.parent / "glow_data"
-AT10_OUTPUT = GLOW_DATA / "starterDD_outputs" / "AT10_compo_test"
+AT10_OUTPUT = GLOW_DATA / "starterDD_outputs" / "AT10_compo_test" / "2L_scheme"
 
 AT10_compo_test_case = DragonCase(
         case_name="AT10_24UOX",
@@ -49,7 +49,7 @@ AT10_compo_test_case = DragonCase(
         config_yamls={
             "MATS": str(AT10_INPUTS / "material_compositions.yaml"),
             "GEOM": str(AT10_INPUTS / "GEOM_24UOX.yaml"),
-            "CALC_SCHEME": str(AT10_INPUTS / "CALC_SCHEME_1L.yaml"),
+            "CALC_SCHEME": str(AT10_INPUTS / "CALC_SCHEME_2L.yaml"),
         },
         output_path=str(AT10_OUTPUT),
         tdt_path=str(AT10_OUTPUT),
@@ -108,7 +108,7 @@ print(f"Results: {run_result.run_directory}")
 # Results directory structure:
 #   results/
 #   └── AT10_24UOX/
-#       └── RSE_IC_1L_MOC_5sp/
+#       └── RSE_IC_2L_MOC_5sp/
 #           ├── 2026-03-12T14-32-07/
 #           │   ├── run_manifest.yaml
 #           │   ├── inputs/           (frozen config yamls)
