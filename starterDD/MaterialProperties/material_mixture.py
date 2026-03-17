@@ -481,30 +481,6 @@ def fractions_to_iso_densities(
 
     return iso_densities
 
-
-def DensToIsoDens_water(density):
-    """Convert water mass density to isotopic number densities.
-
-    .. deprecated::
-        Use :func:`fractions_to_iso_densities` with ``density_type='mass_density'``
-        and explicit mass fractions instead.
-
-    :param density: Water mass density in g/cm³.
-    :return: ``{"H1": N_H, "O16": N_O}`` in atoms/barn·cm.
-    """
-    warnings.warn(
-        "DensToIsoDens_water is deprecated. "
-        "Use fractions_to_iso_densities(composition, 'mass_density', density) instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    M_H2O = 15.9994 + 2.0 * 1.00794
-    N_MAT = density * AVOGADRO / (M_H2O * CM2_TO_BARN)
-    N_O = N_MAT
-    N_H = 2.0 * N_MAT
-    return {"H1": N_H, "O16": N_O}
-
-
 def compute_water_iso_densities_at_densities(densities):
     """Compute H and O isotopic number densities for light water at
     multiple mass densities.
