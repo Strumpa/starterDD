@@ -37,7 +37,7 @@ DRAGLIBS_PATH = Path(os.environ.get('DRAGLIB_DIR', "/path/to/draglibs"))
 # glow_data sits next to the starterDD project root
 GLOW_DATA = PROJECT_ROOT.parent / "glow_data"
 AT10_OUTPUT = GLOW_DATA / "starterDD_outputs" / "AT10_compo_test" / "1L_scheme"
-run_dragon=False  # Set to False for a dry run (no Dragon execution)
+run_dragon=True # Set to False for a dry run (no Dragon execution)
 
 AT10_compo_test_case = DragonCase(
         case_name="AT10_24UOX",
@@ -78,8 +78,8 @@ result = AT10_compo_test_case.generate_cle2000_procedures()
 if not run_dragon:
     dry_result = AT10_compo_test_case.run(
         draglib_paths={
-            "J311_295": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
-        },
+            "draglibJeff3p1p1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
+        }, # if None, read from the $DRAGLIBS env var, and selected name + alias in the case config.
         results_root="./results",
         dry_run=True,
     )
@@ -94,7 +94,7 @@ if run_dragon:
     run_result = AT10_compo_test_case.run(
         dragon_executable=DRAGON_EXEC,  # or None to use $dragon_exec
         draglib_paths={
-            "J311_295": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
+            "draglibJeff3p1p1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
         },
         results_root="./results",
         num_threads=1,

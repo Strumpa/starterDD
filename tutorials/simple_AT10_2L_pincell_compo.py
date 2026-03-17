@@ -79,7 +79,7 @@ if not run_dragon:
     #
     dry_result = AT10_compo_test_case.run(
          draglib_paths={
-             "J311_295": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
+             "draglibJeff3p1p1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
          },
          results_root="./results",
          dry_run=True,
@@ -95,7 +95,7 @@ if run_dragon:
     run_result = AT10_compo_test_case.run(
         dragon_executable=DRAGON_EXEC,  # or None to use $dragon_exec
         draglib_paths={
-            "J311_295": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
+            "draglibJeff3p1p1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
         },
         results_root="./results",
         num_threads=1,
