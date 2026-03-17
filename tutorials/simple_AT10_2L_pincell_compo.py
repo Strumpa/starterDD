@@ -39,7 +39,7 @@ DRAGLIBS_PATH = Path(os.environ.get('DRAGLIB_DIR', "/path/to/draglibs"))
 # glow_data sits next to the starterDD project root
 GLOW_DATA = PROJECT_ROOT.parent / "glow_data"
 AT10_OUTPUT = GLOW_DATA / "starterDD_outputs" / "AT10_compo_test" / "2L_scheme"
-exec=True  # Set to False for a dry run (no Dragon execution)
+run_dragon=True  # Set to False for a dry run (no Dragon execution)
 
 AT10_compo_test_case = DragonCase(
         case_name="AT10_24UOX",
@@ -73,7 +73,7 @@ result = AT10_compo_test_case.generate_cle2000_procedures()
 #
 # Use dry_run=True to stage everything without executing Dragon.
 # =====================================================================
-if not exec:
+if not run_dragon:
     # --- Option A: dry run (no Dragon execution) -----------------------
     # Useful for verifying the setup before running.
     #
@@ -89,7 +89,7 @@ if not exec:
 # --- Option B: full execution --------------------------------------
 # Requires $dragon_exec and draglib files to be available.
 #
-if exec:
+if run_dragon:
     print("Running Dragon... This may take a few moments.")
     print(f"Using Dragon executable: {DRAGON_EXEC}")
     run_result = AT10_compo_test_case.run(

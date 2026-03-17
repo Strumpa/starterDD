@@ -134,7 +134,6 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
                     PropertyType.MATERIAL: ["MODERATOR"],
                     PropertyType.MACRO: [f"MACRO_{row_idx}{cell_idx}"]
                 })
-            print(f"Generated cell {tmp_cell.name} at position ({cell_idx}, {row_idx})")
             row_of_cells.append(tmp_cell)
         lattice_components.append(row_of_cells)
     return lattice_components
@@ -162,8 +161,6 @@ def add_cells_to_regular_lattice(lattice, ordered_cells, cell_pitch, translation
             if "W" in cell.name:  # Skip water rod placeholders
                 continue
             else:
-                print(f"Adding cell {cell.name} at position ({cell_idx}, {row_idx})")
-                print(f"cell_pitch: {cell_pitch}, translation: {translation}")
                 lattice.add_cell(
                     cell, ((cell_idx + 0.5) * cell_pitch + translation,
                            (row_idx + 0.5) * cell_pitch + translation,
@@ -525,13 +522,10 @@ def export_glow_geom(output_path, output_file_name, lattice, tracking_option, ex
         Tracking option, either ``"TISO"`` or ``"TSPC"``
     """
     # check of output path exists and create if not
-    print(f"Exporting geometry to {output_path} with raw name {output_file_name} with tracking option '{tracking_option}' and export_macro={export_macro}")
     cwd = os.getcwd()
-    print(f"Current working directory: {cwd}")
     if not os.path.isabs(output_path):
         output_path = os.path.join(cwd, output_path)
     if not os.path.exists(output_path):
-        print(output_path + " does not exist, creating it.")
         os.makedirs(output_path)
         
     if export_macro:
@@ -842,7 +836,6 @@ def _build_control_cross_shapes(ctrl, ap):
     # Right part of north arm (tip region beyond last tube)
     rw = bhs - last_boundary
     cx, cy = ct(last_boundary + rw / 2.0, ap - bt / 4.0)
-    print(f"building rect at cx={cx}, cy={cy} with rw={rw}, bt={bt}")
     if rw>1e-6:
         split_rects.append(Rectangle(
             name="CTRL_SPLIT_H_RIGHT",
@@ -853,7 +846,6 @@ def _build_control_cross_shapes(ctrl, ap):
     # Bottom part of west arm (covers tubes region)
     bh = last_boundary
     cx, cy = ct(bt / 4.0, ap - lw / 2.0)
-    print(f"building rect at cx={cx}, cy={cy} with bh={bh}, bt={bt}")
     if bh>1e-6:
         split_rects.append(Rectangle(
             name="CTRL_SPLIT_V_BOT",

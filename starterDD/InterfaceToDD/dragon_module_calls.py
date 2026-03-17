@@ -1446,7 +1446,7 @@ class USS:
     def __init__(self, calculation_step, track_name=None, title=None):
         self.step = calculation_step
         # check step type is self-shielding
-        if self.step.type != "self-shielding":
+        if self.step.step_type != "self_shielding":
             raise ValueError(f"USS module only applicable for self-shielding steps, but got step type '{self.step.type}'")
         step_tag = self.step.name.upper()
         self.track_name = track_name or f"TRK{step_tag}"

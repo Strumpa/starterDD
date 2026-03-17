@@ -798,7 +798,7 @@ class DragonRunner:
 
                 manifest["execution"] = {
                     "dry_run": True,
-                    "staging_directory": staging_dir,
+                    "staging_listing": staging_listing,
                 }
                 with open(manifest_path, "w") as f:
                     yaml.dump(

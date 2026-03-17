@@ -228,7 +228,6 @@ class DragonCase:
         # Generate procedures if not already done
         if not hasattr(self, "scheme") or self.scheme is None:
             self.generate_cle2000_procedures()
-        print(f"In dragon case run : draglib_paths = {draglib_paths}")
         runner = DragonRunner(
             dragon_case=self,
             dragon_executable=dragon_executable,

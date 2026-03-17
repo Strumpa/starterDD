@@ -15,10 +15,10 @@ A python package aiming to provide a user-friendly experience for Dragon and Don
     - Support for control crosses.
 
 - InterfaceToDD : allows users to interface the starterDD functionalities to the Version5 (Donjon&Dragon) environment. As of 16/03/2026 Dragon can be executed directly from starterDD. 
-    - Specify a path to a Dragon executable in file or as a "dragon_exec" environment varaible,
+    - Specify a path to a Dragon executable in file or as a "dragon_exec" environment variable,
     - Specify a path to draglibs in zipped or unzipped in file or as a "DRAGLIBS_DIR" envionment variable,
     - Execute the Dragon case and save time stamped results.
-    - Only a direct self-shielding + MOC calculation scheme is supoprted for now, more schemes will be implemented.
+    - Only a direct self-shielding + MOC calculation scheme is supported for now, more schemes will be implemented.
 
 # To install starterDD 
 

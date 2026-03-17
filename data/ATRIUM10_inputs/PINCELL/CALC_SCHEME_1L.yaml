@@ -68,7 +68,7 @@ FLUX_CALCULATION_SCHEME:
 CALCULATION_BRANCHES:
   - name: "Coolant density variation"
     type: "coolant_density"
-    # Reference : BWR Progression Problem for GE14, Table 2 "Coolant density as a fuinction of void"
+    # Reference : BWR Progression Problem for GE14, Table 2 "Coolant density as a function of void"
     #        0%            20%           40%         60%         80%
     values: [0.73669000, 0.59685660, 0.45702320, 0.31718980, 0.17735640] # in g/cm3
   - name: "Fuel temperature variation"
