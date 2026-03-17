@@ -37,7 +37,7 @@ DRAGLIBS_PATH = Path(os.environ.get('DRAGLIB_DIR', "/path/to/draglibs"))
 # glow_data sits next to the starterDD project root
 GLOW_DATA = PROJECT_ROOT.parent / "glow_data"
 AT10_OUTPUT = GLOW_DATA / "starterDD_outputs" / "AT10_compo_test" / "1L_scheme"
-exec=False
+exec=False  # Set to False for a dry run (no Dragon execution)
 
 AT10_compo_test_case = DragonCase(
         case_name="AT10_24UOX",
@@ -75,14 +75,15 @@ result = AT10_compo_test_case.generate_cle2000_procedures()
 # --- Option A: dry run (no Dragon execution) -----------------------
 # Useful for verifying the setup before running.
 #
-#dry_result = AT10_compo_test_case.run(
-#     draglib_paths={
-#         "J311_295": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
-#     },
-#     results_root="./results",
-#     dry_run=True,
-#)
-#print(f"Dry run directory: {dry_result.run_directory}")
+if not exec:
+    dry_result = AT10_compo_test_case.run(
+        draglib_paths={
+            "J311_295": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
+        },
+        results_root="./results",
+        dry_run=True,
+    )
+    print(f"Dry run directory: {dry_result.run_directory}")
 
 # --- Option B: full execution --------------------------------------
 # Requires $dragon_exec and draglib files to be available.

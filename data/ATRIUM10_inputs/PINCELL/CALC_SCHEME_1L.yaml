@@ -70,7 +70,7 @@ CALCULATION_BRANCHES:
     type: "coolant_density"
     # Reference : BWR Progression Problem for GE14, Table 2 "Coolant density as a fuinction of void"
     #        0%            20%           40%         60%         80%
-    values: [0.73669000] #[0.73669000, 0.59685660, 0.45702320, 0.31718980, 0.17735640] # in g/cm3
+    values: [0.73669000, 0.59685660, 0.45702320, 0.31718980, 0.17735640] # in g/cm3
   - name: "Fuel temperature variation"
     type: "fuel_temperature"
     values: [750.0]   #[750.0, 900.0, 1500.0]
