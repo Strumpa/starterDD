@@ -180,7 +180,6 @@ class Composition:
         """
         self.isotope_name_composition = {}
         for zaid in self.isotopic_composition.keys():
-            #print(f"Converting ZAID {zaid} to isotope name...")
             # Extract Z and A from the ZAID
             Z = int(float(zaid)//1000)  # Z is the part before the last three digits
             A = int(float(zaid) - Z*1000)   # A is the last three digits

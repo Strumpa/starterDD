@@ -292,7 +292,6 @@ class CartesianAssemblyModel:
         """
         # create a n by m grid of pin models based on the lattice description and pin geometry information provided in the geometry description yaml file, and store it in the lattice attribute of the assembly model.
         print("Analyzing lattice description and building lattice data structure with pin models based on the geometry description ...")
-        print(f"Lattice description: {self.lattice_description}")
         self.lattice = []
         number_of_water_rod_placeholders = 0
         pin_pitch = self.pin_geometry_dict.get("pin_pitch", 0) if self.pin_geometry_dict else 0
@@ -488,7 +487,6 @@ class CartesianAssemblyModel:
 
             # Get fuel temperature from any pin with this material
             temperature = self._get_fuel_temperature_for_material(base_material_name)
-            print(temperature)
             depletable = getattr(composition, 'depletable', False)
 
             mix = MaterialMixture(
