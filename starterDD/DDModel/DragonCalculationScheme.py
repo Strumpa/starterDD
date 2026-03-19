@@ -20,6 +20,7 @@ VALID_SELF_SHIELDING_METHODS = ("RSE", "PT")  # RSE: subgroup+equivalence, PT: p
 VALID_SPATIAL_METHODS = ("CP", "IC", "MOC")
 VALID_TRACKING_OPTIONS = ("TISO", "TSPC")
 VALID_RADIAL_SCHEMES = ("Santamarina", "automatic", "user_defined")
+VALID_MIX_NUMBERING_STRATEGIES = ("by_material", "by_pin")
 
 
 # ---------------------------------------------------------------------------
@@ -656,6 +657,7 @@ class CalculationStep:
         anisotropy_level=1,
         polar_angles_quadrature=None,
         number_of_polar_angles=None,
+        mix_numbering_strategy="by_material",
     ):
         # --- Validate step type ---
         if step_type not in VALID_STEP_TYPES:
@@ -728,6 +730,13 @@ class CalculationStep:
                 f"Valid options: {VALID_RADIAL_SCHEMES}"
             )
 
+        # --- Validate mix numbering strategy ---
+        if mix_numbering_strategy not in VALID_MIX_NUMBERING_STRATEGIES:
+            raise ValueError(
+                f"Invalid mix_numbering_strategy '{mix_numbering_strategy}'. "
+                f"Valid options: {VALID_MIX_NUMBERING_STRATEGIES}"
+            )
+
         # --- Validate tracking parameters ---
         if spatial_method == "MOC":
             if polar_angles_quadrature is None:
@@ -766,6 +775,7 @@ class CalculationStep:
         self.anisotropy_level = anisotropy_level
         self.polar_angles_quadrature = polar_angles_quadrature
         self.number_of_polar_angles = number_of_polar_angles
+        self.mix_numbering_strategy = mix_numbering_strategy
 
     # ------------------------------------------------------------------
     # Radii application
@@ -900,7 +910,8 @@ class CalculationStep:
             f"CalculationStep(name='{self.name}', "
             f"type='{self.step_type}', "
             f"{method_str}, "
-            f"tracking='{self.tracking}'{level_str})"
+            f"tracking='{self.tracking}', "
+            f"mix_numbering='{self.mix_numbering_strategy}'{level_str})"
         )
 
 
@@ -1389,6 +1400,7 @@ class DragonCalculationScheme:
               steps:
                 - name: "name_of_step" (human-readable identifier)
                   step_type: "flux" or "self_shielding"
+                  mix_numbering_strategy: "by_material" or "by_pin" (optional, default "by_material")
                   self_shielding_module: "USS" or "SHI" (only for self_shielding steps)
                   self_shielding_method: "RSE" or "PT"  (only for self_shielding steps)
                   spatial_method: "IC" or "MOC" or "CP"
@@ -1414,6 +1426,8 @@ class DragonCalculationScheme:
                       # int N (default 1): N=1 no extra splits; N>=2 produces N-1 evenly spaced radii in the moderator region (r < inner_radius).
                       # list[float]: explicit user-defined radii (must be > 0 and < inner_radius).
                       # When extra rings are added, sectors[0]/angles[0] are automatically replicated for each new sub-ring.
+                      subdivisions_coolant_corners: <int> : number of subdivisions to apply to the corner regions of the coolant corners in circular water rods
+                      allows for the submeshing of regions with r>outer_radius, but within the water rod cell.
                       # For square water rods (Cartesian grid sub-meshing):
                       splits: [nx, ny]  # grid subdivisions applied to the whole bounding box; material is reassigned by geometric containment
                 
@@ -1620,7 +1634,7 @@ class DragonCalculationScheme:
                 side_y_splits=box_disc_raw.get("side_y_splits", None),
             )
 
-        # --- Tracking parameters (common to all step types) ---
+        # --- Tracking parameters (common to all flux step types) ---
         tracking_kwargs = dict(
             num_angles_2d=d.get("num_angles_2d", 8),
             line_density=d.get("line_density", 25.0),
@@ -1647,6 +1661,7 @@ class DragonCalculationScheme:
             water_rod_sectors=water_rod_sectors,
             export_macros=d.get("export_macros", False),
             box_discretization=box_disc,
+            mix_numbering_strategy=d.get("mix_numbering_strategy", "by_material"),
             **tracking_kwargs,
         )
 

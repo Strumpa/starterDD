@@ -270,7 +270,10 @@ class DragonCase:
             )
         ssh_step = ssh_steps[0]
         ssh_step.apply_radii(assembly)
-        assembly.number_fuel_material_mixtures_by_pin()
+        
+        # Apply mix numbering strategy from the SSH step (Phase 3: hybrid orchestration)
+        # The strategy can be "by_material" or "by_pin" as defined in the calculation scheme
+        assembly.apply_mix_numbering_strategy(ssh_step.mix_numbering_strategy)
 
         # 4. Build geometry (if call_glow) and read TDT files
         #    for each calculation step.  The TDT file provides

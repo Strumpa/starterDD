@@ -30,6 +30,12 @@ class CartesianAssemblyModel:
         self.lattice = None # this will be a data structure representing the lattice of the assembly, which can be a 2D list of pin models corresponding to the lattice description, for example.
         self.set_uniform_temperatures(fuel_temperature=900.0, gap_temperature=600.0, coolant_temperature=600.0, moderator_temperature=600.0, structural_temperature=600.0) # default uniform temperatures for the assembly, which can be updated later based on the core description or other information provided for the assembly.
 
+        # --- Mix numbering state management (Phase 2) ---
+        self.current_mix_numbering_strategy = None  # Current strategy in use: "by_material" or "by_pin"
+        self.mix_state_history = []  # List of snapshots: [(strategy, mix_dict, pin_indices), ...]
+        self.mix_correspondence_mapping = {}  # Tracks transitions: {(old_strategy, new_strategy): {temp_idx → tdt_idx}, ...}
+        self.temp_to_tdt_index_mapping = {}  # Temp indices → TDT indices (set during TDT enforcement)
+
     def parse_geometry_description(self, geometry_description_yaml):
         """
         Parse the geometry description YAML file for the assembly.
@@ -890,6 +896,150 @@ class CartesianAssemblyModel:
             raise RuntimeError("Fuel material mixtures have not been numbered yet. Call number_fuel_material_mixtures first.")
         return self.fuel_material_mixtures
 
+    def _capture_mix_state(self):
+        """
+        Capture a snapshot of the current mix numbering state.
+
+        Records the current strategy, the material_mixtures_dict mapping,
+        and pin indices (for by_pin strategies). This snapshot is stored
+        in mix_state_history for later reference.
+
+        Returns
+        -------
+        dict
+            Snapshot containing strategy, mix_dict copy, and pin indices.
+        """
+        if not hasattr(self, 'fuel_material_mixture_names') or self.fuel_material_mixture_names is None:
+            raise RuntimeError(
+                "Fuel material mixtures have not been numbered yet. "
+                "Cannot capture mix state."
+            )
+
+        snapshot = {
+            "strategy": self.current_mix_numbering_strategy,
+            "mix_dict": dict(self.material_mixtures_dict),  # Copy of mapping
+            "pin_indices": {},  # (row, col) → pin_idx for by_pin
+            "timestamp": len(self.mix_state_history),  # Ordinal
+        }
+
+        # Record pin indices if strategy is by_pin
+        if self.current_mix_numbering_strategy == "by_pin":
+            for i, row in enumerate(self.lattice):
+                for j, pin in enumerate(row):
+                    if isinstance(pin, FuelPinModel) and hasattr(pin, 'pin_idx'):
+                        snapshot["pin_indices"][(i, j)] = pin.pin_idx
+
+        self.mix_state_history.append(snapshot)
+        return snapshot
+
+    def apply_mix_numbering_strategy(self, strategy):
+        """
+        Apply a mix numbering strategy to the assembly, switching from the
+        current strategy if needed.
+
+        This method orchestrates calling the appropriate numbering method
+        (by_material or by_pin) and records the state transition.
+
+        Parameters
+        ----------
+        strategy : str
+            "by_material" or "by_pin".
+
+        Raises
+        ------
+        ValueError
+            If strategy is not one of the valid options.
+        RuntimeError
+            If material compositions have not been set or lattice not built.
+        """
+        from .DragonCalculationScheme import VALID_MIX_NUMBERING_STRATEGIES
+
+        if strategy not in VALID_MIX_NUMBERING_STRATEGIES:
+            raise ValueError(
+                f"Invalid mix_numbering_strategy '{strategy}'. "
+                f"Valid options: {VALID_MIX_NUMBERING_STRATEGIES}"
+            )
+
+        # If already at this strategy, no-op
+        if self.current_mix_numbering_strategy == strategy:
+            return
+
+        # Record old strategy for correspondence tracking
+        old_strategy = self.current_mix_numbering_strategy
+
+        # Apply the new strategy
+        if strategy == "by_material":
+            self.number_fuel_material_mixtures_by_material()
+        elif strategy == "by_pin":
+            self.number_fuel_material_mixtures_by_pin()
+
+        # Update current strategy
+        self.current_mix_numbering_strategy = strategy
+
+        # Capture the new state for history and correspondence tracking
+        self._capture_mix_state()
+
+        # Record the transition
+        if old_strategy is not None:
+            self.record_mix_correspondence_transition(old_strategy, strategy)
+
+        print(f"[apply_mix_numbering] Switched from {old_strategy} to {strategy}.")
+
+    def record_mix_correspondence_transition(self, old_strategy, new_strategy):
+        """
+        Record the correspondence mapping between mixes when switching strategies.
+
+        This creates a mapping from temporary indices (assigned by the old
+        strategy before TDT enforcement) to the new strategy's indices.
+        The mapping key is a tuple (old_strategy, new_strategy).
+
+        After TDT enforcement, indices are converted to TDT indices via
+        temp_to_tdt_index_mapping.
+
+        Parameters
+        ----------
+        old_strategy : str
+            The previous strategy (e.g., "by_material").
+        new_strategy : str
+            The new strategy (e.g., "by_pin").
+        """
+        transition_key = (old_strategy, new_strategy)
+
+        # Map old mixture names to old indices (from mix_state_history)
+        if len(self.mix_state_history) < 2:
+            print(f"[record_correspondence] Not enough history to track correspondence "
+                  f"from {old_strategy} to {new_strategy}. Skipping.")
+            return
+
+        old_snapshot = self.mix_state_history[-2]  # Previous state
+        new_snapshot = self.mix_state_history[-1]  # Current state
+
+        # old_snapshot contains mix_dict from old strategy
+        # new_snapshot contains material_mixtures_dict from new strategy
+        old_mix_dict = old_snapshot["mix_dict"]
+        new_mix_dict = new_snapshot["mix_dict"]
+
+        correspondence = {}
+        for old_name, old_temp_idx in old_mix_dict.items():
+            # Try to find a corresponding mix in the new strategy with the same base material
+            base_material = old_name.rsplit("_zone_", 1)[0] if "_zone_" in old_name else old_name.rsplit("_zone", 1)[0]
+
+            # Search for a new mix with matching base material
+            for new_name, new_temp_idx in new_mix_dict.items():
+                new_base = new_name.rsplit("_zone", 1)[0]
+                if new_base == base_material:
+                    # Record correspondence: old temp idx → new temp idx
+                    correspondence[old_temp_idx] = new_temp_idx
+                    break  # Use first matching zone
+
+        self.mix_correspondence_mapping[transition_key] = correspondence
+
+        if correspondence:
+            print(f"[record_correspondence] Recorded {len(correspondence)} correspondences "
+                  f"from {old_strategy} to {new_strategy}.")
+        else:
+            print(f"[record_correspondence] No correspondences found for {old_strategy} → {new_strategy}.")
+
     def enforce_material_mixture_indices_from_tdt(self, tdt_indices_dict):
         """
         Update material mixture indices in the assembly model so they match the
@@ -929,6 +1079,19 @@ class CartesianAssemblyModel:
                 "Fuel material mixtures have not been numbered yet. "
                 "Call number_fuel_material_mixtures_by_material() before enforcing TDT indices."
             )
+
+        # --- CAPTURE TEMP→TDT MAPPING BEFORE ENFORCEMENT ---
+        # Store mapping of temporary indices (pre-TDT) to final TDT indices
+        # This is needed for correspondence tracking across strategy switches
+        temp_to_tdt_map = {}
+        for name in self.fuel_material_mixture_names:
+            if name in self.material_mixtures_dict:
+                temp_idx = self.material_mixtures_dict[name]
+                if name in tdt_indices_dict:
+                    tdt_idx = tdt_indices_dict[name]
+                    temp_to_tdt_map[temp_idx] = tdt_idx
+        
+        self.temp_to_tdt_index_mapping = temp_to_tdt_map
 
         # Separate fuel vs non-fuel entries from the TDT mapping
         fuel_names_set = set(self.fuel_material_mixture_names)
@@ -984,6 +1147,22 @@ class CartesianAssemblyModel:
         print(f"[enforce_tdt] Updated {len(self.fuel_material_mixture_names)} fuel mixture indices from TDT file.")
         if non_fuel:
             print(f"[enforce_tdt] Also stored {len(non_fuel)} non-fuel mixture indices: {non_fuel}")
+
+        # --- RE-MAP CORRESPONDENCE AFTER TDT ENFORCEMENT ---
+        # If we have recorded transitions between strategies, update the correspondence
+        # mappings to point from temporary indices to final TDT indices
+        if self.mix_correspondence_mapping:
+            for transition_key, correspondence in self.mix_correspondence_mapping.items():
+                # For each correspondence mapping (old_temp_idx → new_temp_idx),
+                # we need to map both through temp_to_tdt_map to get final indices
+                updated_correspondence = {}
+                for old_temp, new_temp in correspondence.items():
+                    old_tdt = self.temp_to_tdt_index_mapping.get(old_temp, old_temp)
+                    new_tdt = self.temp_to_tdt_index_mapping.get(new_temp, new_temp)
+                    updated_correspondence[old_tdt] = new_tdt
+                self.mix_correspondence_mapping[transition_key] = updated_correspondence
+            print(f"[enforce_tdt] Re-mapped {len(self.mix_correspondence_mapping)} "
+                  f"strategy correspondence mappings to TDT indices.")
 
         # --- Update per-tube control cross absorber mixtures (if any) ---
         if ctrl_cross_names_set:

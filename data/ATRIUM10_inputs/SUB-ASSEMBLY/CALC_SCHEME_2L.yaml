@@ -1,13 +1,14 @@
-# DRAGON Calculation Scheme for the AT10 pincell.
+# DRAGON Calculation Scheme for the AT10 3x3 sub-assembly test.
 # Defines the sequence of calculation steps (self-shielding, flux)
 # with their respective discretization options.
 #
 # This file is used as a test case and example for the automated creation of DRAGON calculation schemes in starterDD.
+# Special case with a 2 level flux calculations scheme with mix duplication.
 # R.Guasch
-# Date : 12/03/2026 [created]
+# Date : 18/03/2026 [created]
 
 FLUX_CALCULATION_SCHEME:
-  name: "AT10_PINCELL_2L_IC_MOC"
+  name: "AT10_3x3_2L_IC_MOC_with_mix_splitting"
 
   steps:
     # ------------------------------------------------------------------
@@ -18,10 +19,11 @@ FLUX_CALCULATION_SCHEME:
     #   - TISO tracking (isotropic)
     #   - Santamarina radii for fuel zone subdivision
     #   - No azimuthal sectorization
+    #   - Self-shielding mixes : by material numbering, subdivided into Santamarina zones
     # ------------------------------------------------------------------
     - name: "SSH"
       step_type: "self_shielding"
-      mix_numbering_strategy: "by_pin"
+      mix_numbering_strategy: "by_material"
       self_shielding_module: "USS"
       self_shielding_method: "RSE"
       transport_correction: "NONE"
@@ -29,7 +31,7 @@ FLUX_CALCULATION_SCHEME:
       tracking: "TISO"
       num_angles_2d: 8
       line_density: 25.0
-      # No need for polar angles and nmu as not used outside of MOC. Should be supported 
+      
       anisotropy_level: 4
       radial_scheme: "Santamarina"
       export_macros: true
@@ -42,10 +44,11 @@ FLUX_CALCULATION_SCHEME:
     #   - TISO tracking (isotropic tracks, reflective boundary conditions)
     #   - Santamarina radii (same subdivision as SSH)
     #   - Windmill sectorization on coolant region
+    #   - Material mixes numbering : by material numbering, subdivided into Santamarina zones
     # ------------------------------------------------------------------
     - name: "FLUXL1"
       step_type: "flux"
-      mix_numbering_strategy: "by_pin"
+      mix_numbering_strategy: "by_material"
       spatial_method: "IC"
       tracking: "TISO"
       num_angles_2d: 8
@@ -60,7 +63,9 @@ FLUX_CALCULATION_SCHEME:
           # UOX pins: 4 Santamarina fuel zones + gap + clad + coolant = 7 regions
           sectors: [1, 1, 1, 1, 1, 1, 8]
           angles:  [0, 0, 0, 0, 0, 0, 22.5]
-
+    # ------------------------------------------------------------------
+    # Step 3: Energy condensation -> condense from a fine (295g) to a coarse (26g) energy grid, in order to prepare for the second level of flux calculation. The condensation is done on the flux calculated in the first level, and the condensed cross sections are used in the second level.
+    #   - Condensation method : edition between levels (use the flux calculated in the first level to condense the cross sections for the second level)
     - name: "Energy condensation"
       step_type: "edition_between_levels"
       number_of_macro_groups: 26
@@ -68,8 +73,15 @@ FLUX_CALCULATION_SCHEME:
        150, 210, 241, 244, 247, 252, 255, 258, 261, 268, 273, 277, 281, 286, 291]
       SPH_correction: True
       max_SPH_group: 19
+    # Step 4: Mix splitting -> split material mixtures into pin-based mixtures in order to prepare for the second level.
+    - name: "Mix splitting"
+      step_type: "mix_splitting"
+      initial_mix_numbering_strategy: "by_material"
+      target_mix_numbering_strategy: "by_pin"
+      # The mix splitting step is used to split the material mixes after the first flux calculation, in order to prepare for the energy condensation step. This allows to have more accurate self-shielding and flux calculations in the second level, as the material mixes are more refined.
+
     # ------------------------------------------------------------------
-    # Step 3: Flux calculation (second level)
+    # Step 5: Flux calculation (second level)
     #   - MOC spatial solution for the flux calculation
     #   - TSPC tracking (cyclic tracks, specular boundary conditions)
     #   - Santamarina radii (same subdivision as SSH)

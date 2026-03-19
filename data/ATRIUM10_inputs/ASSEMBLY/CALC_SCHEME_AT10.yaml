@@ -19,6 +19,7 @@ DRAGON_CALCULATION_SCHEME:
     # ------------------------------------------------------------------
     - name: "SSH"
       step_type: "self_shielding"
+      mix_numbering_strategy: "by_pin"
       self_shielding_method: "RSE"
       spatial_method: "IC"
       tracking: "TISO"
