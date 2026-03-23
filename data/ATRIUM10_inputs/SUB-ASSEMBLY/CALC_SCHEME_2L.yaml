@@ -1,4 +1,4 @@
-# DRAGON Calculation Scheme for the AT10 3x3 sub-assembly test.
+# DRAGON Calculation Scheme for the AT10 4x4 sub-assembly test.
 # Defines the sequence of calculation steps (self-shielding, flux)
 # with their respective discretization options.
 #
@@ -8,7 +8,7 @@
 # Date : 18/03/2026 [created]
 
 FLUX_CALCULATION_SCHEME:
-  name: "AT10_3x3_2L_IC_MOC_with_mix_splitting"
+  name: "AT10_4x4_2L_IC_MOC_with_mix_splitting"
 
   steps:
     # ------------------------------------------------------------------
@@ -63,6 +63,10 @@ FLUX_CALCULATION_SCHEME:
           # UOX pins: 4 Santamarina fuel zones + gap + clad + coolant = 7 regions
           sectors: [1, 1, 1, 1, 1, 1, 8]
           angles:  [0, 0, 0, 0, 0, 0, 22.5]
+        Gd_pins:
+          # Gd pins: 6 Santamarina fuel zones + gap + clad + coolant
+          sectors: [1, 1, 1, 1, 1, 1, 1, 1, 8]
+          angles:  [0, 0, 0, 0, 0, 0, 0, 0, 22.5]
     # ------------------------------------------------------------------
     # Step 3: Energy condensation -> condense from a fine (295g) to a coarse (26g) energy grid, in order to prepare for the second level of flux calculation. The condensation is done on the flux calculated in the first level, and the condensed cross sections are used in the second level.
     #   - Condensation method : edition between levels (use the flux calculated in the first level to condense the cross sections for the second level)
@@ -74,10 +78,10 @@ FLUX_CALCULATION_SCHEME:
       SPH_correction: True
       max_SPH_group: 19
     # Step 4: Mix splitting -> split material mixtures into pin-based mixtures in order to prepare for the second level.
-    - name: "Mix splitting"
-      step_type: "mix_splitting"
-      initial_mix_numbering_strategy: "by_material"
-      target_mix_numbering_strategy: "by_pin"
+    #- name: "Mix splitting"
+    #  step_type: "mix_splitting"
+    #  initial_mix_numbering_strategy: "by_material"
+    #  target_mix_numbering_strategy: "by_pin"
       # The mix splitting step is used to split the material mixes after the first flux calculation, in order to prepare for the energy condensation step. This allows to have more accurate self-shielding and flux calculations in the second level, as the material mixes are more refined.
 
     # ------------------------------------------------------------------
@@ -106,6 +110,11 @@ FLUX_CALCULATION_SCHEME:
           # UOX pins: 4 Santamarina fuel zones + gap + clad + coolant = 7 regions
           sectors: [1, 1, 1, 1, 1, 1, 8]
           angles:  [0, 0, 0, 0, 0, 0, 22.5]
+        Gd_pins:
+          # Gd pins: 6 Santamarina fuel zones + gap + clad + coolant
+          sectors: [1, 1, 1, 1, 1, 1, 1, 1, 8]
+          angles:  [0, 0, 0, 0, 0, 0, 0, 0, 22.5]
+
 
 # Yaml config file block to define the branch calculations :
 # The branches can be used to tabulate Dragon5 cross sections in varying conditions
@@ -116,7 +125,7 @@ CALCULATION_BRANCHES:
     type: "coolant_density"
     # Reference : BWR Progression Problem for GE14, Table 2 "Coolant density as a function of void"
     #        0%            20%           40%         60%         80%
-    values: [0.73669000, 0.59685660, 0.45702320, 0.31718980, 0.17735640] # in g/cm3
+    values: [0.73669000] #[0.73669000, 0.59685660, 0.45702320, 0.31718980, 0.17735640] # in g/cm3
   - name: "Fuel temperature variation"
     type: "fuel_temperature"
     values: [750.0]   #[750.0, 900.0, 1500.0]

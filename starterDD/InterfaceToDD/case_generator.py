@@ -8,7 +8,7 @@ from .CLE2000 import (
     main_procedure, sub_procedure,
     validate_varname, wrap_cle2000_line,
 )
-from .dragon_module_calls import LIB, EDI_COMPO, TRK, EDI_condensation, SPH_correction
+from .dragon_module_calls import LIB, EDI_COMPO, TRK, EDI_condensation, SPH_correction, MIXEQ
 from ..DDModel.DragonCalculationScheme import (
     DragonCalculationScheme,
     BRANCH_TYPE_TO_PARA_NAME,
@@ -183,6 +183,134 @@ class DragonCase:
         assembly.set_material_compositions(compositions)
         return assembly, compositions
 
+    def _generate_mixeq_procedures(self, scheme, assembly):
+        """
+        Generate MIXEQ procedures for numbering strategy transitions.
+
+        This method detects when consecutive trackable steps use different
+        mix numbering strategies and generates MIXEQ procedures to map
+        mixture indices between the different numbering schemes.
+
+        Parameters
+        ----------
+        scheme : DragonCalculationScheme
+            Calculation scheme with trackable steps
+        assembly : CartesianAssemblyModel
+            Assembly with mix state history from multiple steps
+
+        Returns
+        -------
+        list of tuples
+            [(proc_name, file_path), ...] for generated MIXEQ procedures
+        """
+        from .CLE2000 import validate_varname
+
+        mixeq_procedures = []
+        trackable_steps = scheme.get_trackable_steps()
+
+        # Check consecutive steps for strategy transitions
+        for i in range(len(trackable_steps) - 1):
+            current_step = trackable_steps[i]
+            next_step = trackable_steps[i + 1]
+
+            current_strategy = current_step.mix_numbering_strategy
+            next_strategy = next_step.mix_numbering_strategy
+
+            if current_strategy != next_strategy:
+                print(f"[MIXEQ] Strategy transition detected: {current_strategy} → {next_strategy}")
+                print(f"[MIXEQ] Generating MIXEQ for {current_step.name} → {next_step.name}")
+
+                try:
+                    # Generate MIXEQ procedure
+                    mixeq = MIXEQ(assembly, current_step.name, next_step.name)
+                    proc_name = f"MIXEQ_{current_step.name}_to_{next_step.name}"
+
+                    # Validate procedure name (CLE-2000 limitation)
+                    validate_varname(proc_name[:12])
+                    mixeq_path = mixeq.write_to_c2m(self.output_path, proc_name[:12])
+                    mixeq_procedures.append((proc_name[:12], mixeq_path))
+
+                    print(f"[MIXEQ] Successfully generated {proc_name[:12]}")
+
+                except Exception as e:
+                    print(f"[ERROR] Failed to generate MIXEQ for {current_step.name} → {next_step.name}: {e}")
+                    # Continue processing other transitions rather than failing completely
+                    continue
+
+        if not mixeq_procedures:
+            print("[MIXEQ] No strategy transitions detected - no MIXEQ procedures generated")
+        else:
+            print(f"[MIXEQ] Generated {len(mixeq_procedures)} MIXEQ procedure(s)")
+
+        return mixeq_procedures
+
+    def _validate_mixeq_generation(self, scheme, assembly):
+        """
+        Validate that MIXEQ generation prerequisites are met.
+
+        Parameters
+        ----------
+        scheme : DragonCalculationScheme
+            Calculation scheme to validate
+        assembly : CartesianAssemblyModel
+            Assembly model to validate
+
+        Returns
+        -------
+        bool
+            True if validation passes
+
+        Raises
+        ------
+        RuntimeError
+            If validation fails
+        """
+        # Check that assembly supports MIXEQ generation
+        if not hasattr(assembly, 'build_mixeq_correspondence_table'):
+            raise RuntimeError(
+                "Assembly model does not support MIXEQ generation. "
+                "The build_mixeq_correspondence_table method is missing."
+            )
+
+        # Check that assembly has mix state history tracking
+        if not hasattr(assembly, 'mix_state_history'):
+            raise RuntimeError(
+                "Assembly model does not have mix_state_history tracking enabled. "
+                "This is required for MIXEQ generation."
+            )
+
+        # Validate supported strategy transitions
+        trackable_steps = scheme.get_trackable_steps()
+        valid_strategies = ["by_material", "by_pin"]
+
+        for step in trackable_steps:
+            if step.mix_numbering_strategy not in valid_strategies:
+                raise RuntimeError(
+                    f"Unsupported mix numbering strategy '{step.mix_numbering_strategy}' "
+                    f"in step '{step.name}'. Supported strategies: {valid_strategies}"
+                )
+
+        # Check for potential strategy transition issues
+        strategy_changes = 0
+        for i in range(len(trackable_steps) - 1):
+            current_step = trackable_steps[i]
+            next_step = trackable_steps[i + 1]
+
+            if current_step.mix_numbering_strategy != next_step.mix_numbering_strategy:
+                strategy_changes += 1
+
+                # Validate transition directions (optional warning)
+                if (current_step.mix_numbering_strategy == "by_pin" and
+                    next_step.mix_numbering_strategy == "by_material"):
+                    print(f"[WARNING] Unusual strategy transition {current_step.name}: "
+                          f"by_pin → by_material. This may indicate a configuration issue.")
+
+        if strategy_changes > 3:
+            print(f"[WARNING] High number of strategy transitions detected ({strategy_changes}). "
+                  f"This may result in many MIXEQ procedures being generated.")
+
+        return True
+
     # -----------------------------------------------------------
     # Case execution
     # -----------------------------------------------------------
@@ -270,10 +398,10 @@ class DragonCase:
             )
         ssh_step = ssh_steps[0]
         ssh_step.apply_radii(assembly)
-        
-        # Apply mix numbering strategy from the SSH step (Phase 3: hybrid orchestration)
-        # The strategy can be "by_material" or "by_pin" as defined in the calculation scheme
-        assembly.apply_mix_numbering_strategy(ssh_step.mix_numbering_strategy)
+
+        # Apply initial mix numbering strategy from SSH step to establish baseline
+        # This ensures the assembly has a consistent starting state before per-step processing
+        #assembly.apply_mix_numbering_strategy(ssh_step.mix_numbering_strategy)
 
         # 4. Build geometry (if call_glow) and read TDT files
         #    for each calculation step.  The TDT file provides
@@ -281,6 +409,13 @@ class DragonCase:
         #    (assigned by glow/SALOME) for both fuel and
         #    non-fuel materials.
         for step in scheme.get_trackable_steps():
+            # Apply mix numbering strategy for THIS step BEFORE building geometry
+            # (Phase 3: hybrid orchestration per-step strategy)
+            # This ensures glow/SALOME uses the correct naming scheme when
+            # generating geometry for this particular calculation step.
+            assembly.apply_mix_numbering_strategy(step.mix_numbering_strategy)
+            
+
             tdt_file_name = (
                 f"{self.tdt_base_name}_{step.name}"
                 f"_{step.spatial_method}"
@@ -311,62 +446,91 @@ class DragonCase:
                         property_type_to_show=PropertyType.MACRO,
                     )
 
-            # 4b. Read TDT and enforce material indices
-            #     (for the SSH step — it defines the LIB
-            #     numbering used by all subsequent steps)
+            # 4b. Read TDT and enforce material indices for THIS step
+            #     This records the TDT-assigned indices in the step's state history
+            #     for per-step mix tracking (Phase 3: hybrid orchestration).
+            #     Note: SSH step defines the LIB numbering used by all subsequent steps.
+            tdt_file_path = self.tdt_path
+            tdt_full = os.path.join(
+                tdt_file_path,
+                f"{tdt_file_name}_{step.tracking}"
+                + ("_MACRO" if step.export_macros else "")
+                + ".dat",
+            )
+            if not os.path.isfile(tdt_full):
+                raise FileNotFoundError(
+                    f"TDT file not found: {tdt_full}\n"
+                    f"  tdt_path = {tdt_file_path}\n"
+                    f"When call_glow=False, the TDT .dat "
+                    f"file must already exist.  Pass an "
+                    f"explicit tdt_path= to DragonCase "
+                    f"pointing at the directory that "
+                    f"contains the file."
+                )
+            tdt_indices = (
+                read_material_mixture_indices_from_tdt_file(
+                    tdt_file_path=tdt_file_path,
+                    tdt_file_name=tdt_file_name,
+                    tracking_option=step.tracking,
+                    include_macros=step.export_macros,
+                    material_names=None,
+                )
+            )
+            # Enforce TDT indices: updates assembly mix indices and records
+            # them in mix_state_history for this step
+            assembly.enforce_material_mixture_indices_from_tdt(
+                tdt_indices, step_name=step.name
+            )
+            # Identify generating / daughter mixes
+            #    (must happen after TDT enforcement so that
+            #    indices are final, and before LIB creation)
+            assembly.identify_generating_and_daughter_mixes()
+            
             if step.step_type == "self_shielding":
-                tdt_file_path = self.tdt_path
-                tdt_full = os.path.join(
-                    tdt_file_path,
-                    f"{tdt_file_name}_{step.tracking}"
-                    + ("_MACRO" if step.export_macros else "")
-                    + ".dat",
+                print(f"[SSH Step] Applied TDT indices for step '{step.name}'. ")
+                print(f"These indices define the initial LIB numbering.")
+                
+                # ----- MIX.c2m -----
+                mix_proc_name = "MIX"
+                print(f"Generating MIX procedure '{mix_proc_name}' with LIB: ...")
+                has_density = (
+                    scheme.has_branches()
+                    and scheme.get_branch("coolant_density") is not None
                 )
-                if not os.path.isfile(tdt_full):
-                    raise FileNotFoundError(
-                        f"TDT file not found: {tdt_full}\n"
-                        f"  tdt_path = {tdt_file_path}\n"
-                        f"When call_glow=False, the TDT .dat "
-                        f"file must already exist.  Pass an "
-                        f"explicit tdt_path= to DragonCase "
-                        f"pointing at the directory that "
-                        f"contains the file."
-                    )
-                tdt_indices = (
-                    read_material_mixture_indices_from_tdt_file(
-                        tdt_file_path=tdt_file_path,
-                        tdt_file_name=tdt_file_name,
-                        tracking_option=step.tracking,
-                        include_macros=step.export_macros,
-                        material_names=None,
-                    )
-                )
-                assembly.enforce_material_mixture_indices_from_tdt(
-                    tdt_indices
+                lib = LIB(assembly, density_branch=has_density)
+                mix_path = lib.write_to_c2m(
+                    self.output_path, mix_proc_name,
                 )
 
-        # 5. Identify generating / daughter mixes
-        #    (must happen after TDT enforcement so that
-        #    indices are final)
-        assembly.identify_generating_and_daughter_mixes()
+
+        # Build per-step mix mapping
+        # This records each trackable step's mix names and TDT indices for later use
+        step_mix_mapping = {}
+        for step in scheme.get_trackable_steps():
+            names, indices = assembly.get_step_mix_names_and_indices(step.name)
+            if names is not None:
+                state = assembly.get_step_mix_state(step.name)
+                step_mix_mapping[step.name] = {
+                    "strategy": state["strategy"] if state else None,
+                    "mix_names": names,
+                    "tdt_indices": indices,
+                }
+        # Note: step_mix_mapping is prepared but not yet used in this version of the code.
+
+        # 6. Generate MIXEQ procedures for numbering strategy transitions
+        try:
+            # Validate prerequisites for MIXEQ generation
+            self._validate_mixeq_generation(scheme, assembly)
+            mixeq_procedures = self._generate_mixeq_procedures(scheme, assembly)
+        except Exception as e:
+            print(f"[ERROR] MIXEQ validation failed: {e}")
+            print("[MIXEQ] Skipping MIXEQ generation - continuing with standard workflow")
+            mixeq_procedures = []
 
         # Determine the first draglib alias
         draglib_alias = list(
             self.draglibs_names_to_alias.values()
         )[0]
-
-        # ----- MIX.c2m (LIB procedure) -----
-        mix_proc_name = f"MIX"
-        validate_varname(mix_proc_name[:12])
-        print(f"Generating MIX procedure '{mix_proc_name}' with LIB: ...")
-        has_density = (
-            scheme.has_branches()
-            and scheme.get_branch("coolant_density") is not None
-        )
-        lib = LIB(assembly, density_branch=has_density)
-        mix_path = lib.write_to_c2m(
-            self.output_path, mix_proc_name,
-        )
 
         # ----- TRK.c2m -----
         trk_proc_name = f"TRK"
@@ -431,12 +595,22 @@ class DragonCase:
                 ssh_step,
             )
 
-        return {
+        # Build return dictionary with individual MIXEQ procedure entries
+        result_dict = {
             "x2m": x2m_path,
             "mix": mix_path,
             "trk": trk_path,
             "edir": edir_path,
         }
+
+        # Add MIXEQ procedures as individual entries
+        for i, (proc_name, proc_path) in enumerate(mixeq_procedures):
+            result_dict[f"mixeq_{i+1}"] = proc_path
+
+        # Store procedures dictionary for dragon_runner
+        self._procedure_files = result_dict
+
+        return result_dict
 
     # -----------------------------------------------------------
     # Main x2m builder (single statepoint, backward compat)
@@ -976,8 +1150,9 @@ class DragonCase:
                 f"{inner_indent}{uss_line}"
             )
         )
+        ssh_asm_keyword = "PIJ" if scheme.step[0].spatial_method == "CP" else "ARM"
         proc.add_body_line(
-            f"{inner_indent}    EDIT 1 ARM"
+            f"{inner_indent}    EDIT 1 {ssh_asm_keyword}"
         )
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line("")

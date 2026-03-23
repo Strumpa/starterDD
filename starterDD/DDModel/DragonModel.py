@@ -30,11 +30,10 @@ class CartesianAssemblyModel:
         self.lattice = None # this will be a data structure representing the lattice of the assembly, which can be a 2D list of pin models corresponding to the lattice description, for example.
         self.set_uniform_temperatures(fuel_temperature=900.0, gap_temperature=600.0, coolant_temperature=600.0, moderator_temperature=600.0, structural_temperature=600.0) # default uniform temperatures for the assembly, which can be updated later based on the core description or other information provided for the assembly.
 
-        # --- Mix numbering state management (Phase 2) ---
+        # --- Mix numbering state management (Phase 3 simplified) ---
         self.current_mix_numbering_strategy = None  # Current strategy in use: "by_material" or "by_pin"
-        self.mix_state_history = []  # List of snapshots: [(strategy, mix_dict, pin_indices), ...]
-        self.mix_correspondence_mapping = {}  # Tracks transitions: {(old_strategy, new_strategy): {temp_idx → tdt_idx}, ...}
-        self.temp_to_tdt_index_mapping = {}  # Temp indices → TDT indices (set during TDT enforcement)
+        self.mix_state_history = []  # List of snapshots with mix names, TDT indices, step info
+        self.mix_strategy_correspondences = {}  # Name-based: {(from_strategy, to_strategy): {from_name: [to_names]}}
 
     def parse_geometry_description(self, geometry_description_yaml):
         """
@@ -653,7 +652,7 @@ class CartesianAssemblyModel:
 
         Naming convention::
 
-            <material_composition>_zone<zone_idx>_pin<pin_idx>
+            <material_composition>_zone_<zone_idx>_pin_<pin_idx>
 
         If the lattice has diagonal symmetry (anti-diagonal or main-diagonal),
         pins at mirrored positions share the same ``pin_idx`` (and therefore
@@ -726,7 +725,7 @@ class CartesianAssemblyModel:
                         n_zones = pin.number_of_self_shielding_fuel_zones
                         for zone_number in range(1, n_zones + 1):
                             unique_material_mixture_names.append(
-                                f"{pin.fuel_material_name}_zone{zone_number}_pin{pin_idx}"
+                                f"{pin.fuel_material_name}_zone_{zone_number}_pin_{pin_idx}"
                             )
 
         # Sequential indices starting from 1
@@ -743,8 +742,8 @@ class CartesianAssemblyModel:
         # ------------------------------------------------------------------
         self.fuel_material_mixtures = []
         for unique_name in unique_material_mixture_names:
-            # Extract base material name from "<material>_zone<N>_pin<M>"
-            base_material_name = unique_name.rsplit("_zone", 1)[0]
+            # Extract base material name from "<material>_zone_<N>_pin_<M>"
+            base_material_name = unique_name.split("_")[0]
             mix_index = material_mixtures_dict[unique_name]
 
             composition = self.composition_lookup.get(base_material_name, None)
@@ -782,7 +781,7 @@ class CartesianAssemblyModel:
                     pin_mixture_indices = []
                     pin_mixture_names = []
                     for zone_number in range(1, n_zones + 1):
-                        zone_name = f"{pin.fuel_material_name}_zone{zone_number}_pin{pin_idx}"
+                        zone_name = f"{pin.fuel_material_name}_zone_{zone_number}_pin_{pin_idx}"
                         mix_index = material_mixtures_dict[zone_name]
                         mix = next(
                             m for m in self.fuel_material_mixtures
@@ -900,14 +899,14 @@ class CartesianAssemblyModel:
         """
         Capture a snapshot of the current mix numbering state.
 
-        Records the current strategy, the material_mixtures_dict mapping,
-        and pin indices (for by_pin strategies). This snapshot is stored
-        in mix_state_history for later reference.
+        Records the current strategy, mix names, TDT indices (after enforcement),
+        and pin indices (for by_pin strategies). This snapshot is stored in
+        mix_state_history for later reference and per-step tracking.
 
         Returns
         -------
         dict
-            Snapshot containing strategy, mix_dict copy, and pin indices.
+            Snapshot containing strategy, mix_names, tdt_indices, step_name, etc.
         """
         if not hasattr(self, 'fuel_material_mixture_names') or self.fuel_material_mixture_names is None:
             raise RuntimeError(
@@ -917,7 +916,10 @@ class CartesianAssemblyModel:
 
         snapshot = {
             "strategy": self.current_mix_numbering_strategy,
-            "mix_dict": dict(self.material_mixtures_dict),  # Copy of mapping
+            "mix_names": list(self.fuel_material_mixture_names),  # Direct name list
+            "tdt_indices": {},  # Populated after TDT enforcement
+            "tdt_enforced": False,  # Flag
+            "step_name": None,  # Set during TDT enforcement
             "pin_indices": {},  # (row, col) → pin_idx for by_pin
             "timestamp": len(self.mix_state_history),  # Ordinal
         }
@@ -985,62 +987,77 @@ class CartesianAssemblyModel:
 
         print(f"[apply_mix_numbering] Switched from {old_strategy} to {strategy}.")
 
-    def record_mix_correspondence_transition(self, old_strategy, new_strategy):
+    def record_mix_correspondence_transition(self, from_strategy, to_strategy):
         """
-        Record the correspondence mapping between mixes when switching strategies.
+        Record name-based correspondence mapping between mix numbering strategies.
 
-        This creates a mapping from temporary indices (assigned by the old
-        strategy before TDT enforcement) to the new strategy's indices.
-        The mapping key is a tuple (old_strategy, new_strategy).
+        Creates bidirectional mappings between mixes in different strategies based
+        on their base material name. This enables querying which mixes in one
+        strategy correspond to mixes in another strategy.
 
-        After TDT enforcement, indices are converted to TDT indices via
-        temp_to_tdt_index_mapping.
+        For example, by_material → by_pin creates:
+        - Forward: "UOX_zone_1" → ["UOX_zone1_pin1", "UOX_zone1_pin2", ...]
+        - Reverse: "UOX_zone_1_pin1" → ["UOX_zone_1"]
+
+        The correspondences are stored in `self.mix_strategy_correspondences` as:
+        {(from_strategy, to_strategy): {from_mix_name: [to_mix_name1, ...]}}
 
         Parameters
         ----------
-        old_strategy : str
+        from_strategy : str
             The previous strategy (e.g., "by_material").
-        new_strategy : str
+        to_strategy : str
             The new strategy (e.g., "by_pin").
         """
-        transition_key = (old_strategy, new_strategy)
-
-        # Map old mixture names to old indices (from mix_state_history)
         if len(self.mix_state_history) < 2:
             print(f"[record_correspondence] Not enough history to track correspondence "
-                  f"from {old_strategy} to {new_strategy}. Skipping.")
+                  f"from {from_strategy} to {to_strategy}. Skipping.")
             return
 
         old_snapshot = self.mix_state_history[-2]  # Previous state
         new_snapshot = self.mix_state_history[-1]  # Current state
 
-        # old_snapshot contains mix_dict from old strategy
-        # new_snapshot contains material_mixtures_dict from new strategy
-        old_mix_dict = old_snapshot["mix_dict"]
-        new_mix_dict = new_snapshot["mix_dict"]
+        # Get mix names from both snapshots
+        old_names = old_snapshot["mix_names"]
+        new_names = new_snapshot["mix_names"]
 
-        correspondence = {}
-        for old_name, old_temp_idx in old_mix_dict.items():
-            # Try to find a corresponding mix in the new strategy with the same base material
-            base_material = old_name.rsplit("_zone_", 1)[0] if "_zone_" in old_name else old_name.rsplit("_zone", 1)[0]
+        # Build forward correspondence: old_name → [new_names]
+        forward_correspondence = {}
+        for old_name in old_names:
+            # Parse base material from old name
+            # Handle both "_zone_" (by_material) and "_zone" (by_pin) formats
+            base_material = old_name.split("_")[0]
+            zone_number = old_name.split("_")[2]
 
-            # Search for a new mix with matching base material
-            for new_name, new_temp_idx in new_mix_dict.items():
-                new_base = new_name.rsplit("_zone", 1)[0]
-                if new_base == base_material:
-                    # Record correspondence: old temp idx → new temp idx
-                    correspondence[old_temp_idx] = new_temp_idx
-                    break  # Use first matching zone
+            # Find all new names with matching base material
+            matching_new_names = []
+            for new_name in new_names:
+                new_base = new_name.split("_")[0]
+                new_zone_number = new_name.split("_")[2]
+                if new_base == base_material and new_zone_number == zone_number:
+                    matching_new_names.append(new_name)
 
-        self.mix_correspondence_mapping[transition_key] = correspondence
+            if matching_new_names:
+                forward_correspondence[old_name] = matching_new_names
 
-        if correspondence:
-            print(f"[record_correspondence] Recorded {len(correspondence)} correspondences "
-                  f"from {old_strategy} to {new_strategy}.")
-        else:
-            print(f"[record_correspondence] No correspondences found for {old_strategy} → {new_strategy}.")
+        # Build reverse correspondence: new_name → [old_names]
+        reverse_correspondence = {}
+        for old_name, new_names_list in forward_correspondence.items():
+            for new_name in new_names_list:
+                if new_name not in reverse_correspondence:
+                    reverse_correspondence[new_name] = []
+                reverse_correspondence[new_name].append(old_name)
 
-    def enforce_material_mixture_indices_from_tdt(self, tdt_indices_dict):
+        # Store bidirectional mappings
+        self.mix_strategy_correspondences[(from_strategy, to_strategy)] = forward_correspondence
+        self.mix_strategy_correspondences[(to_strategy, from_strategy)] = reverse_correspondence
+        print(self.mix_strategy_correspondences)
+
+        print(f"[record_correspondence] Recorded {len(forward_correspondence)} forward "
+              f"and {len(reverse_correspondence)} reverse name-based correspondences "
+              f"between {from_strategy} and {to_strategy}.")
+
+    def enforce_material_mixture_indices_from_tdt(self, tdt_indices_dict, step_name=None):
         """
         Update material mixture indices in the assembly model so they match the
         indices assigned by glow/SALOME in the TDT file.
@@ -1056,6 +1073,9 @@ class CartesianAssemblyModel:
         3. Every ``MaterialMixture`` object in ``self.fuel_material_mixtures``
         4. Every ``FuelPinModel`` in the lattice (``pin.fuel_material_mixture_indices``)
 
+        Additionally, stores TDT indices in the current mix_state_history entry for
+        per-step tracking.
+
         Parameters
         ----------
         tdt_indices_dict : dict[str, int]
@@ -1064,6 +1084,9 @@ class CartesianAssemblyModel:
             names in the assembly model are applied; extra entries (e.g. COOLANT,
             CLAD, MODERATOR, GAP, CHANNEL_BOX) are stored separately in
             ``self.non_fuel_material_mixture_indices`` for later use.
+        step_name : str, optional
+            Name of the calculation step (e.g., "SSH", "FLUX_L1") for tracking
+            per-step mix state.
 
         Raises
         ------
@@ -1079,19 +1102,6 @@ class CartesianAssemblyModel:
                 "Fuel material mixtures have not been numbered yet. "
                 "Call number_fuel_material_mixtures_by_material() before enforcing TDT indices."
             )
-
-        # --- CAPTURE TEMP→TDT MAPPING BEFORE ENFORCEMENT ---
-        # Store mapping of temporary indices (pre-TDT) to final TDT indices
-        # This is needed for correspondence tracking across strategy switches
-        temp_to_tdt_map = {}
-        for name in self.fuel_material_mixture_names:
-            if name in self.material_mixtures_dict:
-                temp_idx = self.material_mixtures_dict[name]
-                if name in tdt_indices_dict:
-                    tdt_idx = tdt_indices_dict[name]
-                    temp_to_tdt_map[temp_idx] = tdt_idx
-        
-        self.temp_to_tdt_index_mapping = temp_to_tdt_map
 
         # Separate fuel vs non-fuel entries from the TDT mapping
         fuel_names_set = set(self.fuel_material_mixture_names)
@@ -1148,21 +1158,15 @@ class CartesianAssemblyModel:
         if non_fuel:
             print(f"[enforce_tdt] Also stored {len(non_fuel)} non-fuel mixture indices: {non_fuel}")
 
-        # --- RE-MAP CORRESPONDENCE AFTER TDT ENFORCEMENT ---
-        # If we have recorded transitions between strategies, update the correspondence
-        # mappings to point from temporary indices to final TDT indices
-        if self.mix_correspondence_mapping:
-            for transition_key, correspondence in self.mix_correspondence_mapping.items():
-                # For each correspondence mapping (old_temp_idx → new_temp_idx),
-                # we need to map both through temp_to_tdt_map to get final indices
-                updated_correspondence = {}
-                for old_temp, new_temp in correspondence.items():
-                    old_tdt = self.temp_to_tdt_index_mapping.get(old_temp, old_temp)
-                    new_tdt = self.temp_to_tdt_index_mapping.get(new_temp, new_temp)
-                    updated_correspondence[old_tdt] = new_tdt
-                self.mix_correspondence_mapping[transition_key] = updated_correspondence
-            print(f"[enforce_tdt] Re-mapped {len(self.mix_correspondence_mapping)} "
-                  f"strategy correspondence mappings to TDT indices.")
+        # --- STORE TDT INDICES IN CURRENT MIX STATE HISTORY ---
+        # Record TDT indices in the current mix state snapshot for per-step tracking
+        if self.mix_state_history:
+            current_state = self.mix_state_history[-1]
+            current_state["tdt_indices"] = dict(self.material_mixtures_dict)  # Copy final indices
+            current_state["tdt_enforced"] = True
+            if step_name:
+                current_state["step_name"] = step_name
+                print(f"[enforce_tdt] Stored TDT indices for step '{step_name}' in mix state history.")
 
         # --- Update per-tube control cross absorber mixtures (if any) ---
         if ctrl_cross_names_set:
@@ -1181,6 +1185,206 @@ class CartesianAssemblyModel:
                 ]
             print(f"[enforce_tdt] Updated {len(ctrl_cross_names_set)} "
                   f"control cross absorber tube indices from TDT file.")
+
+    def get_corresponding_mixes(self, mix_name, from_strategy, to_strategy):
+        """
+        Query which mixes in to_strategy correspond to mix_name in from_strategy.
+
+        Uses the name-based correspondence mapping built during strategy transitions
+        to find related mixes across different numbering strategies.
+
+        Parameters
+        ----------
+        mix_name : str
+            Mix name in from_strategy (e.g., "UOX_zone_1")
+        from_strategy : str
+            Source strategy ("by_material" or "by_pin")
+        to_strategy : str
+            Target strategy ("by_material" or "by_pin")
+
+        Returns
+        -------
+        list[str]
+            List of corresponding mix names in to_strategy. Empty list if no
+            correspondence exists.
+
+        Examples
+        --------
+        >>> assembly.get_corresponding_mixes("UOX_zone_1", "by_material", "by_pin")
+        ["UOX_zone_1_pin1", "UOX_zone_1_pin2"]
+
+        >>> assembly.get_corresponding_mixes("UOX_zone_1_pin1", "by_pin", "by_material")
+        ["UOX_zone_1"]
+        """
+        transition_key = (from_strategy, to_strategy)
+        if transition_key not in self.mix_strategy_correspondences:
+            return []
+
+        correspondence = self.mix_strategy_correspondences[transition_key]
+        return correspondence.get(mix_name, [])
+
+    def get_step_mix_state(self, step_name):
+        """
+        Retrieve the mix state snapshot for a specific calculation step.
+
+        Returns the complete state information recorded during that step's mix
+        numbering and TDT enforcement, including strategy, mix names, and TDT
+        indices.
+
+        Parameters
+        ----------
+        step_name : str
+            Step name (e.g., "SSH", "FLUX_L1", "FLUX_L2")
+
+        Returns
+        -------
+        dict or None
+            State snapshot containing:
+            - strategy: mix numbering strategy
+            - mix_names: list of mix names
+            - tdt_indices: {name: tdt_idx} if enforced, else {}
+            - tdt_enforced: boolean
+            - step_name: step identifier
+            - pin_indices: {(row, col): pin_idx} for by_pin strategies
+            Returns None if step not found.
+
+        Examples
+        --------
+        >>> ssh_state = assembly.get_step_mix_state("SSH")
+        >>> ssh_state["strategy"]
+        "by_material"
+        >>> ssh_state["mix_names"]
+        ["UOX_zone_1", "UOX_zone_2", "GD_zone_1"]
+        >>> ssh_state["tdt_indices"]["UOX_zone_1"]
+        101
+        """
+        for snapshot in self.mix_state_history:
+            if snapshot.get("step_name") == step_name:
+                return snapshot
+        return None
+
+    def get_step_mix_names_and_indices(self, step_name):
+        """
+        Get mix names and their TDT indices for a specific calculation step.
+
+        Convenience method that extracts just the names and indices from the
+        step's state snapshot.
+
+        Parameters
+        ----------
+        step_name : str
+            Step name (e.g., "FLUX_L1")
+
+        Returns
+        -------
+        tuple[list[str], dict[str, int]] or (None, None)
+            (mix_names, tdt_indices_dict) if step found, else (None, None).
+            If step exists but TDT not yet enforced, returns (mix_names, {}).
+
+        Examples
+        --------
+        >>> names, indices = assembly.get_step_mix_names_and_indices("FLUX_L1")
+        >>> names
+        ["UOX_zone1_pin1", "UOX_zone1_pin2", ...]
+        >>> indices
+        {"UOX_zone1_pin1": 201, "UOX_zone1_pin2": 202, ...}
+        """
+        state = self.get_step_mix_state(step_name)
+        if state is None:
+            return None, None
+
+        if not state.get("tdt_enforced", False):
+            print(f"[WARNING] Step '{step_name}' has no TDT-enforced indices yet.")
+            return state["mix_names"], {}
+
+        return state["mix_names"], state["tdt_indices"]
+
+    def build_mixeq_correspondence_table(self, from_step, to_step):
+        """
+        Build a correspondence table for MIXEQ.c2m procedure generation.
+
+        For depletion tracking across calculation steps with different mix
+        numbering strategies, DRAGON requires a MIXEQ module that maps mixes
+        between steps. This method builds the required correspondence table.
+
+        Parameters
+        ----------
+        from_step : str
+            Source step name (e.g., "SSH", "FLUX_L1")
+        to_step : str
+            Target step name (e.g., "FLUX_L1", "FLUX_L2")
+
+        Returns
+        -------
+        list[tuple[str, str, int, int]]
+            List of (from_mix_name, to_mix_name, from_tdt_idx, to_tdt_idx)
+            tuples representing the correspondence mapping.
+
+        Raises
+        ------
+        ValueError
+            If either step state is not found or if no correspondence exists
+            between the strategies used by the two steps.
+
+        Examples
+        --------
+        >>> table = assembly.build_mixeq_correspondence_table("SSH", "FLUX_L1")
+        >>> table[0]
+        ("UOX_zone_1", "UOX_zone1_pin1", 101, 201)
+
+        >>> # Use in MIXEQ.c2m generation:
+        >>> for from_name, to_name, from_idx, to_idx in table:
+        """
+        from_state = self.get_step_mix_state(from_step)
+        to_state = self.get_step_mix_state(to_step)
+
+        if from_state is None or to_state is None:
+            raise ValueError(
+                f"Step state not found. Available steps: "
+                f"{[s.get('step_name') for s in self.mix_state_history if s.get('step_name')]}"
+            )
+
+        from_strategy = from_state["strategy"]
+        to_strategy = to_state["strategy"]
+        from_tdt = from_state.get("tdt_indices", {})
+        to_tdt = to_state.get("tdt_indices", {})
+
+        # If strategies are the same, no correspondence needed (1-to-1 mapping by name)
+        if from_strategy == to_strategy:
+            print(f"[build_mixeq] Steps '{from_step}' and '{to_step}' use the same strategy "
+                  f"({from_strategy}). Building 1-to-1 correspondence by name.")
+            table = []
+            for from_name in from_state["mix_names"]:
+                if from_name in from_tdt and from_name in to_tdt:
+                    table.append((from_name, from_name, from_tdt[from_name], to_tdt[from_name]))
+            return table
+
+        # Different strategies - use recorded correspondence
+        transition_key = (from_strategy, to_strategy)
+        if transition_key not in self.mix_strategy_correspondences:
+            raise ValueError(
+                f"No correspondence recorded for {from_strategy} → {to_strategy}. "
+                f"Available transitions: {list(self.mix_strategy_correspondences.keys())}"
+            )
+
+        correspondence = self.mix_strategy_correspondences[transition_key]
+
+        # Build table: (from_name, to_name, from_idx, to_idx)
+        table = []
+        for from_name, to_names in correspondence.items():
+            from_idx = from_tdt.get(from_name)
+            if from_idx is None:
+                continue
+            for to_name in to_names:
+                to_idx = to_tdt.get(to_name)
+                if to_idx is not None:
+                    table.append((from_name, to_name, from_idx, to_idx))
+
+        if not table:
+            print(f"[WARNING] No valid correspondences found between '{from_step}' and '{to_step}' "
+                  f"(both steps may lack TDT enforcement).")
+
+        return table
 
     def get_postprocessing_lattice_info(self):
         """
@@ -1513,6 +1717,7 @@ class FuelPinModel:
         self.height = height
         self.isGd = isGd
         self.self_shielding_option = self_shielding_option
+        self.isGeneratingCell = False # By default pins are not generating cells, this attribute is updated after creation if the pin is identified as a generating cell.
 
         if self_shielding_option is None:
             # Default: single fuel region (1-zone) – awaiting DragonCalculationScheme

@@ -375,6 +375,9 @@ class DragonRunner:
         """
         # 1. Copy CLE2000 procedures into staging dir
         for key, path in self._procedure_files.items():
+            # Safety check: skip any entries that are lists (MIXEQ compatibility)
+            if isinstance(path, list):
+                continue
             src = os.path.abspath(path)
             if os.path.isfile(src):
                 dst = os.path.join(
@@ -707,25 +710,29 @@ class DragonRunner:
         if not hasattr(self.case, "scheme") or self.case.scheme is None:
             procs = self.case.generate_cle2000_procedures()
         else:
-            # Procedures already generated; retrieve paths
-            procs = {
-                "x2m": os.path.join(
-                    self.case.output_path,
-                    f"{self.case.case_name}.x2m",
-                ),
-                "mix": os.path.join(
-                    self.case.output_path,
-                    f"MIX.c2m",
-                ),
-                "trk": os.path.join(
-                    self.case.output_path,
-                    f"TRK.c2m",
-                ),
-                "edir": os.path.join(
-                    self.case.output_path,
-                    f"EDIR.c2m",
-                ),
-            }
+            # Procedures already generated; check if we have the full dict stored
+            if hasattr(self.case, '_procedure_files') and self.case._procedure_files:
+                procs = self.case._procedure_files
+            else:
+                # Fallback: manually construct dict (without MIXEQ procedures)
+                procs = {
+                    "x2m": os.path.join(
+                        self.case.output_path,
+                        f"{self.case.case_name}.x2m",
+                    ),
+                    "mix": os.path.join(
+                        self.case.output_path,
+                        f"MIX.c2m",
+                    ),
+                    "trk": os.path.join(
+                        self.case.output_path,
+                        f"TRK.c2m",
+                    ),
+                    "edir": os.path.join(
+                        self.case.output_path,
+                        f"EDIR.c2m",
+                    ),
+                }
 
         self._procedure_files = procs
         self._scheme = self.case.scheme

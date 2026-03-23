@@ -14,343 +14,343 @@ set ures 1
 %  MATERIAL DEFINITIONS
 % ============================================================
 
-mat UOX28_zone1_pin1 sum tmp 900.0 burn 1
+mat UOX28_zone_1_pin_1 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX28_zone2_pin1 sum tmp 900.0 burn 1
+mat UOX28_zone_2_pin_1 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX28_zone3_pin1 sum tmp 900.0 burn 1
+mat UOX28_zone_3_pin_1 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX28_zone4_pin1 sum tmp 900.0 burn 1
+mat UOX28_zone_4_pin_1 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX40_zone1_pin2 sum tmp 900.0 burn 1
+mat UOX40_zone_1_pin_2 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone2_pin2 sum tmp 900.0 burn 1
+mat UOX40_zone_2_pin_2 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone3_pin2 sum tmp 900.0 burn 1
+mat UOX40_zone_3_pin_2 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone4_pin2 sum tmp 900.0 burn 1
+mat UOX40_zone_4_pin_2 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX49_zone1_pin3 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_3 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin3 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_3 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin3 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_3 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin3 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_3 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone1_pin4 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_4 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin4 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_4 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin4 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_4 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin4 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_4 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone1_pin5 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_5 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin5 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_5 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin5 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_5 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin5 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_5 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone1_pin6 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_6 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin6 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_6 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin6 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_6 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin6 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_6 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone1_pin7 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_7 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin7 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_7 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin7 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_7 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin7 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_7 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone1_pin8 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_8 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin8 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_8 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin8 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_8 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin8 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_8 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone1_pin9 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_9 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin9 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_9 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin9 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_9 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin9 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_9 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX32_zone1_pin10 sum tmp 900.0 burn 1
+mat UOX32_zone_1_pin_10 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX32_zone2_pin10 sum tmp 900.0 burn 1
+mat UOX32_zone_2_pin_10 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX32_zone3_pin10 sum tmp 900.0 burn 1
+mat UOX32_zone_3_pin_10 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX32_zone4_pin10 sum tmp 900.0 burn 1
+mat UOX32_zone_4_pin_10 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX40_zone1_pin11 sum tmp 900.0 burn 1
+mat UOX40_zone_1_pin_11 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone2_pin11 sum tmp 900.0 burn 1
+mat UOX40_zone_2_pin_11 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone3_pin11 sum tmp 900.0 burn 1
+mat UOX40_zone_3_pin_11 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone4_pin11 sum tmp 900.0 burn 1
+mat UOX40_zone_4_pin_11 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone1_pin12 sum tmp 900.0 burn 1
+mat UOX40_zone_1_pin_12 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone2_pin12 sum tmp 900.0 burn 1
+mat UOX40_zone_2_pin_12 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone3_pin12 sum tmp 900.0 burn 1
+mat UOX40_zone_3_pin_12 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone4_pin12 sum tmp 900.0 burn 1
+mat UOX40_zone_4_pin_12 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX44Gd6_zone1_pin13 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_1_pin_13 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -364,7 +364,7 @@ mat UOX44Gd6_zone1_pin13 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone2_pin13 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_2_pin_13 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -378,7 +378,7 @@ mat UOX44Gd6_zone2_pin13 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone3_pin13 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_3_pin_13 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -392,7 +392,7 @@ mat UOX44Gd6_zone3_pin13 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone4_pin13 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_4_pin_13 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -406,7 +406,7 @@ mat UOX44Gd6_zone4_pin13 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone5_pin13 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_5_pin_13 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -420,7 +420,7 @@ mat UOX44Gd6_zone5_pin13 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone6_pin13 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_6_pin_13 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -434,63 +434,63 @@ mat UOX44Gd6_zone6_pin13 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX49_zone1_pin14 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_14 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin14 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_14 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin14 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_14 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin14 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_14 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone1_pin15 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_15 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin15 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_15 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin15 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_15 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin15 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_15 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49Gd8_zone1_pin16 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_1_pin_16 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -504,7 +504,7 @@ mat UOX49Gd8_zone1_pin16 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone2_pin16 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_2_pin_16 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -518,7 +518,7 @@ mat UOX49Gd8_zone2_pin16 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone3_pin16 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_3_pin_16 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -532,7 +532,7 @@ mat UOX49Gd8_zone3_pin16 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone4_pin16 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_4_pin_16 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -546,7 +546,7 @@ mat UOX49Gd8_zone4_pin16 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone5_pin16 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_5_pin_16 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -560,7 +560,7 @@ mat UOX49Gd8_zone5_pin16 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone6_pin16 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_6_pin_16 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -574,35 +574,35 @@ mat UOX49Gd8_zone6_pin16 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49_zone1_pin17 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_17 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin17 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_17 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin17 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_17 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin17 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_17 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49Gd8_zone1_pin18 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_1_pin_18 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -616,7 +616,7 @@ mat UOX49Gd8_zone1_pin18 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone2_pin18 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_2_pin_18 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -630,7 +630,7 @@ mat UOX49Gd8_zone2_pin18 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone3_pin18 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_3_pin_18 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -644,7 +644,7 @@ mat UOX49Gd8_zone3_pin18 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone4_pin18 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_4_pin_18 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -658,7 +658,7 @@ mat UOX49Gd8_zone4_pin18 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone5_pin18 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_5_pin_18 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -672,7 +672,7 @@ mat UOX49Gd8_zone5_pin18 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone6_pin18 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_6_pin_18 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -686,63 +686,63 @@ mat UOX49Gd8_zone6_pin18 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49_zone1_pin19 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_19 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin19 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_19 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin19 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_19 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin19 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_19 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX40_zone1_pin20 sum tmp 900.0 burn 1
+mat UOX40_zone_1_pin_20 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone2_pin20 sum tmp 900.0 burn 1
+mat UOX40_zone_2_pin_20 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone3_pin20 sum tmp 900.0 burn 1
+mat UOX40_zone_3_pin_20 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone4_pin20 sum tmp 900.0 burn 1
+mat UOX40_zone_4_pin_20 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX44Gd6_zone1_pin21 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_1_pin_21 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -756,7 +756,7 @@ mat UOX44Gd6_zone1_pin21 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone2_pin21 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_2_pin_21 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -770,7 +770,7 @@ mat UOX44Gd6_zone2_pin21 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone3_pin21 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_3_pin_21 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -784,7 +784,7 @@ mat UOX44Gd6_zone3_pin21 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone4_pin21 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_4_pin_21 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -798,7 +798,7 @@ mat UOX44Gd6_zone4_pin21 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone5_pin21 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_5_pin_21 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -812,7 +812,7 @@ mat UOX44Gd6_zone5_pin21 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone6_pin21 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_6_pin_21 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -826,119 +826,119 @@ mat UOX44Gd6_zone6_pin21 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44_zone1_pin22 sum tmp 900.0 burn 1
+mat UOX44_zone_1_pin_22 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX44_zone2_pin22 sum tmp 900.0 burn 1
+mat UOX44_zone_2_pin_22 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX44_zone3_pin22 sum tmp 900.0 burn 1
+mat UOX44_zone_3_pin_22 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX44_zone4_pin22 sum tmp 900.0 burn 1
+mat UOX44_zone_4_pin_22 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX49_zone1_pin23 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_23 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin23 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_23 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin23 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_23 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin23 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_23 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone1_pin24 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_24 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin24 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_24 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin24 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_24 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin24 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_24 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone1_pin25 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_25 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin25 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_25 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin25 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_25 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin25 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_25 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49Gd8_zone1_pin26 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_1_pin_26 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -952,7 +952,7 @@ mat UOX49Gd8_zone1_pin26 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone2_pin26 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_2_pin_26 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -966,7 +966,7 @@ mat UOX49Gd8_zone2_pin26 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone3_pin26 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_3_pin_26 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -980,7 +980,7 @@ mat UOX49Gd8_zone3_pin26 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone4_pin26 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_4_pin_26 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -994,7 +994,7 @@ mat UOX49Gd8_zone4_pin26 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone5_pin26 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_5_pin_26 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -1008,7 +1008,7 @@ mat UOX49Gd8_zone5_pin26 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone6_pin26 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_6_pin_26 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -1022,91 +1022,91 @@ mat UOX49Gd8_zone6_pin26 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49_zone1_pin27 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_27 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin27 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_27 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin27 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_27 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin27 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_27 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX40_zone1_pin28 sum tmp 900.0 burn 1
+mat UOX40_zone_1_pin_28 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone2_pin28 sum tmp 900.0 burn 1
+mat UOX40_zone_2_pin_28 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone3_pin28 sum tmp 900.0 burn 1
+mat UOX40_zone_3_pin_28 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone4_pin28 sum tmp 900.0 burn 1
+mat UOX40_zone_4_pin_28 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone1_pin29 sum tmp 900.0 burn 1
+mat UOX40_zone_1_pin_29 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone2_pin29 sum tmp 900.0 burn 1
+mat UOX40_zone_2_pin_29 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone3_pin29 sum tmp 900.0 burn 1
+mat UOX40_zone_3_pin_29 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone4_pin29 sum tmp 900.0 burn 1
+mat UOX40_zone_4_pin_29 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX44Gd6_zone1_pin30 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_1_pin_30 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -1120,7 +1120,7 @@ mat UOX44Gd6_zone1_pin30 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone2_pin30 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_2_pin_30 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -1134,7 +1134,7 @@ mat UOX44Gd6_zone2_pin30 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone3_pin30 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_3_pin_30 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -1148,7 +1148,7 @@ mat UOX44Gd6_zone3_pin30 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone4_pin30 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_4_pin_30 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -1162,7 +1162,7 @@ mat UOX44Gd6_zone4_pin30 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone5_pin30 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_5_pin_30 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -1176,7 +1176,7 @@ mat UOX44Gd6_zone5_pin30 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX44Gd6_zone6_pin30 sum tmp 900.0 burn 1
+mat UOX44Gd6_zone_6_pin_30 sum tmp 900.0 burn 1
     92235.09c 9.518316E-04
     92234.09c 8.507606E-06
     92236.09c 4.359845E-06
@@ -1190,91 +1190,91 @@ mat UOX44Gd6_zone6_pin30 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579020E-02
 
-mat UOX49_zone1_pin31 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_31 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin31 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_31 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin31 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_31 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin31 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_31 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone1_pin32 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_32 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin32 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_32 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin32 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_32 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin32 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_32 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX40_zone1_pin33 sum tmp 900.0 burn 1
+mat UOX40_zone_1_pin_33 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone2_pin33 sum tmp 900.0 burn 1
+mat UOX40_zone_2_pin_33 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone3_pin33 sum tmp 900.0 burn 1
+mat UOX40_zone_3_pin_33 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone4_pin33 sum tmp 900.0 burn 1
+mat UOX40_zone_4_pin_33 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40Gd8_zone1_pin34 sum tmp 900.0 burn 1
+mat UOX40Gd8_zone_1_pin_34 sum tmp 900.0 burn 1
     92235.09c 8.363105E-04
     92234.09c 7.475061E-06
     92236.09c 3.830703E-06
@@ -1288,7 +1288,7 @@ mat UOX40Gd8_zone1_pin34 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589437E-02
 
-mat UOX40Gd8_zone2_pin34 sum tmp 900.0 burn 1
+mat UOX40Gd8_zone_2_pin_34 sum tmp 900.0 burn 1
     92235.09c 8.363105E-04
     92234.09c 7.475061E-06
     92236.09c 3.830703E-06
@@ -1302,7 +1302,7 @@ mat UOX40Gd8_zone2_pin34 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589437E-02
 
-mat UOX40Gd8_zone3_pin34 sum tmp 900.0 burn 1
+mat UOX40Gd8_zone_3_pin_34 sum tmp 900.0 burn 1
     92235.09c 8.363105E-04
     92234.09c 7.475061E-06
     92236.09c 3.830703E-06
@@ -1316,7 +1316,7 @@ mat UOX40Gd8_zone3_pin34 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589437E-02
 
-mat UOX40Gd8_zone4_pin34 sum tmp 900.0 burn 1
+mat UOX40Gd8_zone_4_pin_34 sum tmp 900.0 burn 1
     92235.09c 8.363105E-04
     92234.09c 7.475061E-06
     92236.09c 3.830703E-06
@@ -1330,7 +1330,7 @@ mat UOX40Gd8_zone4_pin34 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589437E-02
 
-mat UOX40Gd8_zone5_pin34 sum tmp 900.0 burn 1
+mat UOX40Gd8_zone_5_pin_34 sum tmp 900.0 burn 1
     92235.09c 8.363105E-04
     92234.09c 7.475061E-06
     92236.09c 3.830703E-06
@@ -1344,7 +1344,7 @@ mat UOX40Gd8_zone5_pin34 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589437E-02
 
-mat UOX40Gd8_zone6_pin34 sum tmp 900.0 burn 1
+mat UOX40Gd8_zone_6_pin_34 sum tmp 900.0 burn 1
     92235.09c 8.363105E-04
     92234.09c 7.475061E-06
     92236.09c 3.830703E-06
@@ -1358,119 +1358,119 @@ mat UOX40Gd8_zone6_pin34 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589437E-02
 
-mat UOX44_zone1_pin35 sum tmp 900.0 burn 1
+mat UOX44_zone_1_pin_35 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX44_zone2_pin35 sum tmp 900.0 burn 1
+mat UOX44_zone_2_pin_35 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX44_zone3_pin35 sum tmp 900.0 burn 1
+mat UOX44_zone_3_pin_35 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX44_zone4_pin35 sum tmp 900.0 burn 1
+mat UOX44_zone_4_pin_35 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX49_zone1_pin36 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_36 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin36 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_36 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin36 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_36 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin36 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_36 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX40_zone1_pin37 sum tmp 900.0 burn 1
+mat UOX40_zone_1_pin_37 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone2_pin37 sum tmp 900.0 burn 1
+mat UOX40_zone_2_pin_37 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone3_pin37 sum tmp 900.0 burn 1
+mat UOX40_zone_3_pin_37 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone4_pin37 sum tmp 900.0 burn 1
+mat UOX40_zone_4_pin_37 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX36_zone1_pin38 sum tmp 900.0 burn 1
+mat UOX36_zone_1_pin_38 sum tmp 900.0 burn 1
     92235.09c 8.455642E-04
     92234.09c 7.557773E-06
     92236.09c 3.873089E-06
     92238.09c 2.234506E-02
     8016.09c 4.640410E-02
 
-mat UOX36_zone2_pin38 sum tmp 900.0 burn 1
+mat UOX36_zone_2_pin_38 sum tmp 900.0 burn 1
     92235.09c 8.455642E-04
     92234.09c 7.557773E-06
     92236.09c 3.873089E-06
     92238.09c 2.234506E-02
     8016.09c 4.640410E-02
 
-mat UOX36_zone3_pin38 sum tmp 900.0 burn 1
+mat UOX36_zone_3_pin_38 sum tmp 900.0 burn 1
     92235.09c 8.455642E-04
     92234.09c 7.557773E-06
     92236.09c 3.873089E-06
     92238.09c 2.234506E-02
     8016.09c 4.640410E-02
 
-mat UOX36_zone4_pin38 sum tmp 900.0 burn 1
+mat UOX36_zone_4_pin_38 sum tmp 900.0 burn 1
     92235.09c 8.455642E-04
     92234.09c 7.557773E-06
     92236.09c 3.873089E-06
     92238.09c 2.234506E-02
     8016.09c 4.640410E-02
 
-mat UOX49Gd6_zone1_pin39 sum tmp 900.0 burn 1
+mat UOX49Gd6_zone_1_pin_39 sum tmp 900.0 burn 1
     92235.09c 1.059986E-03
     92234.09c 9.474307E-06
     92236.09c 4.855245E-06
@@ -1484,7 +1484,7 @@ mat UOX49Gd6_zone1_pin39 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579265E-02
 
-mat UOX49Gd6_zone2_pin39 sum tmp 900.0 burn 1
+mat UOX49Gd6_zone_2_pin_39 sum tmp 900.0 burn 1
     92235.09c 1.059986E-03
     92234.09c 9.474307E-06
     92236.09c 4.855245E-06
@@ -1498,7 +1498,7 @@ mat UOX49Gd6_zone2_pin39 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579265E-02
 
-mat UOX49Gd6_zone3_pin39 sum tmp 900.0 burn 1
+mat UOX49Gd6_zone_3_pin_39 sum tmp 900.0 burn 1
     92235.09c 1.059986E-03
     92234.09c 9.474307E-06
     92236.09c 4.855245E-06
@@ -1512,7 +1512,7 @@ mat UOX49Gd6_zone3_pin39 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579265E-02
 
-mat UOX49Gd6_zone4_pin39 sum tmp 900.0 burn 1
+mat UOX49Gd6_zone_4_pin_39 sum tmp 900.0 burn 1
     92235.09c 1.059986E-03
     92234.09c 9.474307E-06
     92236.09c 4.855245E-06
@@ -1526,7 +1526,7 @@ mat UOX49Gd6_zone4_pin39 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579265E-02
 
-mat UOX49Gd6_zone5_pin39 sum tmp 900.0 burn 1
+mat UOX49Gd6_zone_5_pin_39 sum tmp 900.0 burn 1
     92235.09c 1.059986E-03
     92234.09c 9.474307E-06
     92236.09c 4.855245E-06
@@ -1540,7 +1540,7 @@ mat UOX49Gd6_zone5_pin39 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579265E-02
 
-mat UOX49Gd6_zone6_pin39 sum tmp 900.0 burn 1
+mat UOX49Gd6_zone_6_pin_39 sum tmp 900.0 burn 1
     92235.09c 1.059986E-03
     92234.09c 9.474307E-06
     92236.09c 4.855245E-06
@@ -1554,147 +1554,147 @@ mat UOX49Gd6_zone6_pin39 sum tmp 900.0 burn 1
     64160.09c 4.440811E-04
     8016.09c 4.579265E-02
 
-mat UOX40_zone1_pin40 sum tmp 900.0 burn 1
+mat UOX40_zone_1_pin_40 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone2_pin40 sum tmp 900.0 burn 1
+mat UOX40_zone_2_pin_40 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone3_pin40 sum tmp 900.0 burn 1
+mat UOX40_zone_3_pin_40 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone4_pin40 sum tmp 900.0 burn 1
+mat UOX40_zone_4_pin_40 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX49_zone1_pin41 sum tmp 900.0 burn 1
+mat UOX49_zone_1_pin_41 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone2_pin41 sum tmp 900.0 burn 1
+mat UOX49_zone_2_pin_41 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone3_pin41 sum tmp 900.0 burn 1
+mat UOX49_zone_3_pin_41 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX49_zone4_pin41 sum tmp 900.0 burn 1
+mat UOX49_zone_4_pin_41 sum tmp 900.0 burn 1
     92235.09c 1.150884E-03
     92234.09c 1.028676E-05
     92236.09c 5.271599E-06
     92238.09c 2.203906E-02
     8016.09c 4.641101E-02
 
-mat UOX40_zone1_pin42 sum tmp 900.0 burn 1
+mat UOX40_zone_1_pin_42 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone2_pin42 sum tmp 900.0 burn 1
+mat UOX40_zone_2_pin_42 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone3_pin42 sum tmp 900.0 burn 1
+mat UOX40_zone_3_pin_42 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone4_pin42 sum tmp 900.0 burn 1
+mat UOX40_zone_4_pin_42 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone1_pin43 sum tmp 900.0 burn 1
+mat UOX40_zone_1_pin_43 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone2_pin43 sum tmp 900.0 burn 1
+mat UOX40_zone_2_pin_43 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone3_pin43 sum tmp 900.0 burn 1
+mat UOX40_zone_3_pin_43 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX40_zone4_pin43 sum tmp 900.0 burn 1
+mat UOX40_zone_4_pin_43 sum tmp 900.0 burn 1
     92235.09c 9.277669E-04
     92234.09c 8.292512E-06
     92236.09c 4.249617E-06
     92238.09c 2.226267E-02
     8016.09c 4.640596E-02
 
-mat UOX44_zone1_pin44 sum tmp 900.0 burn 1
+mat UOX44_zone_1_pin_44 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX44_zone2_pin44 sum tmp 900.0 burn 1
+mat UOX44_zone_2_pin_44 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX44_zone3_pin44 sum tmp 900.0 burn 1
+mat UOX44_zone_3_pin_44 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX44_zone4_pin44 sum tmp 900.0 burn 1
+mat UOX44_zone_4_pin_44 sum tmp 900.0 burn 1
     92235.09c 1.033455E-03
     92234.09c 9.237164E-06
     92236.09c 4.733718E-06
     92238.09c 2.215675E-02
     8016.09c 4.640835E-02
 
-mat UOX49Gd8_zone1_pin45 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_1_pin_45 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -1708,7 +1708,7 @@ mat UOX49Gd8_zone1_pin45 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone2_pin45 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_2_pin_45 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -1722,7 +1722,7 @@ mat UOX49Gd8_zone2_pin45 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone3_pin45 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_3_pin_45 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -1736,7 +1736,7 @@ mat UOX49Gd8_zone3_pin45 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone4_pin45 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_4_pin_45 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -1750,7 +1750,7 @@ mat UOX49Gd8_zone4_pin45 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone5_pin45 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_5_pin_45 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -1764,7 +1764,7 @@ mat UOX49Gd8_zone5_pin45 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX49Gd8_zone6_pin45 sum tmp 900.0 burn 1
+mat UOX49Gd8_zone_6_pin_45 sum tmp 900.0 burn 1
     92235.09c 1.037433E-03
     92234.09c 9.272726E-06
     92236.09c 4.751941E-06
@@ -1778,63 +1778,63 @@ mat UOX49Gd8_zone6_pin45 sum tmp 900.0 burn 1
     64160.09c 5.921081E-04
     8016.09c 4.589891E-02
 
-mat UOX32_zone1_pin46 sum tmp 900.0 burn 1
+mat UOX32_zone_1_pin_46 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX32_zone2_pin46 sum tmp 900.0 burn 1
+mat UOX32_zone_2_pin_46 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX32_zone3_pin46 sum tmp 900.0 burn 1
+mat UOX32_zone_3_pin_46 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX32_zone4_pin46 sum tmp 900.0 burn 1
+mat UOX32_zone_4_pin_46 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX32_zone1_pin47 sum tmp 900.0 burn 1
+mat UOX32_zone_1_pin_47 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX32_zone2_pin47 sum tmp 900.0 burn 1
+mat UOX32_zone_2_pin_47 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX32_zone3_pin47 sum tmp 900.0 burn 1
+mat UOX32_zone_3_pin_47 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX32_zone4_pin47 sum tmp 900.0 burn 1
+mat UOX32_zone_4_pin_47 sum tmp 900.0 burn 1
     92235.09c 7.516173E-04
     92234.09c 6.718062E-06
     92236.09c 3.442767E-06
     92238.09c 2.243921E-02
     8016.09c 4.640198E-02
 
-mat UOX44Gd3_zone1_pin48 sum tmp 900.0 burn 1
+mat UOX44Gd3_zone_1_pin_48 sum tmp 900.0 burn 1
     92235.09c 9.822092E-04
     92234.09c 8.779125E-06
     92236.09c 4.498989E-06
@@ -1848,7 +1848,7 @@ mat UOX44Gd3_zone1_pin48 sum tmp 900.0 burn 1
     64160.09c 2.220406E-04
     8016.09c 4.563073E-02
 
-mat UOX44Gd3_zone2_pin48 sum tmp 900.0 burn 1
+mat UOX44Gd3_zone_2_pin_48 sum tmp 900.0 burn 1
     92235.09c 9.822092E-04
     92234.09c 8.779125E-06
     92236.09c 4.498989E-06
@@ -1862,7 +1862,7 @@ mat UOX44Gd3_zone2_pin48 sum tmp 900.0 burn 1
     64160.09c 2.220406E-04
     8016.09c 4.563073E-02
 
-mat UOX44Gd3_zone3_pin48 sum tmp 900.0 burn 1
+mat UOX44Gd3_zone_3_pin_48 sum tmp 900.0 burn 1
     92235.09c 9.822092E-04
     92234.09c 8.779125E-06
     92236.09c 4.498989E-06
@@ -1876,7 +1876,7 @@ mat UOX44Gd3_zone3_pin48 sum tmp 900.0 burn 1
     64160.09c 2.220406E-04
     8016.09c 4.563073E-02
 
-mat UOX44Gd3_zone4_pin48 sum tmp 900.0 burn 1
+mat UOX44Gd3_zone_4_pin_48 sum tmp 900.0 burn 1
     92235.09c 9.822092E-04
     92234.09c 8.779125E-06
     92236.09c 4.498989E-06
@@ -1890,7 +1890,7 @@ mat UOX44Gd3_zone4_pin48 sum tmp 900.0 burn 1
     64160.09c 2.220406E-04
     8016.09c 4.563073E-02
 
-mat UOX44Gd3_zone5_pin48 sum tmp 900.0 burn 1
+mat UOX44Gd3_zone_5_pin_48 sum tmp 900.0 burn 1
     92235.09c 9.822092E-04
     92234.09c 8.779125E-06
     92236.09c 4.498989E-06
@@ -1904,7 +1904,7 @@ mat UOX44Gd3_zone5_pin48 sum tmp 900.0 burn 1
     64160.09c 2.220406E-04
     8016.09c 4.563073E-02
 
-mat UOX44Gd3_zone6_pin48 sum tmp 900.0 burn 1
+mat UOX44Gd3_zone_6_pin_48 sum tmp 900.0 burn 1
     92235.09c 9.822092E-04
     92234.09c 8.779125E-06
     92236.09c 4.498989E-06
@@ -1918,84 +1918,84 @@ mat UOX44Gd3_zone6_pin48 sum tmp 900.0 burn 1
     64160.09c 2.220406E-04
     8016.09c 4.563073E-02
 
-mat UOX28_zone1_pin49 sum tmp 900.0 burn 1
+mat UOX28_zone_1_pin_49 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX28_zone2_pin49 sum tmp 900.0 burn 1
+mat UOX28_zone_2_pin_49 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX28_zone3_pin49 sum tmp 900.0 burn 1
+mat UOX28_zone_3_pin_49 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX28_zone4_pin49 sum tmp 900.0 burn 1
+mat UOX28_zone_4_pin_49 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX28_zone1_pin50 sum tmp 900.0 burn 1
+mat UOX28_zone_1_pin_50 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX28_zone2_pin50 sum tmp 900.0 burn 1
+mat UOX28_zone_2_pin_50 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX28_zone3_pin50 sum tmp 900.0 burn 1
+mat UOX28_zone_3_pin_50 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX28_zone4_pin50 sum tmp 900.0 burn 1
+mat UOX28_zone_4_pin_50 sum tmp 900.0 burn 1
     92235.09c 6.576692E-04
     92234.09c 5.878340E-06
     92236.09c 3.012440E-06
     92238.09c 2.253337E-02
     8016.09c 4.639986E-02
 
-mat UOX16_zone1_pin51 sum tmp 900.0 burn 1
+mat UOX16_zone_1_pin_51 sum tmp 900.0 burn 1
     92235.09c 3.758179E-04
     92234.09c 3.359114E-06
     92236.09c 1.721426E-06
     92238.09c 2.281585E-02
     8016.09c 4.639349E-02
 
-mat UOX16_zone2_pin51 sum tmp 900.0 burn 1
+mat UOX16_zone_2_pin_51 sum tmp 900.0 burn 1
     92235.09c 3.758179E-04
     92234.09c 3.359114E-06
     92236.09c 1.721426E-06
     92238.09c 2.281585E-02
     8016.09c 4.639349E-02
 
-mat UOX16_zone3_pin51 sum tmp 900.0 burn 1
+mat UOX16_zone_3_pin_51 sum tmp 900.0 burn 1
     92235.09c 3.758179E-04
     92234.09c 3.359114E-06
     92236.09c 1.721426E-06
     92238.09c 2.281585E-02
     8016.09c 4.639349E-02
 
-mat UOX16_zone4_pin51 sum tmp 900.0 burn 1
+mat UOX16_zone_4_pin_51 sum tmp 900.0 burn 1
     92235.09c 3.758179E-04
     92234.09c 3.359114E-06
     92236.09c 1.721426E-06
@@ -2113,480 +2113,480 @@ therm lwtr  lwtr.05t
 % ============================================================
 
 pin UOX28_1
-    UOX28_zone1_pin1  0.309713
-    UOX28_zone2_pin1  0.391759
-    UOX28_zone3_pin1  0.426910
-    UOX28_zone4_pin1  0.438000
+    UOX28_zone_1_pin_1  0.309713
+    UOX28_zone_2_pin_1  0.391759
+    UOX28_zone_3_pin_1  0.426910
+    UOX28_zone_4_pin_1  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40_2
-    UOX40_zone1_pin2  0.309713
-    UOX40_zone2_pin2  0.391759
-    UOX40_zone3_pin2  0.426910
-    UOX40_zone4_pin2  0.438000
+    UOX40_zone_1_pin_2  0.309713
+    UOX40_zone_2_pin_2  0.391759
+    UOX40_zone_3_pin_2  0.426910
+    UOX40_zone_4_pin_2  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_3
-    UOX49_zone1_pin3  0.309713
-    UOX49_zone2_pin3  0.391759
-    UOX49_zone3_pin3  0.426910
-    UOX49_zone4_pin3  0.438000
+    UOX49_zone_1_pin_3  0.309713
+    UOX49_zone_2_pin_3  0.391759
+    UOX49_zone_3_pin_3  0.426910
+    UOX49_zone_4_pin_3  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_4
-    UOX49_zone1_pin4  0.309713
-    UOX49_zone2_pin4  0.391759
-    UOX49_zone3_pin4  0.426910
-    UOX49_zone4_pin4  0.438000
+    UOX49_zone_1_pin_4  0.309713
+    UOX49_zone_2_pin_4  0.391759
+    UOX49_zone_3_pin_4  0.426910
+    UOX49_zone_4_pin_4  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_5
-    UOX49_zone1_pin5  0.309713
-    UOX49_zone2_pin5  0.391759
-    UOX49_zone3_pin5  0.426910
-    UOX49_zone4_pin5  0.438000
+    UOX49_zone_1_pin_5  0.309713
+    UOX49_zone_2_pin_5  0.391759
+    UOX49_zone_3_pin_5  0.426910
+    UOX49_zone_4_pin_5  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_6
-    UOX49_zone1_pin6  0.309713
-    UOX49_zone2_pin6  0.391759
-    UOX49_zone3_pin6  0.426910
-    UOX49_zone4_pin6  0.438000
+    UOX49_zone_1_pin_6  0.309713
+    UOX49_zone_2_pin_6  0.391759
+    UOX49_zone_3_pin_6  0.426910
+    UOX49_zone_4_pin_6  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_7
-    UOX49_zone1_pin7  0.309713
-    UOX49_zone2_pin7  0.391759
-    UOX49_zone3_pin7  0.426910
-    UOX49_zone4_pin7  0.438000
+    UOX49_zone_1_pin_7  0.309713
+    UOX49_zone_2_pin_7  0.391759
+    UOX49_zone_3_pin_7  0.426910
+    UOX49_zone_4_pin_7  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_8
-    UOX49_zone1_pin8  0.309713
-    UOX49_zone2_pin8  0.391759
-    UOX49_zone3_pin8  0.426910
-    UOX49_zone4_pin8  0.438000
+    UOX49_zone_1_pin_8  0.309713
+    UOX49_zone_2_pin_8  0.391759
+    UOX49_zone_3_pin_8  0.426910
+    UOX49_zone_4_pin_8  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_9
-    UOX49_zone1_pin9  0.309713
-    UOX49_zone2_pin9  0.391759
-    UOX49_zone3_pin9  0.426910
-    UOX49_zone4_pin9  0.438000
+    UOX49_zone_1_pin_9  0.309713
+    UOX49_zone_2_pin_9  0.391759
+    UOX49_zone_3_pin_9  0.426910
+    UOX49_zone_4_pin_9  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX32_10
-    UOX32_zone1_pin10  0.309713
-    UOX32_zone2_pin10  0.391759
-    UOX32_zone3_pin10  0.426910
-    UOX32_zone4_pin10  0.438000
+    UOX32_zone_1_pin_10  0.309713
+    UOX32_zone_2_pin_10  0.391759
+    UOX32_zone_3_pin_10  0.426910
+    UOX32_zone_4_pin_10  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40_11
-    UOX40_zone1_pin11  0.309713
-    UOX40_zone2_pin11  0.391759
-    UOX40_zone3_pin11  0.426910
-    UOX40_zone4_pin11  0.438000
+    UOX40_zone_1_pin_11  0.309713
+    UOX40_zone_2_pin_11  0.391759
+    UOX40_zone_3_pin_11  0.426910
+    UOX40_zone_4_pin_11  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40_12
-    UOX40_zone1_pin12  0.309713
-    UOX40_zone2_pin12  0.391759
-    UOX40_zone3_pin12  0.426910
-    UOX40_zone4_pin12  0.438000
+    UOX40_zone_1_pin_12  0.309713
+    UOX40_zone_2_pin_12  0.391759
+    UOX40_zone_3_pin_12  0.426910
+    UOX40_zone_4_pin_12  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX44Gd6_13
-    UOX44Gd6_zone1_pin13  0.195880
-    UOX44Gd6_zone2_pin13  0.277016
-    UOX44Gd6_zone3_pin13  0.339273
-    UOX44Gd6_zone4_pin13  0.391759
-    UOX44Gd6_zone5_pin13  0.426910
-    UOX44Gd6_zone6_pin13  0.438000
+    UOX44Gd6_zone_1_pin_13  0.195880
+    UOX44Gd6_zone_2_pin_13  0.277016
+    UOX44Gd6_zone_3_pin_13  0.339273
+    UOX44Gd6_zone_4_pin_13  0.391759
+    UOX44Gd6_zone_5_pin_13  0.426910
+    UOX44Gd6_zone_6_pin_13  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_14
-    UOX49_zone1_pin14  0.309713
-    UOX49_zone2_pin14  0.391759
-    UOX49_zone3_pin14  0.426910
-    UOX49_zone4_pin14  0.438000
+    UOX49_zone_1_pin_14  0.309713
+    UOX49_zone_2_pin_14  0.391759
+    UOX49_zone_3_pin_14  0.426910
+    UOX49_zone_4_pin_14  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_15
-    UOX49_zone1_pin15  0.309713
-    UOX49_zone2_pin15  0.391759
-    UOX49_zone3_pin15  0.426910
-    UOX49_zone4_pin15  0.438000
+    UOX49_zone_1_pin_15  0.309713
+    UOX49_zone_2_pin_15  0.391759
+    UOX49_zone_3_pin_15  0.426910
+    UOX49_zone_4_pin_15  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49Gd8_16
-    UOX49Gd8_zone1_pin16  0.195880
-    UOX49Gd8_zone2_pin16  0.277016
-    UOX49Gd8_zone3_pin16  0.339273
-    UOX49Gd8_zone4_pin16  0.391759
-    UOX49Gd8_zone5_pin16  0.426910
-    UOX49Gd8_zone6_pin16  0.438000
+    UOX49Gd8_zone_1_pin_16  0.195880
+    UOX49Gd8_zone_2_pin_16  0.277016
+    UOX49Gd8_zone_3_pin_16  0.339273
+    UOX49Gd8_zone_4_pin_16  0.391759
+    UOX49Gd8_zone_5_pin_16  0.426910
+    UOX49Gd8_zone_6_pin_16  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_17
-    UOX49_zone1_pin17  0.309713
-    UOX49_zone2_pin17  0.391759
-    UOX49_zone3_pin17  0.426910
-    UOX49_zone4_pin17  0.438000
+    UOX49_zone_1_pin_17  0.309713
+    UOX49_zone_2_pin_17  0.391759
+    UOX49_zone_3_pin_17  0.426910
+    UOX49_zone_4_pin_17  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49Gd8_18
-    UOX49Gd8_zone1_pin18  0.195880
-    UOX49Gd8_zone2_pin18  0.277016
-    UOX49Gd8_zone3_pin18  0.339273
-    UOX49Gd8_zone4_pin18  0.391759
-    UOX49Gd8_zone5_pin18  0.426910
-    UOX49Gd8_zone6_pin18  0.438000
+    UOX49Gd8_zone_1_pin_18  0.195880
+    UOX49Gd8_zone_2_pin_18  0.277016
+    UOX49Gd8_zone_3_pin_18  0.339273
+    UOX49Gd8_zone_4_pin_18  0.391759
+    UOX49Gd8_zone_5_pin_18  0.426910
+    UOX49Gd8_zone_6_pin_18  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_19
-    UOX49_zone1_pin19  0.309713
-    UOX49_zone2_pin19  0.391759
-    UOX49_zone3_pin19  0.426910
-    UOX49_zone4_pin19  0.438000
+    UOX49_zone_1_pin_19  0.309713
+    UOX49_zone_2_pin_19  0.391759
+    UOX49_zone_3_pin_19  0.426910
+    UOX49_zone_4_pin_19  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40_20
-    UOX40_zone1_pin20  0.309713
-    UOX40_zone2_pin20  0.391759
-    UOX40_zone3_pin20  0.426910
-    UOX40_zone4_pin20  0.438000
+    UOX40_zone_1_pin_20  0.309713
+    UOX40_zone_2_pin_20  0.391759
+    UOX40_zone_3_pin_20  0.426910
+    UOX40_zone_4_pin_20  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX44Gd6_21
-    UOX44Gd6_zone1_pin21  0.195880
-    UOX44Gd6_zone2_pin21  0.277016
-    UOX44Gd6_zone3_pin21  0.339273
-    UOX44Gd6_zone4_pin21  0.391759
-    UOX44Gd6_zone5_pin21  0.426910
-    UOX44Gd6_zone6_pin21  0.438000
+    UOX44Gd6_zone_1_pin_21  0.195880
+    UOX44Gd6_zone_2_pin_21  0.277016
+    UOX44Gd6_zone_3_pin_21  0.339273
+    UOX44Gd6_zone_4_pin_21  0.391759
+    UOX44Gd6_zone_5_pin_21  0.426910
+    UOX44Gd6_zone_6_pin_21  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX44_22
-    UOX44_zone1_pin22  0.309713
-    UOX44_zone2_pin22  0.391759
-    UOX44_zone3_pin22  0.426910
-    UOX44_zone4_pin22  0.438000
+    UOX44_zone_1_pin_22  0.309713
+    UOX44_zone_2_pin_22  0.391759
+    UOX44_zone_3_pin_22  0.426910
+    UOX44_zone_4_pin_22  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_23
-    UOX49_zone1_pin23  0.309713
-    UOX49_zone2_pin23  0.391759
-    UOX49_zone3_pin23  0.426910
-    UOX49_zone4_pin23  0.438000
+    UOX49_zone_1_pin_23  0.309713
+    UOX49_zone_2_pin_23  0.391759
+    UOX49_zone_3_pin_23  0.426910
+    UOX49_zone_4_pin_23  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_24
-    UOX49_zone1_pin24  0.309713
-    UOX49_zone2_pin24  0.391759
-    UOX49_zone3_pin24  0.426910
-    UOX49_zone4_pin24  0.438000
+    UOX49_zone_1_pin_24  0.309713
+    UOX49_zone_2_pin_24  0.391759
+    UOX49_zone_3_pin_24  0.426910
+    UOX49_zone_4_pin_24  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_25
-    UOX49_zone1_pin25  0.309713
-    UOX49_zone2_pin25  0.391759
-    UOX49_zone3_pin25  0.426910
-    UOX49_zone4_pin25  0.438000
+    UOX49_zone_1_pin_25  0.309713
+    UOX49_zone_2_pin_25  0.391759
+    UOX49_zone_3_pin_25  0.426910
+    UOX49_zone_4_pin_25  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49Gd8_26
-    UOX49Gd8_zone1_pin26  0.195880
-    UOX49Gd8_zone2_pin26  0.277016
-    UOX49Gd8_zone3_pin26  0.339273
-    UOX49Gd8_zone4_pin26  0.391759
-    UOX49Gd8_zone5_pin26  0.426910
-    UOX49Gd8_zone6_pin26  0.438000
+    UOX49Gd8_zone_1_pin_26  0.195880
+    UOX49Gd8_zone_2_pin_26  0.277016
+    UOX49Gd8_zone_3_pin_26  0.339273
+    UOX49Gd8_zone_4_pin_26  0.391759
+    UOX49Gd8_zone_5_pin_26  0.426910
+    UOX49Gd8_zone_6_pin_26  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_27
-    UOX49_zone1_pin27  0.309713
-    UOX49_zone2_pin27  0.391759
-    UOX49_zone3_pin27  0.426910
-    UOX49_zone4_pin27  0.438000
+    UOX49_zone_1_pin_27  0.309713
+    UOX49_zone_2_pin_27  0.391759
+    UOX49_zone_3_pin_27  0.426910
+    UOX49_zone_4_pin_27  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40_28
-    UOX40_zone1_pin28  0.309713
-    UOX40_zone2_pin28  0.391759
-    UOX40_zone3_pin28  0.426910
-    UOX40_zone4_pin28  0.438000
+    UOX40_zone_1_pin_28  0.309713
+    UOX40_zone_2_pin_28  0.391759
+    UOX40_zone_3_pin_28  0.426910
+    UOX40_zone_4_pin_28  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40_29
-    UOX40_zone1_pin29  0.309713
-    UOX40_zone2_pin29  0.391759
-    UOX40_zone3_pin29  0.426910
-    UOX40_zone4_pin29  0.438000
+    UOX40_zone_1_pin_29  0.309713
+    UOX40_zone_2_pin_29  0.391759
+    UOX40_zone_3_pin_29  0.426910
+    UOX40_zone_4_pin_29  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX44Gd6_30
-    UOX44Gd6_zone1_pin30  0.195880
-    UOX44Gd6_zone2_pin30  0.277016
-    UOX44Gd6_zone3_pin30  0.339273
-    UOX44Gd6_zone4_pin30  0.391759
-    UOX44Gd6_zone5_pin30  0.426910
-    UOX44Gd6_zone6_pin30  0.438000
+    UOX44Gd6_zone_1_pin_30  0.195880
+    UOX44Gd6_zone_2_pin_30  0.277016
+    UOX44Gd6_zone_3_pin_30  0.339273
+    UOX44Gd6_zone_4_pin_30  0.391759
+    UOX44Gd6_zone_5_pin_30  0.426910
+    UOX44Gd6_zone_6_pin_30  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_31
-    UOX49_zone1_pin31  0.309713
-    UOX49_zone2_pin31  0.391759
-    UOX49_zone3_pin31  0.426910
-    UOX49_zone4_pin31  0.438000
+    UOX49_zone_1_pin_31  0.309713
+    UOX49_zone_2_pin_31  0.391759
+    UOX49_zone_3_pin_31  0.426910
+    UOX49_zone_4_pin_31  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_32
-    UOX49_zone1_pin32  0.309713
-    UOX49_zone2_pin32  0.391759
-    UOX49_zone3_pin32  0.426910
-    UOX49_zone4_pin32  0.438000
+    UOX49_zone_1_pin_32  0.309713
+    UOX49_zone_2_pin_32  0.391759
+    UOX49_zone_3_pin_32  0.426910
+    UOX49_zone_4_pin_32  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40_33
-    UOX40_zone1_pin33  0.309713
-    UOX40_zone2_pin33  0.391759
-    UOX40_zone3_pin33  0.426910
-    UOX40_zone4_pin33  0.438000
+    UOX40_zone_1_pin_33  0.309713
+    UOX40_zone_2_pin_33  0.391759
+    UOX40_zone_3_pin_33  0.426910
+    UOX40_zone_4_pin_33  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40Gd8_34
-    UOX40Gd8_zone1_pin34  0.195880
-    UOX40Gd8_zone2_pin34  0.277016
-    UOX40Gd8_zone3_pin34  0.339273
-    UOX40Gd8_zone4_pin34  0.391759
-    UOX40Gd8_zone5_pin34  0.426910
-    UOX40Gd8_zone6_pin34  0.438000
+    UOX40Gd8_zone_1_pin_34  0.195880
+    UOX40Gd8_zone_2_pin_34  0.277016
+    UOX40Gd8_zone_3_pin_34  0.339273
+    UOX40Gd8_zone_4_pin_34  0.391759
+    UOX40Gd8_zone_5_pin_34  0.426910
+    UOX40Gd8_zone_6_pin_34  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX44_35
-    UOX44_zone1_pin35  0.309713
-    UOX44_zone2_pin35  0.391759
-    UOX44_zone3_pin35  0.426910
-    UOX44_zone4_pin35  0.438000
+    UOX44_zone_1_pin_35  0.309713
+    UOX44_zone_2_pin_35  0.391759
+    UOX44_zone_3_pin_35  0.426910
+    UOX44_zone_4_pin_35  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_36
-    UOX49_zone1_pin36  0.309713
-    UOX49_zone2_pin36  0.391759
-    UOX49_zone3_pin36  0.426910
-    UOX49_zone4_pin36  0.438000
+    UOX49_zone_1_pin_36  0.309713
+    UOX49_zone_2_pin_36  0.391759
+    UOX49_zone_3_pin_36  0.426910
+    UOX49_zone_4_pin_36  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40_37
-    UOX40_zone1_pin37  0.309713
-    UOX40_zone2_pin37  0.391759
-    UOX40_zone3_pin37  0.426910
-    UOX40_zone4_pin37  0.438000
+    UOX40_zone_1_pin_37  0.309713
+    UOX40_zone_2_pin_37  0.391759
+    UOX40_zone_3_pin_37  0.426910
+    UOX40_zone_4_pin_37  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX36_38
-    UOX36_zone1_pin38  0.309713
-    UOX36_zone2_pin38  0.391759
-    UOX36_zone3_pin38  0.426910
-    UOX36_zone4_pin38  0.438000
+    UOX36_zone_1_pin_38  0.309713
+    UOX36_zone_2_pin_38  0.391759
+    UOX36_zone_3_pin_38  0.426910
+    UOX36_zone_4_pin_38  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49Gd6_39
-    UOX49Gd6_zone1_pin39  0.195880
-    UOX49Gd6_zone2_pin39  0.277016
-    UOX49Gd6_zone3_pin39  0.339273
-    UOX49Gd6_zone4_pin39  0.391759
-    UOX49Gd6_zone5_pin39  0.426910
-    UOX49Gd6_zone6_pin39  0.438000
+    UOX49Gd6_zone_1_pin_39  0.195880
+    UOX49Gd6_zone_2_pin_39  0.277016
+    UOX49Gd6_zone_3_pin_39  0.339273
+    UOX49Gd6_zone_4_pin_39  0.391759
+    UOX49Gd6_zone_5_pin_39  0.426910
+    UOX49Gd6_zone_6_pin_39  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40_40
-    UOX40_zone1_pin40  0.309713
-    UOX40_zone2_pin40  0.391759
-    UOX40_zone3_pin40  0.426910
-    UOX40_zone4_pin40  0.438000
+    UOX40_zone_1_pin_40  0.309713
+    UOX40_zone_2_pin_40  0.391759
+    UOX40_zone_3_pin_40  0.426910
+    UOX40_zone_4_pin_40  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49_41
-    UOX49_zone1_pin41  0.309713
-    UOX49_zone2_pin41  0.391759
-    UOX49_zone3_pin41  0.426910
-    UOX49_zone4_pin41  0.438000
+    UOX49_zone_1_pin_41  0.309713
+    UOX49_zone_2_pin_41  0.391759
+    UOX49_zone_3_pin_41  0.426910
+    UOX49_zone_4_pin_41  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40_42
-    UOX40_zone1_pin42  0.309713
-    UOX40_zone2_pin42  0.391759
-    UOX40_zone3_pin42  0.426910
-    UOX40_zone4_pin42  0.438000
+    UOX40_zone_1_pin_42  0.309713
+    UOX40_zone_2_pin_42  0.391759
+    UOX40_zone_3_pin_42  0.426910
+    UOX40_zone_4_pin_42  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX40_43
-    UOX40_zone1_pin43  0.309713
-    UOX40_zone2_pin43  0.391759
-    UOX40_zone3_pin43  0.426910
-    UOX40_zone4_pin43  0.438000
+    UOX40_zone_1_pin_43  0.309713
+    UOX40_zone_2_pin_43  0.391759
+    UOX40_zone_3_pin_43  0.426910
+    UOX40_zone_4_pin_43  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX44_44
-    UOX44_zone1_pin44  0.309713
-    UOX44_zone2_pin44  0.391759
-    UOX44_zone3_pin44  0.426910
-    UOX44_zone4_pin44  0.438000
+    UOX44_zone_1_pin_44  0.309713
+    UOX44_zone_2_pin_44  0.391759
+    UOX44_zone_3_pin_44  0.426910
+    UOX44_zone_4_pin_44  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX49Gd8_45
-    UOX49Gd8_zone1_pin45  0.195880
-    UOX49Gd8_zone2_pin45  0.277016
-    UOX49Gd8_zone3_pin45  0.339273
-    UOX49Gd8_zone4_pin45  0.391759
-    UOX49Gd8_zone5_pin45  0.426910
-    UOX49Gd8_zone6_pin45  0.438000
+    UOX49Gd8_zone_1_pin_45  0.195880
+    UOX49Gd8_zone_2_pin_45  0.277016
+    UOX49Gd8_zone_3_pin_45  0.339273
+    UOX49Gd8_zone_4_pin_45  0.391759
+    UOX49Gd8_zone_5_pin_45  0.426910
+    UOX49Gd8_zone_6_pin_45  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX32_46
-    UOX32_zone1_pin46  0.309713
-    UOX32_zone2_pin46  0.391759
-    UOX32_zone3_pin46  0.426910
-    UOX32_zone4_pin46  0.438000
+    UOX32_zone_1_pin_46  0.309713
+    UOX32_zone_2_pin_46  0.391759
+    UOX32_zone_3_pin_46  0.426910
+    UOX32_zone_4_pin_46  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX32_47
-    UOX32_zone1_pin47  0.309713
-    UOX32_zone2_pin47  0.391759
-    UOX32_zone3_pin47  0.426910
-    UOX32_zone4_pin47  0.438000
+    UOX32_zone_1_pin_47  0.309713
+    UOX32_zone_2_pin_47  0.391759
+    UOX32_zone_3_pin_47  0.426910
+    UOX32_zone_4_pin_47  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX44Gd3_48
-    UOX44Gd3_zone1_pin48  0.195880
-    UOX44Gd3_zone2_pin48  0.277016
-    UOX44Gd3_zone3_pin48  0.339273
-    UOX44Gd3_zone4_pin48  0.391759
-    UOX44Gd3_zone5_pin48  0.426910
-    UOX44Gd3_zone6_pin48  0.438000
+    UOX44Gd3_zone_1_pin_48  0.195880
+    UOX44Gd3_zone_2_pin_48  0.277016
+    UOX44Gd3_zone_3_pin_48  0.339273
+    UOX44Gd3_zone_4_pin_48  0.391759
+    UOX44Gd3_zone_5_pin_48  0.426910
+    UOX44Gd3_zone_6_pin_48  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX28_49
-    UOX28_zone1_pin49  0.309713
-    UOX28_zone2_pin49  0.391759
-    UOX28_zone3_pin49  0.426910
-    UOX28_zone4_pin49  0.438000
+    UOX28_zone_1_pin_49  0.309713
+    UOX28_zone_2_pin_49  0.391759
+    UOX28_zone_3_pin_49  0.426910
+    UOX28_zone_4_pin_49  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX28_50
-    UOX28_zone1_pin50  0.309713
-    UOX28_zone2_pin50  0.391759
-    UOX28_zone3_pin50  0.426910
-    UOX28_zone4_pin50  0.438000
+    UOX28_zone_1_pin_50  0.309713
+    UOX28_zone_2_pin_50  0.391759
+    UOX28_zone_3_pin_50  0.426910
+    UOX28_zone_4_pin_50  0.438000
     gap  0.447000
     clad  0.515000
     cool
 
 pin UOX16_51
-    UOX16_zone1_pin51  0.309713
-    UOX16_zone2_pin51  0.391759
-    UOX16_zone3_pin51  0.426910
-    UOX16_zone4_pin51  0.438000
+    UOX16_zone_1_pin_51  0.309713
+    UOX16_zone_2_pin_51  0.391759
+    UOX16_zone_3_pin_51  0.426910
+    UOX16_zone_4_pin_51  0.438000
     gap  0.447000
     clad  0.515000
     cool

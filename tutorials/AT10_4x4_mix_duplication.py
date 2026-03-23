@@ -43,18 +43,18 @@ DRAGLIBS_PATH = Path(os.environ.get('DRAGLIB_DIR', "/path/to/draglibs"))
 
 # glow_data sits next to the starterDD project root
 GLOW_DATA = PROJECT_ROOT.parent / "glow_data"
-AT10_OUTPUT = GLOW_DATA / "starterDD_outputs" / "AT10_compo_test" / "2L_scheme"
-run_dragon=True  # Set to False for a dry run (no Dragon execution)
+AT10_OUTPUT = GLOW_DATA / "starterDD_outputs" / "AT10_4x4" / "2L_scheme"
+run_dragon=False  # Set to False for a dry run (no Dragon execution)
 
-AT10_compo_test_case = DragonCase(
-        case_name="AT10_3x3_mix_splitting",
-        call_glow=False,
+AT10_4x4_test_case = DragonCase(
+        case_name="AT10_4x4_mix_splitting",
+        call_glow=True,
         draglibs_names_to_alias={
             "draglibJeff3p1p1SHEM295_v5p1": "J311_295",
         },
         config_yamls={
             "MATS": str(AT10_INPUTS / "material_compositions.yaml"),
-            "GEOM": str(AT10_INPUTS / "GEOM_3x3.yaml"),
+            "GEOM": str(AT10_INPUTS / "GEOM_4x4.yaml"),
             "CALC_SCHEME": str(AT10_INPUTS / "CALC_SCHEME_2L.yaml"),
         },
         output_path=str(AT10_OUTPUT),
@@ -62,7 +62,7 @@ AT10_compo_test_case = DragonCase(
     )
 
 # Step 1: Generate CLE2000 procedures (x2m + c2m files)
-result = AT10_compo_test_case.generate_cle2000_procedures()
+result = AT10_4x4_test_case.generate_cle2000_procedures()
 
 # =====================================================================
 # Step 2: Execute the case with the Dragon runner
@@ -82,11 +82,11 @@ if not run_dragon:
     # --- Option A: dry run (no Dragon execution) -----------------------
     # Useful for verifying the setup before running.
     #
-    dry_result = AT10_compo_test_case.run(
+    dry_result = AT10_4x4_test_case.run(
          draglib_paths={
              "draglibJeff3p1p1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
          },
-         results_root="./results",
+         results_root=str(PROJECT_ROOT / "tutorials" / "results"),
          dry_run=True,
     )
     print(f"Dry run directory: {dry_result.run_directory}")
@@ -97,12 +97,12 @@ if not run_dragon:
 if run_dragon:
     print("Running Dragon... This may take a few moments.")
     print(f"Using Dragon executable: {DRAGON_EXEC}")
-    run_result = AT10_compo_test_case.run(
+    run_result = AT10_4x4_test_case.run(
         dragon_executable=DRAGON_EXEC,  # or None to use $dragon_exec
         draglib_paths={
             "draglibJeff3p1p1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
         },
-        results_root="./results",
+        results_root=str(PROJECT_ROOT / "tutorials" / "results"),
         num_threads=1,
     )
     print(f"Draglibs path used: {DRAGLIBS_PATH / 'draglibJeff3p1p1SHEM295_v5p1'}")
@@ -114,12 +114,12 @@ if run_dragon:
 #
 # Results directory structure:
 #   results/
-#   └── AT10_24UOX/
+#   └── AT10_4x4/
 #       └── RSE_IC_2L_MOC_5sp/
 #           ├── 2026-03-12T14-32-07/
 #           │   ├── run_manifest.yaml
 #           │   ├── inputs/           (frozen config yamls)
 #           │   ├── procedures/       (generated CLE2000 files)
-#           │   ├── AT10_24UOX.result   (Dragon listing)
-#           │   └── _CPO_AT10_24UOX     (COMPO output)
+#           │   ├── AT10_4x4.result   (Dragon listing)
+#           │   └── _CPO_AT10_4x4     (COMPO output)
 #           └── latest -> 2026-03-12T14-32-07/

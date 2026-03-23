@@ -1,4 +1,4 @@
-# Geometry description for the ATRIUM-10 BWR fuel bundle.
+# Geometry description of a 4x4 sub-assembly of the ATRIUM-10 BWR fuel bundle.
 # This file describes the geometry of the pincell, including the fuel radius, gap radius, clad radius, and the number of fuel zones. 
 # This information is used to build the pincell geometry.
 
@@ -13,10 +13,12 @@ ASSEMBLY_GEOMETRY:
   lattice_type: "cartesian"
   reactor_type: "BWR"
   lattice_description:
-    - ["ROD1", "ROD2", "ROD3"]
-    - ["ROD2", "ROD4", "ROD7"]
-    - ["ROD3", "ROD7", "ROD6"]
+    - ["ROD1", "ROD2", "ROD3", "ROD5"]
+    - ["ROD2", "ROD4", "ROD7", "ROD6"]
+    - ["ROD3", "ROD7", "ROD6", "ROD6"]
+    - ["ROD5", "ROD6", "ROD6", "ROD6"]
 
+  Gd_rod_ids: ["ROD7"]
   assembly_pitch: 1.295
   gap_wide: 0.0
   channel_box_thickness: 0.0
