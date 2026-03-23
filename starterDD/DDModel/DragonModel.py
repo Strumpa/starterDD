@@ -300,17 +300,19 @@ class CartesianAssemblyModel:
         self.lattice = []
         number_of_water_rod_placeholders = 0
         pin_pitch = self.pin_geometry_dict.get("pin_pitch", 0) if self.pin_geometry_dict else 0
+        material_descriptors_used = [] # store descriptors that have already been analysed
+        self.generating_fuel_cells = []
+        self.non_generating_fuel_cells = []
         for y_index, row in enumerate(self.lattice_description):
             lattice_row = []
             for x_index, descriptor in enumerate(row):
                 if self.rod_ID_to_material_dict is not None:
                     material_name = self.rod_ID_to_material_dict.get(descriptor, None)
                     rod_id = descriptor
-                    print(f"Descriptor {descriptor} mapped to material name {material_name} based on rod ID to material mapping.")
                 else:                    
                     material_name = descriptor # if no mapping provided, use the descriptor in the lattice description as the material name for the pin geometry definition, but this would require that the descriptors in the lattice description are directly usable as material names for the pin geometry definition, which might not be the case depending on how the material compositions are defined for the assembly.
                     rod_id = None
-                    print(f"No rod ID to material mapping provided, descriptor {descriptor} will be used as a material name for the pin geometry definition.")
+                    print(f"WARNING : No rod ID to material mapping provided, descriptor {descriptor} will be used as a material name for the pin geometry definition.")
                 pin_geometry_info = self.pin_geometry_dict # for now assume all pins have the same geometry information, but this can be updated later to allow for different pin geometries based on the material or rod ID for example by changing the structure of the pin_geometry_dict in the geometry description yaml file to allow for different geometry information for different types of pins.
                 if pin_geometry_info is not None:
                     fuel_radius = pin_geometry_info.get("fuel_radius", None)
@@ -352,6 +354,16 @@ class CartesianAssemblyModel:
                             pin_model.set_clad_temperature(self.structural_temperature)
                             pin_model.set_gap_temperature(self.gap_temperature)
                             pin_model.set_coolant_temperature(self.coolant_temperature)
+                            # Set the generating cell status for self-shielding treatment and order of mix creation in glow
+                            if material_name not in material_descriptors_used:
+                                print(f"Setting pin at lattice position ({x_index}, {y_index}) with material '{material_name}' as a generating cell.")
+                                pin_model.set_generating_cell_status(True)
+                                material_descriptors_used.append(material_name)
+                                self.generating_fuel_cells.append(pin_model)
+                            else:
+                                print(f"Setting pin at lattice position ({x_index}, {y_index}) with material '{material_name}' as a non-generating cell.")
+                                pin_model.set_generating_cell_status(False)
+                                self.non_generating_fuel_cells.append(pin_model)
                             lattice_row.append(pin_model)
                         elif descriptor in self.non_fuel_rod_ids:
                             number_of_water_rod_placeholders += 1
@@ -1834,6 +1846,12 @@ class FuelPinModel:
         self.center_x = center_x
         self.center_y = center_y
         self.center = (center_x, center_y)
+
+    def set_generating_cell_status(self, is_generating):
+        """
+        Set whether this pin is a generating cell for self-shielding treatment in Dragon.
+        """
+        self.isGeneratingCell = is_generating
 
 
 class CircularWaterRodModel:

@@ -91,14 +91,13 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
     # Import here to avoid circular import issues
     from ..DDModel.DragonModel import FuelPinModel
     
-    lattice_components = []
+    lattice_components = {} # change to a dictionaty to store cells and their pin model, at a given position. This will allow to keep track of the pin models associated with each cell.
     pitch = assemblyModel.pin_geometry_dict["pin_pitch"]
     
     fuel_material_mixtures = assemblyModel.fuel_material_mixtures
     row_idx = -1
     for row in assemblyModel.lattice:
         row_idx += 1 
-        row_of_cells = []
         cell_idx = -1
         for pin in row:
             cell_idx += 1
@@ -124,48 +123,48 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
                     PropertyType.MATERIAL: list_of_cell_mats,
                     PropertyType.MACRO: [f"MACRO{row_idx}{cell_idx}"] * len(list_of_cell_mats)
                 })
-            else:  # Water rod placeholder or other non-fuel cell
-                tmp_cell = RectCell(
-                    name=pin.rod_ID,
-                    height_x_width=(pitch, pitch),
-                    center=(0.0, 0.0, 0.0),
-                )
-                tmp_cell.set_properties({
-                    PropertyType.MATERIAL: ["MODERATOR"],
-                    PropertyType.MACRO: [f"MACRO_{row_idx}{cell_idx}"]
-                })
-            row_of_cells.append(tmp_cell)
-        lattice_components.append(row_of_cells)
+            lattice_components[(row_idx, cell_idx)] = [tmp_cell, pin] # store both the cell and its associated pin model for later reference
     return lattice_components
 
 
-def add_cells_to_regular_lattice(lattice, ordered_cells, cell_pitch, translation=0.0):
+def add_cells_to_regular_lattice(lattice, lattice_components, cell_pitch, translation=0.0):
     """
     Add fuel cells to the lattice, skipping water rod placeholders.
+    Generating cells are added last in order to enforce order of mix attribution in SALOME (cells added last are assigned first mix numbers)
 
     Parameters
     ----------
     lattice : Lattice
         The lattice to which cells will be added
-    ordered_cells : list of list of RectCell
-        2D list of RectCell objects representing the lattice layout
+    lattice_components : dict
+        Dictionary mapping positions to lists of RectCell objects and their associated pin models
     cell_pitch : float
         Pitch of each cell in the lattice
     translation : float
         Translation to apply to cell positions
     """
-    for row_idx in range(len(ordered_cells)):
-        row_of_cells = ordered_cells[row_idx]
-        for cell_idx in range(len(row_of_cells)):
-            cell = row_of_cells[cell_idx]
-            if "W" in cell.name:  # Skip water rod placeholders
-                continue
-            else:
+    # Import here to avoid circular import issues
+    from ..DDModel.DragonModel import FuelPinModel
+
+    for pos, cell_and_pin in lattice_components.items():
+        cell, pin = cell_and_pin
+        if pin is not None and isinstance(pin, FuelPinModel):
+            if pin.isGeneratingCell is False: # add all non generating cells first
                 lattice.add_cell(
-                    cell, ((cell_idx + 0.5) * cell_pitch + translation,
-                           (row_idx + 0.5) * cell_pitch + translation,
-                           0.0)
+                    cell, ((pos[0] + 0.5) * cell_pitch + translation,
+                            (pos[1] + 0.5) * cell_pitch + translation,
+                            0.0)
                 )
+    for pos, cell_and_pin in lattice_components.items():
+        cell, pin = cell_and_pin
+        if pin is not None and isinstance(pin, FuelPinModel):
+            if pin.isGeneratingCell: # add generating cells last
+                lattice.add_cell(
+                    cell, ((pos[0] + 0.5) * cell_pitch + translation,
+                            (pos[1] + 0.5) * cell_pitch + translation,
+                            0.0)
+                )
+
     return lattice
 
 

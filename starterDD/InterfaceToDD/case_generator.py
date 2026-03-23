@@ -201,7 +201,7 @@ class DragonCase:
         Returns
         -------
         list of tuples
-            [(proc_name, file_path), ...] for generated MIXEQ procedures
+            [(proc_name, file_path, current_step_name, next_step_name), ...] for generated MIXEQ procedures
         """
         from .CLE2000 import validate_varname
 
@@ -228,7 +228,7 @@ class DragonCase:
                     # Validate procedure name (CLE-2000 limitation)
                     validate_varname(proc_name[:12])
                     mixeq_path = mixeq.write_to_c2m(self.output_path, proc_name[:12])
-                    mixeq_procedures.append((proc_name[:12], mixeq_path))
+                    mixeq_procedures.append((proc_name[:12], mixeq_path, current_step.name, next_step.name))
 
                     print(f"[MIXEQ] Successfully generated {proc_name[:12]}")
 
@@ -570,28 +570,32 @@ class DragonCase:
                 x2m_path = self._build_main_x2m_with_branches_2level(
                     scheme, trk, lib, edi_compo,
                     mix_proc_name, trk_proc_name,
-                    edir_proc_name, draglib_alias,
+                    edir_proc_name, mixeq_procedures, 
+                    draglib_alias,
                     ssh_step,
                 )
             else:
                 x2m_path = self._build_main_x2m_2level(
                     scheme, trk, lib, edi_compo,
                     mix_proc_name, trk_proc_name,
-                    edir_proc_name, draglib_alias,
+                    edir_proc_name, mixeq_procedures,  
+                    draglib_alias,
                     ssh_step,
                 )
         elif scheme.has_branches():
             x2m_path = self._build_main_x2m_with_branches(
                 scheme, trk, lib, edi_compo,
                 mix_proc_name, trk_proc_name,
-                edir_proc_name, draglib_alias,
+                edir_proc_name, mixeq_procedures,  
+                draglib_alias,
                 ssh_step,
             )
         else:
             x2m_path = self._build_main_x2m(
                 scheme, trk, lib, edi_compo,
                 mix_proc_name, trk_proc_name,
-                edir_proc_name, draglib_alias,
+                edir_proc_name, mixeq_procedures, 
+                draglib_alias,
                 ssh_step,
             )
 
@@ -604,7 +608,7 @@ class DragonCase:
         }
 
         # Add MIXEQ procedures as individual entries
-        for i, (proc_name, proc_path) in enumerate(mixeq_procedures):
+        for i, (proc_name, proc_path, current_step_name, next_step_name) in enumerate(mixeq_procedures):
             result_dict[f"mixeq_{i+1}"] = proc_path
 
         # Store procedures dictionary for dragon_runner
@@ -618,7 +622,8 @@ class DragonCase:
 
     def _build_main_x2m(self, scheme, trk, lib, edi_compo,
                         mix_proc_name, trk_proc_name,
-                        edir_proc_name, draglib_alias,
+                        edir_proc_name, mixeq_procedures, 
+                        draglib_alias,
                         ssh_step):
         """Assemble and write the main .x2m procedure."""
 
@@ -640,6 +645,10 @@ class DragonCase:
         sub_edir = sub_procedure(edir_proc_name)
         for sp in (sub_mix, sub_trk, sub_edir):
             proc.add_sub_procedure(sp)
+        if mixeq_procedures:
+            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
+                sub_mixeq = sub_procedure(proc_name)
+                proc.add_sub_procedure(sub_mixeq)
 
         # --- Data structures ---
         proc.add_linked_list("LIBRARY")
@@ -715,11 +724,15 @@ class DragonCase:
         proc.add_body_line("")
 
         # --- MIX sub-procedure call ---
-        ssh_method = ssh_step.self_shielding_method or "RSE"
+        ssh_method = ssh_step.self_shielding_method or "PT"
+        if hasattr(ssh_step, 'transport_correction') and ssh_step.transport_correction is not None:
+            transport_correction = ssh_step.transport_correction
+        else:
+            transport_correction = "NONE"
         mix_call_line = (
             f"LIBRARY := {mix_proc_name} :: "
             f"<<Draglib>> '{ssh_method}' <<o_anis>> "
-            f"'NONE' "
+            f"'{transport_correction}' "
             f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
             f"<<TCOOL>> <<TMODE>> <<TCTRL>> ;"
         )
@@ -751,7 +764,21 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(uss_line)
         )
-        asm_keyword = "PIJ" if scheme.step[0].spatial_method == "CP" else "ARM"
+
+        if mixeq_procedures:
+            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
+                if current_step_name == ssh_step.name and next_step_name == scheme.get_flux_steps()[0].name:
+                    proc.add_body_line(
+                        f"* MIXEQ: {current_step_name} → {next_step_name}"
+                    )
+                    mixeq_call = (
+                        f"LIBRARY2 := {proc_name} LIBRARY2 ;"
+                    )
+                    proc.add_body_line(
+                        wrap_cle2000_line(mixeq_call)
+                    )
+
+        asm_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
         proc.add_body_line(f"    EDIT 1 {asm_keyword}")
         proc.add_body_line(";")
         proc.add_body_line("")
@@ -836,7 +863,8 @@ class DragonCase:
     def _build_main_x2m_with_branches(
         self, scheme, trk, lib, edi_compo,
         mix_proc_name, trk_proc_name,
-        edir_proc_name, draglib_alias,
+        edir_proc_name, mixeq_procedures, 
+        draglib_alias,
         ssh_step,
     ):
         """Assemble and write the main .x2m with WHILE loops over branches.
@@ -869,6 +897,11 @@ class DragonCase:
         sub_edir = sub_procedure(edir_proc_name)
         for sp in (sub_mix, sub_trk, sub_edir):
             proc.add_sub_procedure(sp)
+
+        if mixeq_procedures:
+            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
+                sub_mixeq = sub_procedure(proc_name)
+                proc.add_sub_procedure(sub_mixeq)
 
         # --- Data structures ---
         proc.add_linked_list("LIBRARY")
@@ -1106,14 +1139,18 @@ class DragonCase:
         proc.add_body_line("")
 
         # --- MIX sub-procedure call ---
-        ssh_method = ssh_step.self_shielding_method or "RSE"
+        ssh_method = ssh_step.self_shielding_method or "PT"
+        if hasattr(ssh_step, 'transport_correction') and ssh_step.transport_correction is not None:
+            transport_correction = ssh_step.transport_correction
+        else:
+            transport_correction = "NONE"
 
         # Build MIX call — pass N_H N_O if density branch exists
         if density_branch:
             mix_call_line = (
                 f"LIBRARY := {mix_proc_name} :: "
                 f"<<Draglib>> '{ssh_method}' <<o_anis>> "
-                f"'NONE' "
+                f"'{transport_correction}' "
                 f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
                 f"<<TCOOL>> <<TMODE>> <<TCTRL>> "
                 f"<<N_H>> <<N_O>> ;"
@@ -1122,7 +1159,7 @@ class DragonCase:
             mix_call_line = (
                 f"LIBRARY := {mix_proc_name} :: "
                 f"<<Draglib>> '{ssh_method}' <<o_anis>> "
-                f"'NONE' "
+                f"'{transport_correction}' "
                 f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
                 f"<<TCOOL>> <<TMODE>> <<TCTRL>> ;"
             )
@@ -1150,12 +1187,28 @@ class DragonCase:
                 f"{inner_indent}{uss_line}"
             )
         )
-        ssh_asm_keyword = "PIJ" if scheme.step[0].spatial_method == "CP" else "ARM"
+        ssh_asm_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
         proc.add_body_line(
             f"{inner_indent}    EDIT 1 {ssh_asm_keyword}"
         )
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line("")
+
+        if mixeq_procedures:
+            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
+                if current_step_name == ssh_step.name and next_step_name == scheme.get_flux_steps()[0].name:
+                    proc.add_body_line(
+                        f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
+                    )
+                    mixeq_call = (
+                        f"LIBRARY2 := {proc_name} LIBRARY2 ;"
+                    )
+                    proc.add_body_line(
+                        wrap_cle2000_line(
+                            f"{inner_indent}{mixeq_call}"
+                        )
+                    )
+                    proc.add_body_line("")
 
         # --- ASM + FLU on flux step ---
         flux_steps = scheme.get_flux_steps()
@@ -1318,7 +1371,8 @@ class DragonCase:
 
     def _build_main_x2m_2level(self, scheme, trk, lib, edi_compo,
                                mix_proc_name, trk_proc_name,
-                               edir_proc_name, draglib_alias,
+                               edir_proc_name, mixeq_procedures, 
+                               draglib_alias,
                                ssh_step):
         """Build the main .x2m for a 2-level calculation scheme
         (no branch loops, single statepoint).
@@ -1351,13 +1405,19 @@ class DragonCase:
         for sp_name in (mix_proc_name, trk_proc_name, edir_proc_name):
             proc.add_sub_procedure(sub_procedure(sp_name))
 
+        if mixeq_procedures:
+            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
+                sub_mixeq = sub_procedure(proc_name)
+                proc.add_sub_procedure(sub_mixeq)        
+
         # --- Data structures ---
         proc.add_linked_list("LIBRARY")
         proc.add_linked_list("LIBRARY2")
         for trk_ll, _ in trk.get_track_names():
             proc.add_linked_list(trk_ll)
         proc.add_linked_list("SYS")
-        proc.add_linked_list("FLUX")
+        proc.add_linked_list("FLUXL1")
+        proc.add_linked_list("FLUXL2")
         proc.add_linked_list("EDITION")
         proc.add_linked_list(edi_cond.lib_name)
         proc.add_linked_list("COMPO")
@@ -1415,7 +1475,12 @@ class DragonCase:
         proc.add_body_line("")
 
         # --- MIX sub-procedure call ---
-        ssh_method = ssh_step.self_shielding_method or "RSE"
+        ssh_method = ssh_step.self_shielding_method or "PT"
+        if hasattr(ssh_step, 'transport_correction') and ssh_step.transport_correction is not None:
+            transport_correction = ssh_step.transport_correction
+        else:
+            transport_correction = "NONE"
+        
         proc.add_body_line("*" * 50)
         proc.add_body_line("* LIBRARY creation")
         proc.add_body_line("*" * 50)
@@ -1423,7 +1488,7 @@ class DragonCase:
             wrap_cle2000_line(
                 f"LIBRARY := {mix_proc_name} :: "
                 f"<<Draglib>> '{ssh_method}' <<o_anis>> "
-                f"'NONE' "
+                f"'{transport_correction}' "
                 f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
                 f"<<TCOOL>> <<TMODE>> <<TCTRL>> ;"
             )
@@ -1444,6 +1509,22 @@ class DragonCase:
         proc.add_body_line(";")
         proc.add_body_line("")
 
+        if mixeq_procedures:
+            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
+                if current_step_name == ssh_step.name and next_step_name == l1_step.name:
+                    proc.add_body_line(
+                        f"* MIXEQ: {current_step_name} → {next_step_name}"
+                    )
+                    mixeq_call = (
+                        f"LIBRARY2 := {proc_name} LIBRARY2 ;"
+                    )
+                    proc.add_body_line(
+                        wrap_cle2000_line(
+                            f"{mixeq_call}"
+                        )
+                    )
+                    proc.add_body_line("")
+
         # --- ASM L1 + FLU L1 ---
         l1_asm_keyword = "PIJ" if l1_step.spatial_method == "CP" else "ARM"
         proc.add_body_line("*" * 50)
@@ -1459,14 +1540,14 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"FLUX := FLU: SYS LIBRARY2 {l1_trk} {l1_trkfil} ::"
+                f"FLUXL1 := FLU: SYS LIBRARY2 {l1_trk} {l1_trkfil} ::"
             )
         )
         proc.add_body_line("    EDIT 1 TYPE K")
         proc.add_body_line(";")
         proc.add_body_line(
             wrap_cle2000_line(
-                "GREP: FLUX :: GETVAL 'K-EFFECTIVE' 1 1 1 >>keffL1<< ;"
+                "GREP: FLUXL1 :: GETVAL 'K-EFFECTIVE' 1 1 1 >>keffL1<< ;"
             )
         )
         proc.add_body_line(f'ECHO "{self.case_name} L1 keff=" keffL1 ;')
@@ -1477,7 +1558,7 @@ class DragonCase:
         proc.add_body_line("* EDI: energy condensation (L1 → coarse)")
         proc.add_body_line("*" * 50)
         proc.add_body_block(
-            edi_cond.build_edi_call("FLUX", "LIBRARY2", l1_trk)
+            edi_cond.build_edi_call("FLUXL1", "LIBRARY2", l1_trk)
         )
         proc.add_body_block(edi_cond.build_lib_extract())
         proc.add_body_line("")
@@ -1494,11 +1575,27 @@ class DragonCase:
 
         # --- DELETE L1 objects ---
         delete_l1 = (
-            f"FLUX SYS EDITION := "
-            f"DELETE: FLUX SYS EDITION ;"
+            f"FLUXL1 SYS EDITION := "
+            f"DELETE: FLUXL1 SYS EDITION ;"
         )
         proc.add_body_line(wrap_cle2000_line(delete_l1))
         proc.add_body_line("")
+
+        if mixeq_procedures:
+            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
+                if current_step_name == l1_step.name and next_step_name == l2_step.name:
+                    proc.add_body_line(
+                        f"* MIXEQ: {current_step_name} → {next_step_name}"
+                    )
+                    mixeq_call = (
+                        f"{edi_cond.lib_name} := {proc_name} {edi_cond.lib_name} ;"
+                    )
+                    proc.add_body_line(
+                        wrap_cle2000_line(
+                            f"{mixeq_call}"
+                        )
+                    )
+                    proc.add_body_line("")
 
         # --- ASM L2 + FLU L2 ---
         l2_asm_keyword = "PIJ" if l2_step.spatial_method == "CP" else "ARM"
@@ -1515,7 +1612,7 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"FLUX := FLU: {edi_cond.lib_name} SYS "
+                f"FLUXL2 := FLU: {edi_cond.lib_name} SYS "
                 f"{l2_trk} {l2_trkfil} ::"
             )
         )
@@ -1523,7 +1620,7 @@ class DragonCase:
         proc.add_body_line(";")
         proc.add_body_line(
             wrap_cle2000_line(
-                "GREP: FLUX :: GETVAL 'K-EFFECTIVE' 1 1 1 >>keffL2<< ;"
+                "GREP: FLUXL2 :: GETVAL 'K-EFFECTIVE' 1 1 1 >>keffL2<< ;"
             )
         )
         proc.add_body_line(f'ECHO "{self.case_name} L2 keff=" keffL2 ;')
@@ -1535,7 +1632,7 @@ class DragonCase:
         proc.add_body_line("*" * 50)
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{edir_proc_name} FLUX {edi_cond.lib_name} "
+                f"{edir_proc_name} FLUXL2 {edi_cond.lib_name} "
                 f"{l2_trk} :: <<name_compo>> ;"
             )
         )
@@ -1545,7 +1642,8 @@ class DragonCase:
     def _build_main_x2m_with_branches_2level(
         self, scheme, trk, lib, edi_compo,
         mix_proc_name, trk_proc_name,
-        edir_proc_name, draglib_alias,
+        edir_proc_name, mixeq_procedures,
+        draglib_alias,
         ssh_step,
     ):
         """Build the main .x2m for a 2-level scheme with branch WHILE loops.
@@ -1577,6 +1675,10 @@ class DragonCase:
         # --- Sub-procedures ---
         for sp_name in (mix_proc_name, trk_proc_name, edir_proc_name):
             proc.add_sub_procedure(sub_procedure(sp_name))
+        if mixeq_procedures:
+            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
+                sub_mixeq = sub_procedure(proc_name)
+                proc.add_sub_procedure(sub_mixeq)
 
         # --- Data structures ---
         proc.add_linked_list("LIBRARY")
@@ -1584,7 +1686,8 @@ class DragonCase:
         for trk_ll, _ in trk.get_track_names():
             proc.add_linked_list(trk_ll)
         proc.add_linked_list("SYS")
-        proc.add_linked_list("FLUX")
+        proc.add_linked_list("FLUXL1")
+        proc.add_linked_list("FLUXL2")
         proc.add_linked_list("EDITION")
         proc.add_linked_list(edi_cond.lib_name)
         proc.add_linked_list("COMPO")
@@ -1760,12 +1863,17 @@ class DragonCase:
         proc.add_body_line("")
 
         # --- MIX ---
-        ssh_method = ssh_step.self_shielding_method or "RSE"
+        ssh_method = ssh_step.self_shielding_method or "PT"
+        if hasattr(ssh_step, 'transport_correction') and ssh_step.transport_correction is not None:
+            transport_correction = ssh_step.transport_correction
+        else:
+            transport_correction = "NONE"
+
         if density_branch:
             mix_line = (
                 f"LIBRARY := {mix_proc_name} :: "
                 f"<<Draglib>> '{ssh_method}' <<o_anis>> "
-                f"'NONE' "
+                f"'{transport_correction}' "
                 f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
                 f"<<TCOOL>> <<TMODE>> <<TCTRL>> "
                 f"<<N_H>> <<N_O>> ;"
@@ -1774,7 +1882,7 @@ class DragonCase:
             mix_line = (
                 f"LIBRARY := {mix_proc_name} :: "
                 f"<<Draglib>> '{ssh_method}' <<o_anis>> "
-                f"'NONE' "
+                f"'{transport_correction}' "
                 f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
                 f"<<TCOOL>> <<TMODE>> <<TCTRL>> ;"
             )
@@ -1797,6 +1905,22 @@ class DragonCase:
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line("")
 
+        if mixeq_procedures:
+            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
+                if current_step_name == ssh_step.name and next_step_name == l1_step.name:
+                    proc.add_body_line(
+                        f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
+                    )
+                    mixeq_call = (
+                        f"{inner_indent}LIBRARY2 := {proc_name} LIBRARY2 ;"
+                    )
+                    proc.add_body_line(
+                        wrap_cle2000_line(
+                            f"{mixeq_call}"
+                        )
+                    )
+                    proc.add_body_line("")
+
         # --- ASM L1 + FLU L1 ---
         l1_asm_keyword = "PIJ" if l1_step.spatial_method == "CP" else "ARM"
         proc.add_body_line(f"{inner_indent}* ASM: + FLU: — first level")
@@ -1811,7 +1935,7 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}FLUX := FLU: SYS LIBRARY2 "
+                f"{inner_indent}FLUXL1 := FLU: SYS LIBRARY2 "
                 f"{l1_trk} {l1_trkfil} ::"
             )
         )
@@ -1819,7 +1943,7 @@ class DragonCase:
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}GREP: FLUX :: GETVAL "
+                f"{inner_indent}GREP: FLUXL1 :: GETVAL "
                 f"'K-EFFECTIVE' 1 1 1 >>keffL1<< ;"
             )
         )
@@ -1841,7 +1965,7 @@ class DragonCase:
 
         proc.add_body_block(
             _indent_block(
-                edi_cond.build_edi_call("FLUX", "LIBRARY2", l1_trk),
+                edi_cond.build_edi_call("FLUXL1", "LIBRARY2", l1_trk),
                 inner_indent,
             )
         )
@@ -1867,11 +1991,28 @@ class DragonCase:
         proc.add_body_line(f"{inner_indent}* Cleanup L1")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}FLUX SYS EDITION := "
-                f"DELETE: FLUX SYS EDITION ;"
+                f"{inner_indent}FLUXL1 SYS EDITION := "
+                f"DELETE: FLUXL1 SYS EDITION ;"
             )
         )
         proc.add_body_line("")
+
+        if mixeq_procedures:
+            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
+                if current_step_name == l1_step.name and next_step_name == l2_step.name:
+                    proc.add_body_line(
+                        f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
+                    )
+                    mixeq_call = (
+                        f"{inner_indent}{edi_cond.lib_name} := "
+                        f"{proc_name} {edi_cond.lib_name} ;"
+                    )
+                    proc.add_body_line(
+                        wrap_cle2000_line(
+                            f"{mixeq_call}"
+                        )
+                    )
+                    proc.add_body_line("")
 
         # --- ASM L2 + FLU L2 ---
         l2_asm_keyword = "PIJ" if l2_step.spatial_method == "CP" else "ARM"
@@ -1887,7 +2028,7 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}FLUX := FLU: {edi_cond.lib_name} SYS "
+                f"{inner_indent}FLUXL2 := FLU: {edi_cond.lib_name} SYS "
                 f"{l2_trk} {l2_trkfil} ::"
             )
         )
@@ -1895,7 +2036,7 @@ class DragonCase:
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}GREP: FLUX :: GETVAL "
+                f"{inner_indent}GREP: FLUXL2 :: GETVAL "
                 f"'K-EFFECTIVE' 1 1 1 >>keffL2<< ;"
             )
         )
@@ -1911,7 +2052,7 @@ class DragonCase:
         )
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}COMPO := {edir_proc_name} FLUX "
+                f"{inner_indent}COMPO := {edir_proc_name} FLUXL2 "
                 f"{edi_cond.lib_name} "
                 f"{l2_trk} COMPO :: <<name_compo>> "
                 f"{para_args} ;"
@@ -1930,7 +2071,7 @@ class DragonCase:
             )
         )
         proc.add_body_line(
-            f"{inner_indent}FLUX := DELETE: FLUX ;"
+            f"{inner_indent}FLUXL2 := DELETE: FLUXL2 ;"
         )
         proc.add_body_line(
             f"{inner_indent}SYS := DELETE: SYS ;"

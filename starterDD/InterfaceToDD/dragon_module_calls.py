@@ -1824,6 +1824,7 @@ class EDI_condensation:
     Generate the ``EDI:`` call that condenses cross sections from the
     fine energy mesh to a coarser one between two flux levels.
 
+    If lib_name is not specified :
     Produces two CLE-2000 lines:
 
     1. ``EDITION := EDI: <flux> <lib> <trk> :: EDIT 0 MICR ALL MERG MIX
@@ -1836,11 +1837,14 @@ class EDI_condensation:
         Carries ``number_of_macro_groups`` and ``energy_groups_bounds``.
     """
 
-    def __init__(self, edition_step):
+    def __init__(self, edition_step, lib_name=None):
         self.step = edition_step
         n = edition_step.number_of_macro_groups
+        if lib_name is None:
+            lib_name = f"LIB{n}G"
+        else:
+            self.lib_name = lib_name
         self.cond_name = f"COND{n}"
-        self.lib_name  = f"LIB{n}G"
 
     def build_edi_call(self, flux_ll, lib_ll, trk_ll):
         """Return the ``EDI:`` call block as a string.
@@ -1885,8 +1889,10 @@ class SPH_correction:
     Generate the ``SPH:`` equivalence correction call applied to the
     condensed library after a cross-section condensation step.
 
+    If lib_name is not specified,
     Produces:
       ``LIB<N>G := SPH: LIB<N>G <trk> <trkfil> :: EDIT 1 GRMAX <n> ;``
+    else: uses the provided lib_name as a CLE-2000 variable
 
     Parameters
     ----------
@@ -1894,10 +1900,13 @@ class SPH_correction:
         Carries ``number_of_macro_groups`` and ``max_sph_group``.
     """
 
-    def __init__(self, edition_step):
+    def __init__(self, edition_step, lib_name=None):
         self.step = edition_step
         n = edition_step.number_of_macro_groups
-        self.lib_name = f"LIB{n}G"
+        if lib_name is None:
+            self.lib_name = f"LIB{n}G"
+        else:
+            self.lib_name = lib_name
 
     def build_sph_call(self, trk_ll, trkfil_ll):
         """Return the ``SPH:`` call block as a string.
@@ -1940,7 +1949,7 @@ class MIXEQ:
         mixeq.write_to_c2m("./procs", "MIXEQ_SSH_to_L2")
     """
 
-    def __init__(self, assembly_model, from_step, to_step):
+    def __init__(self, assembly_model, lib_name, from_step, to_step):
         """
         Initialize MIXEQ procedure generator.
 
@@ -1956,6 +1965,7 @@ class MIXEQ:
             Target step name (e.g., "FLUX_L2") - typically uses by_pin strategy
         """
         self.assembly = assembly_model
+        self.lib_name = lib_name
         self.from_step = from_step
         self.to_step = to_step
 
@@ -2042,11 +2052,11 @@ class MIXEQ:
 
         # Start LIB: call in library edit mode (EDIT 0)
         call = (
-            "LIBEQ := LIB: LIBEQ ::\n"
+            f"{self.lib_name} := LIB: {self.lib_name} ::\n"
             "  EDIT 0\n"  # Library edit mode - read existing microlib
             f"  NMIX {max_mix}\n"
-            "  DEPL LIB: DRAGON FIL: LIBEQ\n"
-            "  MIXS LIB: MICROLIB FIL: LIBEQ\n"
+            f"  DEPL LIB: DRAGON FIL: {self.lib_name}\n"
+            f"  MIXS LIB: MICROLIB FIL: {self.lib_name}\n"
             "\n"
         )
 
@@ -2055,10 +2065,15 @@ class MIXEQ:
         sorted_table = sorted(self.correspondence_table, key=lambda x: x[3])
 
         for from_name, to_name, from_idx, to_idx in sorted_table:
-            call += f"  ! {from_name} → {to_name}\n"
-            call += f"  MIX {to_idx}\n"
-            call += f"    COMB {from_idx} 1.0\n"
-            call += "\n"
+            if from_idx == to_idx:
+                # No duplication needed, but we can still add a comment for clarity
+                call += f"  ! {from_name} → {to_name}\n"
+                continue
+            else:
+                call += f"  ! {from_name} → {to_name}\n"
+                call += f"  MIX {to_idx}\n"
+                call += f"    COMB {from_idx} 1.0\n"
+                call += "\n"
 
         call += ";"
         return call

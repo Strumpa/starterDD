@@ -633,6 +633,7 @@ class CalculationStep:
     """
 
     VALID_POLAR_QUADRATURES = ("GAUS", "CACA", "CACB", "LCMD", "OPP1", "OGAU")
+    VALID_TRANSPORT_CORRECTIONS = ("NONE", "APOL") # add more as needed
 
     def __init__(
         self,
@@ -655,6 +656,7 @@ class CalculationStep:
         num_angles_2d=8,
         line_density=25.0,
         anisotropy_level=1,
+        transport_correction=None,
         polar_angles_quadrature=None,
         number_of_polar_angles=None,
         mix_numbering_strategy="by_material",
@@ -1674,6 +1676,7 @@ class DragonCalculationScheme:
                 self_shielding_method=d.get(
                     "self_shielding_method", "RSE"),
                 spatial_method=d.get("spatial_method", "CP"),
+                transport_correction=d.get("transport_correction", None),
                 **common_kwargs,
             )
         else:
