@@ -979,6 +979,9 @@ class CartesianAssemblyModel:
 
         # If already at this strategy, no-op
         if self.current_mix_numbering_strategy == strategy:
+            # Capture the current state again so that per-step tracking / MIXEQ mapping
+            # has a distinct snapshot for each call, even when the strategy is unchanged.
+            self._capture_mix_state()
             return
 
         # Record old strategy for correspondence tracking
@@ -1040,15 +1043,25 @@ class CartesianAssemblyModel:
         forward_correspondence = {}
         for old_name in old_names:
             # Parse base material from old name
-            # Handle both "_zone_" (by_material) and "_zone" (by_pin) formats
-            base_material = old_name.split("_")[0]
-            zone_number = old_name.split("_")[2]
-
+            # Handle "_zone_" and "_pin_" patterns to extract the base material name for comparison
+            name_without_zone = old_name.rsplit("_zone_", 1)[0]
+            pin_split = name_without_zone.rsplit("_pin_", 1)
+            if len(pin_split) == 2 and pin_split[1].isdigit():
+                base_material = pin_split[0]
+            else:
+                base_material = name_without_zone
+            zone_number = old_name.rsplit("_zone_", 1)[1] if len(old_name.rsplit("_zone_", 1)) == 2 else None
+        
             # Find all new names with matching base material
             matching_new_names = []
             for new_name in new_names:
-                new_base = new_name.split("_")[0]
-                new_zone_number = new_name.split("_")[2]
+                new_name_without_zone = new_name.rsplit("_zone_", 1)[0]
+                new_pin_split = new_name_without_zone.rsplit("_pin_", 1)
+                if len(new_pin_split) == 2 and new_pin_split[1].isdigit():
+                    new_base = new_pin_split[0]
+                else:
+                    new_base = new_name_without_zone
+                new_zone_number = new_name.rsplit("_zone_", 1)[1].split("_")[0] if len(new_name.rsplit("_zone_", 1)) == 2 else None
                 if new_base == base_material and new_zone_number == zone_number:
                     matching_new_names.append(new_name)
 

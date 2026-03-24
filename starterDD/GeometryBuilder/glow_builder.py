@@ -83,10 +83,9 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
 
     Returns
     -------
-    lattice_components : list of list of RectCell
-        2D list of RectCell objects representing the lattice layout, with properties set
-        according to assemblyModel information. To be used to build lattice geometry with
-        glow and export to TDT file.
+    lattice_components : dictionary mapping (col_idx, row_idx) tuple to [RectCell, FuelPinModel]
+        Allows to keep track of of the pin model describing each cell to ensure proper order of addition to the lattice in 
+        ``add_cells_to_regular_lattice`` (non-generating cells are added first, then generating cells, to enforce correct mix numbering in SALOME).
     """
     # Import here to avoid circular import issues
     from ..DDModel.DragonModel import FuelPinModel

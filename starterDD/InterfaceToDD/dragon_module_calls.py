@@ -1945,7 +1945,7 @@ class MIXEQ:
     -----
     ::
         # Assuming assembly has steps with different strategies recorded
-        mixeq = MIXEQ(assembly, "SSH", "FLUX_L2")
+        mixeq = MIXEQ(assembly, lib_name, "SSH", "FLUX_L2")
         mixeq.write_to_c2m("./procs", "MIXEQ_SSH_to_L2")
     """
 
@@ -2166,9 +2166,9 @@ class MIXEQ:
             "* --------------------------------\n"
             "*    INPUT & OUTPUT PARAMETERS\n"
             "* --------------------------------\n"
-            "PARAMETER LIBEQ ::\n"
+            f"PARAMETER {self.lib_name} ::\n"
             "       EDIT 0\n"
-            "           ::: LINKED_LIST LIBEQ  ;\n"
+            f"           ::: LINKED_LIST {self.lib_name} ;\n"
             "   ;\n"
             "\n"
             "* --------------------------------\n"

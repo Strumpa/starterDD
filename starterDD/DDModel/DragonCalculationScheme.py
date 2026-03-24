@@ -702,6 +702,11 @@ class CalculationStep:
                     f"Invalid self_shielding_method '{self_shielding_method}'. "
                     f"Valid options: {VALID_SELF_SHIELDING_METHODS}"
                 )
+            if transport_correction is not None and transport_correction not in self.VALID_TRANSPORT_CORRECTIONS:
+                raise ValueError(
+                    f"Invalid transport_correction '{transport_correction}'. "
+                    f"Valid options: {self.VALID_TRANSPORT_CORRECTIONS}"
+                )
         else:
             # For non-self-shielding steps, these should be None
             if self_shielding_module is not None:
@@ -775,6 +780,7 @@ class CalculationStep:
         self.num_angles_2d = num_angles_2d
         self.line_density = line_density
         self.anisotropy_level = anisotropy_level
+        self.transport_correction = transport_correction
         self.polar_angles_quadrature = polar_angles_quadrature
         self.number_of_polar_angles = number_of_polar_angles
         self.mix_numbering_strategy = mix_numbering_strategy
