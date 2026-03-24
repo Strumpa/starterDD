@@ -312,7 +312,6 @@ class CartesianAssemblyModel:
                 else:                    
                     material_name = descriptor # if no mapping provided, use the descriptor in the lattice description as the material name for the pin geometry definition, but this would require that the descriptors in the lattice description are directly usable as material names for the pin geometry definition, which might not be the case depending on how the material compositions are defined for the assembly.
                     rod_id = None
-                    print(f"WARNING : No rod ID to material mapping provided, descriptor {descriptor} will be used as a material name for the pin geometry definition.")
                 pin_geometry_info = self.pin_geometry_dict # for now assume all pins have the same geometry information, but this can be updated later to allow for different pin geometries based on the material or rod ID for example by changing the structure of the pin_geometry_dict in the geometry description yaml file to allow for different geometry information for different types of pins.
                 if pin_geometry_info is not None:
                     fuel_radius = pin_geometry_info.get("fuel_radius", None)
@@ -356,12 +355,10 @@ class CartesianAssemblyModel:
                             pin_model.set_coolant_temperature(self.coolant_temperature)
                             # Set the generating cell status for self-shielding treatment and order of mix creation in glow
                             if material_name not in material_descriptors_used:
-                                print(f"Setting pin at lattice position ({x_index}, {y_index}) with material '{material_name}' as a generating cell.")
                                 pin_model.set_generating_cell_status(True)
                                 material_descriptors_used.append(material_name)
                                 self.generating_fuel_cells.append(pin_model)
                             else:
-                                print(f"Setting pin at lattice position ({x_index}, {y_index}) with material '{material_name}' as a non-generating cell.")
                                 pin_model.set_generating_cell_status(False)
                                 self.non_generating_fuel_cells.append(pin_model)
                             lattice_row.append(pin_model)
@@ -672,8 +669,7 @@ class CartesianAssemblyModel:
         mixtures.
 
         The symmetry detection is done automatically by
-        ``check_diagonal_symmetry()``, which checks anti-diagonal first
-        (the standard BWR convention), then main-diagonal.
+        ``check_diagonal_symmetry()``, which checks anti-diagonal first, then main-diagonal.
 
         Prerequisites
         -------------
@@ -754,9 +750,15 @@ class CartesianAssemblyModel:
         # ------------------------------------------------------------------
         self.fuel_material_mixtures = []
         for unique_name in unique_material_mixture_names:
-            # Extract base material name from "<material>_zone_<N>_pin_<M>"
-            base_material_name = unique_name.split("_")[0]
-            mix_index = material_mixtures_dict[unique_name]
+            # Extract base material name from unique_name, which follows
+            # a pattern like "<material>_zone_<N>_pin_<M>" (material may contain underscores).
+            # First remove any "_zone_<N>..." suffix, then strip a trailing "_pin_<M>" if present.
+            name_without_zone = unique_name.rsplit("_zone_", 1)[0]
+            pin_split = name_without_zone.rsplit("_pin_", 1)
+            if len(pin_split) == 2 and pin_split[1].isdigit():
+                base_material_name = pin_split[0]
+            else:
+                base_material_name = name_without_zone
 
             composition = self.composition_lookup.get(base_material_name, None)
             if composition is None:
@@ -1063,7 +1065,6 @@ class CartesianAssemblyModel:
         # Store bidirectional mappings
         self.mix_strategy_correspondences[(from_strategy, to_strategy)] = forward_correspondence
         self.mix_strategy_correspondences[(to_strategy, from_strategy)] = reverse_correspondence
-        print(self.mix_strategy_correspondences)
 
         print(f"[record_correspondence] Recorded {len(forward_correspondence)} forward "
               f"and {len(reverse_correspondence)} reverse name-based correspondences "

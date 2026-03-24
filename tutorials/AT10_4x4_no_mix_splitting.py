@@ -1,4 +1,4 @@
-# Example of a simple DRAGON 2-levels flux calulation scheme with starterDD
+# Example of a simple DRAGON 2-levels flux calculation scheme with starterDD
 # Generate a glow geometry with a single AT10 3x3 sub-assembly with 9 pins,
 # Run dragon with a RSE+IC self shielding step + first level IC on 295g + second level 26g MOC flux calculation.
 # At self shielding step and 1st level flux calculation, each pin is divided in Santamarina radial zones, 

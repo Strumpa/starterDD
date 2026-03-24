@@ -1516,5 +1516,4 @@ if __name__ == "__main__":
     test_get_corresponding_mixes()
     test_step_mix_state_tracking()
     test_build_mixeq_correspondence_table()
-    test_edi_compo_write_to_c2m()
     print("All tests passed successfully!")

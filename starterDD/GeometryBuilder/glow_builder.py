@@ -123,7 +123,7 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
                     PropertyType.MATERIAL: list_of_cell_mats,
                     PropertyType.MACRO: [f"MACRO{row_idx}{cell_idx}"] * len(list_of_cell_mats)
                 })
-            lattice_components[(row_idx, cell_idx)] = [tmp_cell, pin] # store both the cell and its associated pin model for later reference
+                lattice_components[(row_idx, cell_idx)] = [tmp_cell, pin] # store both the cell and its associated pin model for later reference
     return lattice_components
 
 
