@@ -123,7 +123,9 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
                     PropertyType.MATERIAL: list_of_cell_mats,
                     PropertyType.MACRO: [f"MACRO{row_idx}{cell_idx}"] * len(list_of_cell_mats)
                 })
-                lattice_components[(row_idx, cell_idx)] = [tmp_cell, pin] # store both the cell and its associated pin model for later reference
+                # cell_idx in row : column number, ie position along the x direction,
+                # row_idx in lattice: row number, ie position along the y direction
+                lattice_components[(cell_idx, row_idx)] = [tmp_cell, pin] # store both the cell and its associated pin model for later reference
     return lattice_components
 
 
@@ -1810,9 +1812,8 @@ def subdivide_box_into_macros(assembly_box_cell, assembly_model):
         if ctrl_shapes is not None:
             wing_footprints = list(ctrl_shapes["wing_footprints"])
 
-        # Compute stub footprints — moderator rectangles in the blade
-        # region but outside the arm extent.  These must get their own
-        # MACRO so they are not merged with the gap column/row MACROs.
+        # Compute stub footprints — moderator rectangles in the blade region but outside the arm extent. 
+        # These must get their own MACRO so they are not merged with the gap column/row MACROs.
         bt = ctrl.blade_thickness
         bhs = ctrl.blade_half_span
         bt2 = bt / 2.0

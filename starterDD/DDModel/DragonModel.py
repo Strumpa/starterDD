@@ -433,7 +433,7 @@ class CartesianAssemblyModel:
             - "by_material": pins sharing the same fuel_material_name are grouped together.
               A unique material mixture index and name is created for each self-shielding zone
               of each distinct fuel material (e.g. UOX16_zone_1, UOX16_zone_2, ...).
-            - "by_pin": (not yet implemented) each pin gets its own set of mixture indices.
+            - "by_pin": each pin gets its own set of mixture indices.
             - "custom": (not yet implemented) user supplies a mapping.
 
         Prerequisites:
@@ -753,6 +753,7 @@ class CartesianAssemblyModel:
             # Extract base material name from unique_name, which follows
             # a pattern like "<material>_zone_<N>_pin_<M>" (material may contain underscores).
             # First remove any "_zone_<N>..." suffix, then strip a trailing "_pin_<M>" if present.
+            mix_index = material_mixtures_dict[unique_name]
             name_without_zone = unique_name.rsplit("_zone_", 1)[0]
             pin_split = name_without_zone.rsplit("_pin_", 1)
             if len(pin_split) == 2 and pin_split[1].isdigit():
