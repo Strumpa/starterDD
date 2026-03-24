@@ -47,7 +47,7 @@ AT10_OUTPUT = GLOW_DATA / "starterDD_outputs" / "AT10_4x4" / "2L_scheme"
 run_dragon=True  # Set to False for a dry run (no Dragon execution)
 
 AT10_4x4_test_case = DragonCase(
-        case_name="AT10_4x4_mix_splitting",
+        case_name="AT10_4x4_by_pin",
         call_glow=False, # Set to True to call glow for geometry processing.
         draglibs_names_to_alias={
             "draglibJeff3p1p1SHEM295_v5p1": "J311_295",
@@ -55,7 +55,7 @@ AT10_4x4_test_case = DragonCase(
         config_yamls={
             "MATS": str(AT10_INPUTS / "material_compositions.yaml"),
             "GEOM": str(AT10_INPUTS / "GEOM_4x4.yaml"),
-            "CALC_SCHEME": str(AT10_INPUTS / "CALC_SCHEME_2L_split.yaml"),
+            "CALC_SCHEME": str(AT10_INPUTS / "CALC_SCHEME_2L_by_pin.yaml"),
         },
         output_path=str(AT10_OUTPUT),
         tdt_path=str(AT10_OUTPUT),

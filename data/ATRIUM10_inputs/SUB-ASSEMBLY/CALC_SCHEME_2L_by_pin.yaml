@@ -23,7 +23,7 @@ FLUX_CALCULATION_SCHEME:
     # ------------------------------------------------------------------
     - name: "SSH"
       step_type: "self_shielding"
-      mix_numbering_strategy: "by_material"
+      mix_numbering_strategy: "by_pin"
       self_shielding_module: "USS"
       self_shielding_method: "RSE"
       transport_correction: "NONE"
@@ -48,7 +48,7 @@ FLUX_CALCULATION_SCHEME:
     # ------------------------------------------------------------------
     - name: "FLUXL1"
       step_type: "flux"
-      mix_numbering_strategy: "by_material"
+      mix_numbering_strategy: "by_pin"
       spatial_method: "IC"
       tracking: "TISO"
       num_angles_2d: 8
@@ -145,7 +145,7 @@ CALCULATION_OUTPUTS:
   - name: "EDIHOM_295"
     comment: "Homogenized over all materials"
     isotopes: ["U238"] # 
-    spatial_intergation_mode : "ALL"
+    spatial_integration_mode : "ALL"
     energy_bounds : None # None : no condensation, keep all energy groups
     state_points: 
       coolant_density: [0.73669000] #[0.73669000, 0.59685660, 0.45702320, 0.31718980, 0.17735640]

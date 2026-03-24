@@ -221,8 +221,12 @@ class DragonCase:
                 print(f"[MIXEQ] Generating MIXEQ for {current_step.name} → {next_step.name}")
 
                 try:
+                    if current_step.step_type == "self_shielding":
+                        lib_name = f"LIBRARY2"
+                    else:
+                        lib_name = f"LIBEQ"
                     # Generate MIXEQ procedure
-                    mixeq = MIXEQ(assembly, current_step.name, next_step.name)
+                    mixeq = MIXEQ(assembly, lib_name, current_step.name, next_step.name)
                     proc_name = f"MIXEQ_{current_step.name}_to_{next_step.name}"
 
                     # Validate procedure name (CLE-2000 limitation)
@@ -515,7 +519,6 @@ class DragonCase:
                     "mix_names": names,
                     "tdt_indices": indices,
                 }
-        # Note: step_mix_mapping is prepared but not yet used in this version of the code.
 
         # 6. Generate MIXEQ procedures for numbering strategy transitions
         try:
@@ -1385,8 +1388,8 @@ class DragonCase:
 
         # Retrieve edition step for EDI/SPH helpers
         edi_step = scheme.get_edition_between_levels_steps()[0]
-        edi_cond = EDI_condensation(edi_step)
-        sph_corr = SPH_correction(edi_step)
+        edi_cond = EDI_condensation(edi_step, lib_name="LIBEQ")
+        sph_corr = SPH_correction(edi_step, lib_name="LIBEQ")
 
         flux_steps = scheme.get_flux_steps()
         l1_step = flux_steps[0]
@@ -1655,8 +1658,8 @@ class DragonCase:
         from .CLE2000 import wrap_cle2000_line
 
         edi_step = scheme.get_edition_between_levels_steps()[0]
-        edi_cond = EDI_condensation(edi_step)
-        sph_corr = SPH_correction(edi_step)
+        edi_cond = EDI_condensation(edi_step, lib_name="LIBEQ")
+        sph_corr = SPH_correction(edi_step, lib_name="LIBEQ")
 
         flux_steps = scheme.get_flux_steps()
         l1_step = flux_steps[0]

@@ -1841,7 +1841,7 @@ class EDI_condensation:
         self.step = edition_step
         n = edition_step.number_of_macro_groups
         if lib_name is None:
-            lib_name = f"LIB{n}G"
+            self.lib_name = f"LIB{n}G"
         else:
             self.lib_name = lib_name
         self.cond_name = f"COND{n}"
