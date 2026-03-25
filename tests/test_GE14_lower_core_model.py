@@ -567,7 +567,7 @@ class TestEDIMergMix:
 
         # Check that pin_idx from name matches the vector value
         for mix in ge14_assembly_for_lib.fuel_material_mixtures:
-            expected_pin = int(mix.unique_material_mixture_name.rsplit("_pin", 1)[1])
+            expected_pin = int(mix.unique_material_mixture_name.split("_")[-1])
             actual = vector[mix.material_mixture_index - 1]
             assert actual == expected_pin, \
                 f"Mix '{mix.unique_material_mixture_name}' should have pin_idx {expected_pin}, got {actual}"

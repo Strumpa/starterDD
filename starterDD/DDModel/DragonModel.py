@@ -30,6 +30,11 @@ class CartesianAssemblyModel:
         self.lattice = None # this will be a data structure representing the lattice of the assembly, which can be a 2D list of pin models corresponding to the lattice description, for example.
         self.set_uniform_temperatures(fuel_temperature=900.0, gap_temperature=600.0, coolant_temperature=600.0, moderator_temperature=600.0, structural_temperature=600.0) # default uniform temperatures for the assembly, which can be updated later based on the core description or other information provided for the assembly.
 
+        # --- Mix numbering state management (Phase 3 simplified) ---
+        self.current_mix_numbering_strategy = None  # Current strategy in use: "by_material" or "by_pin"
+        self.mix_state_history = []  # List of snapshots with mix names, TDT indices, step info
+        self.mix_strategy_correspondences = {}  # Name-based: {(from_strategy, to_strategy): {from_name: [to_names]}}
+
     def parse_geometry_description(self, geometry_description_yaml):
         """
         Parse the geometry description YAML file for the assembly.
@@ -295,17 +300,18 @@ class CartesianAssemblyModel:
         self.lattice = []
         number_of_water_rod_placeholders = 0
         pin_pitch = self.pin_geometry_dict.get("pin_pitch", 0) if self.pin_geometry_dict else 0
+        material_descriptors_used = [] # store descriptors that have already been analysed
+        self.generating_fuel_cells = []
+        self.non_generating_fuel_cells = []
         for y_index, row in enumerate(self.lattice_description):
             lattice_row = []
             for x_index, descriptor in enumerate(row):
                 if self.rod_ID_to_material_dict is not None:
                     material_name = self.rod_ID_to_material_dict.get(descriptor, None)
                     rod_id = descriptor
-                    print(f"Descriptor {descriptor} mapped to material name {material_name} based on rod ID to material mapping.")
                 else:                    
                     material_name = descriptor # if no mapping provided, use the descriptor in the lattice description as the material name for the pin geometry definition, but this would require that the descriptors in the lattice description are directly usable as material names for the pin geometry definition, which might not be the case depending on how the material compositions are defined for the assembly.
                     rod_id = None
-                    print(f"No rod ID to material mapping provided, descriptor {descriptor} will be used as a material name for the pin geometry definition.")
                 pin_geometry_info = self.pin_geometry_dict # for now assume all pins have the same geometry information, but this can be updated later to allow for different pin geometries based on the material or rod ID for example by changing the structure of the pin_geometry_dict in the geometry description yaml file to allow for different geometry information for different types of pins.
                 if pin_geometry_info is not None:
                     fuel_radius = pin_geometry_info.get("fuel_radius", None)
@@ -347,6 +353,14 @@ class CartesianAssemblyModel:
                             pin_model.set_clad_temperature(self.structural_temperature)
                             pin_model.set_gap_temperature(self.gap_temperature)
                             pin_model.set_coolant_temperature(self.coolant_temperature)
+                            # Set the generating cell status for self-shielding treatment and order of mix creation in glow
+                            if material_name not in material_descriptors_used:
+                                pin_model.set_generating_cell_status(True)
+                                material_descriptors_used.append(material_name)
+                                self.generating_fuel_cells.append(pin_model)
+                            else:
+                                pin_model.set_generating_cell_status(False)
+                                self.non_generating_fuel_cells.append(pin_model)
                             lattice_row.append(pin_model)
                         elif descriptor in self.non_fuel_rod_ids:
                             number_of_water_rod_placeholders += 1
@@ -419,7 +433,7 @@ class CartesianAssemblyModel:
             - "by_material": pins sharing the same fuel_material_name are grouped together.
               A unique material mixture index and name is created for each self-shielding zone
               of each distinct fuel material (e.g. UOX16_zone_1, UOX16_zone_2, ...).
-            - "by_pin": (not yet implemented) each pin gets its own set of mixture indices.
+            - "by_pin": each pin gets its own set of mixture indices.
             - "custom": (not yet implemented) user supplies a mapping.
 
         Prerequisites:
@@ -647,7 +661,7 @@ class CartesianAssemblyModel:
 
         Naming convention::
 
-            <material_composition>_zone<zone_idx>_pin<pin_idx>
+            <material_composition>_zone_<zone_idx>_pin_<pin_idx>
 
         If the lattice has diagonal symmetry (anti-diagonal or main-diagonal),
         pins at mirrored positions share the same ``pin_idx`` (and therefore
@@ -655,8 +669,7 @@ class CartesianAssemblyModel:
         mixtures.
 
         The symmetry detection is done automatically by
-        ``check_diagonal_symmetry()``, which checks anti-diagonal first
-        (the standard BWR convention), then main-diagonal.
+        ``check_diagonal_symmetry()``, which checks anti-diagonal first, then main-diagonal.
 
         Prerequisites
         -------------
@@ -720,7 +733,7 @@ class CartesianAssemblyModel:
                         n_zones = pin.number_of_self_shielding_fuel_zones
                         for zone_number in range(1, n_zones + 1):
                             unique_material_mixture_names.append(
-                                f"{pin.fuel_material_name}_zone{zone_number}_pin{pin_idx}"
+                                f"{pin.fuel_material_name}_zone_{zone_number}_pin_{pin_idx}"
                             )
 
         # Sequential indices starting from 1
@@ -737,9 +750,16 @@ class CartesianAssemblyModel:
         # ------------------------------------------------------------------
         self.fuel_material_mixtures = []
         for unique_name in unique_material_mixture_names:
-            # Extract base material name from "<material>_zone<N>_pin<M>"
-            base_material_name = unique_name.rsplit("_zone", 1)[0]
+            # Extract base material name from unique_name, which follows
+            # a pattern like "<material>_zone_<N>_pin_<M>" (material may contain underscores).
+            # First remove any "_zone_<N>..." suffix, then strip a trailing "_pin_<M>" if present.
             mix_index = material_mixtures_dict[unique_name]
+            name_without_zone = unique_name.rsplit("_zone_", 1)[0]
+            pin_split = name_without_zone.rsplit("_pin_", 1)
+            if len(pin_split) == 2 and pin_split[1].isdigit():
+                base_material_name = pin_split[0]
+            else:
+                base_material_name = name_without_zone
 
             composition = self.composition_lookup.get(base_material_name, None)
             if composition is None:
@@ -776,7 +796,7 @@ class CartesianAssemblyModel:
                     pin_mixture_indices = []
                     pin_mixture_names = []
                     for zone_number in range(1, n_zones + 1):
-                        zone_name = f"{pin.fuel_material_name}_zone{zone_number}_pin{pin_idx}"
+                        zone_name = f"{pin.fuel_material_name}_zone_{zone_number}_pin_{pin_idx}"
                         mix_index = material_mixtures_dict[zone_name]
                         mix = next(
                             m for m in self.fuel_material_mixtures
@@ -890,7 +910,181 @@ class CartesianAssemblyModel:
             raise RuntimeError("Fuel material mixtures have not been numbered yet. Call number_fuel_material_mixtures first.")
         return self.fuel_material_mixtures
 
-    def enforce_material_mixture_indices_from_tdt(self, tdt_indices_dict):
+    def _capture_mix_state(self):
+        """
+        Capture a snapshot of the current mix numbering state.
+
+        Records the current strategy, mix names, TDT indices (after enforcement),
+        and pin indices (for by_pin strategies). This snapshot is stored in
+        mix_state_history for later reference and per-step tracking.
+
+        Returns
+        -------
+        dict
+            Snapshot containing strategy, mix_names, tdt_indices, step_name, etc.
+        """
+        if not hasattr(self, 'fuel_material_mixture_names') or self.fuel_material_mixture_names is None:
+            raise RuntimeError(
+                "Fuel material mixtures have not been numbered yet. "
+                "Cannot capture mix state."
+            )
+
+        snapshot = {
+            "strategy": self.current_mix_numbering_strategy,
+            "mix_names": list(self.fuel_material_mixture_names),  # Direct name list
+            "tdt_indices": {},  # Populated after TDT enforcement
+            "tdt_enforced": False,  # Flag
+            "step_name": None,  # Set during TDT enforcement
+            "pin_indices": {},  # (row, col) → pin_idx for by_pin
+            "timestamp": len(self.mix_state_history),  # Ordinal
+        }
+
+        # Record pin indices if strategy is by_pin
+        if self.current_mix_numbering_strategy == "by_pin":
+            for i, row in enumerate(self.lattice):
+                for j, pin in enumerate(row):
+                    if isinstance(pin, FuelPinModel) and hasattr(pin, 'pin_idx'):
+                        snapshot["pin_indices"][(i, j)] = pin.pin_idx
+
+        self.mix_state_history.append(snapshot)
+        return snapshot
+
+    def apply_mix_numbering_strategy(self, strategy):
+        """
+        Apply a mix numbering strategy to the assembly, switching from the
+        current strategy if needed.
+
+        This method orchestrates calling the appropriate numbering method
+        (by_material or by_pin) and records the state transition.
+
+        Parameters
+        ----------
+        strategy : str
+            "by_material" or "by_pin".
+
+        Raises
+        ------
+        ValueError
+            If strategy is not one of the valid options.
+        RuntimeError
+            If material compositions have not been set or lattice not built.
+        """
+        from .DragonCalculationScheme import VALID_MIX_NUMBERING_STRATEGIES
+
+        if strategy not in VALID_MIX_NUMBERING_STRATEGIES:
+            raise ValueError(
+                f"Invalid mix_numbering_strategy '{strategy}'. "
+                f"Valid options: {VALID_MIX_NUMBERING_STRATEGIES}"
+            )
+
+        # If already at this strategy, no-op
+        if self.current_mix_numbering_strategy == strategy:
+            # Capture the current state again so that per-step tracking / MIXEQ mapping
+            # has a distinct snapshot for each call, even when the strategy is unchanged.
+            self._capture_mix_state()
+            return
+
+        # Record old strategy for correspondence tracking
+        old_strategy = self.current_mix_numbering_strategy
+
+        # Apply the new strategy
+        if strategy == "by_material":
+            self.number_fuel_material_mixtures_by_material()
+        elif strategy == "by_pin":
+            self.number_fuel_material_mixtures_by_pin()
+
+        # Update current strategy
+        self.current_mix_numbering_strategy = strategy
+
+        # Capture the new state for history and correspondence tracking
+        self._capture_mix_state()
+
+        # Record the transition
+        if old_strategy is not None:
+            self.record_mix_correspondence_transition(old_strategy, strategy)
+
+        print(f"[apply_mix_numbering] Switched from {old_strategy} to {strategy}.")
+
+    def record_mix_correspondence_transition(self, from_strategy, to_strategy):
+        """
+        Record name-based correspondence mapping between mix numbering strategies.
+
+        Creates bidirectional mappings between mixes in different strategies based
+        on their base material name. This enables querying which mixes in one
+        strategy correspond to mixes in another strategy.
+
+        For example, by_material → by_pin creates:
+        - Forward: "UOX_zone_1" → ["UOX_zone1_pin1", "UOX_zone1_pin2", ...]
+        - Reverse: "UOX_zone_1_pin1" → ["UOX_zone_1"]
+
+        The correspondences are stored in `self.mix_strategy_correspondences` as:
+        {(from_strategy, to_strategy): {from_mix_name: [to_mix_name1, ...]}}
+
+        Parameters
+        ----------
+        from_strategy : str
+            The previous strategy (e.g., "by_material").
+        to_strategy : str
+            The new strategy (e.g., "by_pin").
+        """
+        if len(self.mix_state_history) < 2:
+            print(f"[record_correspondence] Not enough history to track correspondence "
+                  f"from {from_strategy} to {to_strategy}. Skipping.")
+            return
+
+        old_snapshot = self.mix_state_history[-2]  # Previous state
+        new_snapshot = self.mix_state_history[-1]  # Current state
+
+        # Get mix names from both snapshots
+        old_names = old_snapshot["mix_names"]
+        new_names = new_snapshot["mix_names"]
+
+        # Build forward correspondence: old_name → [new_names]
+        forward_correspondence = {}
+        for old_name in old_names:
+            # Parse base material from old name
+            # Handle "_zone_" and "_pin_" patterns to extract the base material name for comparison
+            name_without_zone = old_name.rsplit("_zone_", 1)[0]
+            pin_split = name_without_zone.rsplit("_pin_", 1)
+            if len(pin_split) == 2 and pin_split[1].isdigit():
+                base_material = pin_split[0]
+            else:
+                base_material = name_without_zone
+            zone_number = old_name.rsplit("_zone_", 1)[1] if len(old_name.rsplit("_zone_", 1)) == 2 else None
+        
+            # Find all new names with matching base material
+            matching_new_names = []
+            for new_name in new_names:
+                new_name_without_zone = new_name.rsplit("_zone_", 1)[0]
+                new_pin_split = new_name_without_zone.rsplit("_pin_", 1)
+                if len(new_pin_split) == 2 and new_pin_split[1].isdigit():
+                    new_base = new_pin_split[0]
+                else:
+                    new_base = new_name_without_zone
+                new_zone_number = new_name.rsplit("_zone_", 1)[1].split("_")[0] if len(new_name.rsplit("_zone_", 1)) == 2 else None
+                if new_base == base_material and new_zone_number == zone_number:
+                    matching_new_names.append(new_name)
+
+            if matching_new_names:
+                forward_correspondence[old_name] = matching_new_names
+
+        # Build reverse correspondence: new_name → [old_names]
+        reverse_correspondence = {}
+        for old_name, new_names_list in forward_correspondence.items():
+            for new_name in new_names_list:
+                if new_name not in reverse_correspondence:
+                    reverse_correspondence[new_name] = []
+                reverse_correspondence[new_name].append(old_name)
+
+        # Store bidirectional mappings
+        self.mix_strategy_correspondences[(from_strategy, to_strategy)] = forward_correspondence
+        self.mix_strategy_correspondences[(to_strategy, from_strategy)] = reverse_correspondence
+
+        print(f"[record_correspondence] Recorded {len(forward_correspondence)} forward "
+              f"and {len(reverse_correspondence)} reverse name-based correspondences "
+              f"between {from_strategy} and {to_strategy}.")
+
+    def enforce_material_mixture_indices_from_tdt(self, tdt_indices_dict, step_name=None):
         """
         Update material mixture indices in the assembly model so they match the
         indices assigned by glow/SALOME in the TDT file.
@@ -906,6 +1100,9 @@ class CartesianAssemblyModel:
         3. Every ``MaterialMixture`` object in ``self.fuel_material_mixtures``
         4. Every ``FuelPinModel`` in the lattice (``pin.fuel_material_mixture_indices``)
 
+        Additionally, stores TDT indices in the current mix_state_history entry for
+        per-step tracking.
+
         Parameters
         ----------
         tdt_indices_dict : dict[str, int]
@@ -914,6 +1111,9 @@ class CartesianAssemblyModel:
             names in the assembly model are applied; extra entries (e.g. COOLANT,
             CLAD, MODERATOR, GAP, CHANNEL_BOX) are stored separately in
             ``self.non_fuel_material_mixture_indices`` for later use.
+        step_name : str, optional
+            Name of the calculation step (e.g., "SSH", "FLUX_L1") for tracking
+            per-step mix state.
 
         Raises
         ------
@@ -985,6 +1185,16 @@ class CartesianAssemblyModel:
         if non_fuel:
             print(f"[enforce_tdt] Also stored {len(non_fuel)} non-fuel mixture indices: {non_fuel}")
 
+        # --- STORE TDT INDICES IN CURRENT MIX STATE HISTORY ---
+        # Record TDT indices in the current mix state snapshot for per-step tracking
+        if self.mix_state_history:
+            current_state = self.mix_state_history[-1]
+            current_state["tdt_indices"] = dict(self.material_mixtures_dict)  # Copy final indices
+            current_state["tdt_enforced"] = True
+            if step_name:
+                current_state["step_name"] = step_name
+                print(f"[enforce_tdt] Stored TDT indices for step '{step_name}' in mix state history.")
+
         # --- Update per-tube control cross absorber mixtures (if any) ---
         if ctrl_cross_names_set:
             missing_ctrl = [
@@ -1002,6 +1212,206 @@ class CartesianAssemblyModel:
                 ]
             print(f"[enforce_tdt] Updated {len(ctrl_cross_names_set)} "
                   f"control cross absorber tube indices from TDT file.")
+
+    def get_corresponding_mixes(self, mix_name, from_strategy, to_strategy):
+        """
+        Query which mixes in to_strategy correspond to mix_name in from_strategy.
+
+        Uses the name-based correspondence mapping built during strategy transitions
+        to find related mixes across different numbering strategies.
+
+        Parameters
+        ----------
+        mix_name : str
+            Mix name in from_strategy (e.g., "UOX_zone_1")
+        from_strategy : str
+            Source strategy ("by_material" or "by_pin")
+        to_strategy : str
+            Target strategy ("by_material" or "by_pin")
+
+        Returns
+        -------
+        list[str]
+            List of corresponding mix names in to_strategy. Empty list if no
+            correspondence exists.
+
+        Examples
+        --------
+        >>> assembly.get_corresponding_mixes("UOX_zone_1", "by_material", "by_pin")
+        ["UOX_zone_1_pin1", "UOX_zone_1_pin2"]
+
+        >>> assembly.get_corresponding_mixes("UOX_zone_1_pin1", "by_pin", "by_material")
+        ["UOX_zone_1"]
+        """
+        transition_key = (from_strategy, to_strategy)
+        if transition_key not in self.mix_strategy_correspondences:
+            return []
+
+        correspondence = self.mix_strategy_correspondences[transition_key]
+        return correspondence.get(mix_name, [])
+
+    def get_step_mix_state(self, step_name):
+        """
+        Retrieve the mix state snapshot for a specific calculation step.
+
+        Returns the complete state information recorded during that step's mix
+        numbering and TDT enforcement, including strategy, mix names, and TDT
+        indices.
+
+        Parameters
+        ----------
+        step_name : str
+            Step name (e.g., "SSH", "FLUX_L1", "FLUX_L2")
+
+        Returns
+        -------
+        dict or None
+            State snapshot containing:
+            - strategy: mix numbering strategy
+            - mix_names: list of mix names
+            - tdt_indices: {name: tdt_idx} if enforced, else {}
+            - tdt_enforced: boolean
+            - step_name: step identifier
+            - pin_indices: {(row, col): pin_idx} for by_pin strategies
+            Returns None if step not found.
+
+        Examples
+        --------
+        >>> ssh_state = assembly.get_step_mix_state("SSH")
+        >>> ssh_state["strategy"]
+        "by_material"
+        >>> ssh_state["mix_names"]
+        ["UOX_zone_1", "UOX_zone_2", "GD_zone_1"]
+        >>> ssh_state["tdt_indices"]["UOX_zone_1"]
+        101
+        """
+        for snapshot in self.mix_state_history:
+            if snapshot.get("step_name") == step_name:
+                return snapshot
+        return None
+
+    def get_step_mix_names_and_indices(self, step_name):
+        """
+        Get mix names and their TDT indices for a specific calculation step.
+
+        Convenience method that extracts just the names and indices from the
+        step's state snapshot.
+
+        Parameters
+        ----------
+        step_name : str
+            Step name (e.g., "FLUX_L1")
+
+        Returns
+        -------
+        tuple[list[str], dict[str, int]] or (None, None)
+            (mix_names, tdt_indices_dict) if step found, else (None, None).
+            If step exists but TDT not yet enforced, returns (mix_names, {}).
+
+        Examples
+        --------
+        >>> names, indices = assembly.get_step_mix_names_and_indices("FLUX_L1")
+        >>> names
+        ["UOX_zone1_pin1", "UOX_zone1_pin2", ...]
+        >>> indices
+        {"UOX_zone1_pin1": 201, "UOX_zone1_pin2": 202, ...}
+        """
+        state = self.get_step_mix_state(step_name)
+        if state is None:
+            return None, None
+
+        if not state.get("tdt_enforced", False):
+            print(f"[WARNING] Step '{step_name}' has no TDT-enforced indices yet.")
+            return state["mix_names"], {}
+
+        return state["mix_names"], state["tdt_indices"]
+
+    def build_mixeq_correspondence_table(self, from_step, to_step):
+        """
+        Build a correspondence table for MIXEQ.c2m procedure generation.
+
+        For depletion tracking across calculation steps with different mix
+        numbering strategies, DRAGON requires a MIXEQ module that maps mixes
+        between steps. This method builds the required correspondence table.
+
+        Parameters
+        ----------
+        from_step : str
+            Source step name (e.g., "SSH", "FLUX_L1")
+        to_step : str
+            Target step name (e.g., "FLUX_L1", "FLUX_L2")
+
+        Returns
+        -------
+        list[tuple[str, str, int, int]]
+            List of (from_mix_name, to_mix_name, from_tdt_idx, to_tdt_idx)
+            tuples representing the correspondence mapping.
+
+        Raises
+        ------
+        ValueError
+            If either step state is not found or if no correspondence exists
+            between the strategies used by the two steps.
+
+        Examples
+        --------
+        >>> table = assembly.build_mixeq_correspondence_table("SSH", "FLUX_L1")
+        >>> table[0]
+        ("UOX_zone_1", "UOX_zone1_pin1", 101, 201)
+
+        >>> # Use in MIXEQ.c2m generation:
+        >>> for from_name, to_name, from_idx, to_idx in table:
+        """
+        from_state = self.get_step_mix_state(from_step)
+        to_state = self.get_step_mix_state(to_step)
+
+        if from_state is None or to_state is None:
+            raise ValueError(
+                f"Step state not found. Available steps: "
+                f"{[s.get('step_name') for s in self.mix_state_history if s.get('step_name')]}"
+            )
+
+        from_strategy = from_state["strategy"]
+        to_strategy = to_state["strategy"]
+        from_tdt = from_state.get("tdt_indices", {})
+        to_tdt = to_state.get("tdt_indices", {})
+
+        # If strategies are the same, no correspondence needed (1-to-1 mapping by name)
+        if from_strategy == to_strategy:
+            print(f"[build_mixeq] Steps '{from_step}' and '{to_step}' use the same strategy "
+                  f"({from_strategy}). Building 1-to-1 correspondence by name.")
+            table = []
+            for from_name in from_state["mix_names"]:
+                if from_name in from_tdt and from_name in to_tdt:
+                    table.append((from_name, from_name, from_tdt[from_name], to_tdt[from_name]))
+            return table
+
+        # Different strategies - use recorded correspondence
+        transition_key = (from_strategy, to_strategy)
+        if transition_key not in self.mix_strategy_correspondences:
+            raise ValueError(
+                f"No correspondence recorded for {from_strategy} → {to_strategy}. "
+                f"Available transitions: {list(self.mix_strategy_correspondences.keys())}"
+            )
+
+        correspondence = self.mix_strategy_correspondences[transition_key]
+
+        # Build table: (from_name, to_name, from_idx, to_idx)
+        table = []
+        for from_name, to_names in correspondence.items():
+            from_idx = from_tdt.get(from_name)
+            if from_idx is None:
+                continue
+            for to_name in to_names:
+                to_idx = to_tdt.get(to_name)
+                if to_idx is not None:
+                    table.append((from_name, to_name, from_idx, to_idx))
+
+        if not table:
+            print(f"[WARNING] No valid correspondences found between '{from_step}' and '{to_step}' "
+                  f"(both steps may lack TDT enforcement).")
+
+        return table
 
     def get_postprocessing_lattice_info(self):
         """
@@ -1334,6 +1744,7 @@ class FuelPinModel:
         self.height = height
         self.isGd = isGd
         self.self_shielding_option = self_shielding_option
+        self.isGeneratingCell = False # By default pins are not generating cells, this attribute is updated after creation if the pin is identified as a generating cell.
 
         if self_shielding_option is None:
             # Default: single fuel region (1-zone) – awaiting DragonCalculationScheme
@@ -1450,6 +1861,12 @@ class FuelPinModel:
         self.center_x = center_x
         self.center_y = center_y
         self.center = (center_x, center_y)
+
+    def set_generating_cell_status(self, is_generating):
+        """
+        Set whether this pin is a generating cell for self-shielding treatment in Dragon.
+        """
+        self.isGeneratingCell = is_generating
 
 
 class CircularWaterRodModel:

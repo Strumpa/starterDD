@@ -7,7 +7,7 @@
 # Date : 12/03/2026 [created]
 
 FLUX_CALCULATION_SCHEME:
-  name: "AT10_PINCELL_2L_IC_MOC"
+  name: "AT10_PINCELL_1L_MOC"
 
   steps:
     # ------------------------------------------------------------------
@@ -18,6 +18,7 @@ FLUX_CALCULATION_SCHEME:
     #   - TISO tracking (isotropic)
     #   - Santamarina radii for fuel zone subdivision
     #   - No azimuthal sectorization
+    #   - Self-shielding mixes : by pin numbering, subdivided into Santamarina zones
     # ------------------------------------------------------------------
     - name: "SSH"
       step_type: "self_shielding"
@@ -29,53 +30,21 @@ FLUX_CALCULATION_SCHEME:
       tracking: "TISO"
       num_angles_2d: 8
       line_density: 25.0
-      # No need for polar angles and nmu as not used outside of MOC. Should be supported 
       anisotropy_level: 4
       radial_scheme: "Santamarina"
       export_macros: true
       sectorization:
         enabled: false
-    
-    # ------------------------------------------------------------------
-    # Step 2: Flux calculation (first level)
-    #   - IC spatial solution for the flux calculation
-    #   - TISO tracking (isotropic tracks, reflective boundary conditions)
-    #   - Santamarina radii (same subdivision as SSH)
-    #   - Windmill sectorization on coolant region
-    # ------------------------------------------------------------------
-    - name: "FLUXL1"
-      step_type: "flux"
-      mix_numbering_strategy: "by_pin"
-      spatial_method: "IC"
-      tracking: "TISO"
-      num_angles_2d: 8
-      line_density: 25.0
-      anisotropy_level: 4
-      radial_scheme: "Santamarina"
-      export_macros: True
-      sectorization:
-        enabled: True
-        windmill: True
-        fuel_pins:
-          # UOX pins: 4 Santamarina fuel zones + gap + clad + coolant = 7 regions
-          sectors: [1, 1, 1, 1, 1, 1, 8]
-          angles:  [0, 0, 0, 0, 0, 0, 22.5]
 
-    - name: "Energy condensation"
-      step_type: "edition_between_levels"
-      number_of_macro_groups: 26
-      energy_groups_bounds: [10,  14,  18,  26,  33,  40,  49,  56,  66, 84,
-       150, 210, 241, 244, 247, 252, 255, 258, 261, 268, 273, 277, 281, 286, 291]
-      SPH_correction: True
-      max_SPH_group: 19
     # ------------------------------------------------------------------
-    # Step 3: Flux calculation (second level)
+    # Step 2: Flux calculation (single level)
     #   - MOC spatial solution for the flux calculation
     #   - TSPC tracking (cyclic tracks, specular boundary conditions)
     #   - Santamarina radii (same subdivision as SSH)
     #   - Windmill sectorization on coolant region
+    #   - Material mixes numbering : by pin numbering, subdivided into Santamarina zones
     # ------------------------------------------------------------------
-    - name: "FLUXL2"
+    - name: "FLUX"
       step_type: "flux"
       mix_numbering_strategy: "by_pin"
       spatial_method: "MOC"
@@ -124,7 +93,7 @@ CALCULATION_OUTPUTS:
   - name: "EDIHOM_295"
     comment: "Homogenized over all materials"
     isotopes: ["U238"] # 
-    spatial_intergation_mode : "ALL"
+    spatial_integration_mode : "ALL"
     energy_bounds : None # None : no condensation, keep all energy groups
     state_points: 
       coolant_density: [0.73669000] #[0.73669000, 0.59685660, 0.45702320, 0.31718980, 0.17735640]

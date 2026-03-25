@@ -1000,7 +1000,7 @@ class TestSerpent2DetectorAPI:
         )
         assembly.analyze_lattice_description(build_pins=True, apply_self_shielding="from_yaml")
         assembly.set_material_compositions(compositions)
-        assembly.number_fuel_material_mixtures_by_pin()
+        assembly.apply_mix_numbering_strategy("by_pin")
 
         model = Serpent2Model(assembly_model=assembly)
         model.build(
@@ -1051,7 +1051,7 @@ class TestSerpent2DetectorAPI:
         )
         assembly.analyze_lattice_description(build_pins=True, apply_self_shielding="from_yaml")
         assembly.set_material_compositions(compositions)
-        assembly.number_fuel_material_mixtures_by_pin()
+        assembly.apply_mix_numbering_strategy("by_pin")
 
         model = Serpent2Model(assembly_model=assembly)
         model.build(

@@ -777,9 +777,9 @@ class EDI:
 
         elif self.spatial_mode == "by_pin":
             for mix in self.assembly.fuel_material_mixtures:
-                # Parse pin_idx from "UOX28_zone1_pin3"
+                # Parse pin_idx from "UOX28_zone_1_pin_3"
                 pin_idx = int(
-                    mix.unique_material_mixture_name.rsplit("_pin", 1)[1]
+                    mix.unique_material_mixture_name.split("_")[-1]
                 )
                 vector[mix.material_mixture_index - 1] = pin_idx
 
@@ -1824,6 +1824,7 @@ class EDI_condensation:
     Generate the ``EDI:`` call that condenses cross sections from the
     fine energy mesh to a coarser one between two flux levels.
 
+    If lib_name is not specified :
     Produces two CLE-2000 lines:
 
     1. ``EDITION := EDI: <flux> <lib> <trk> :: EDIT 0 MICR ALL MERG MIX
@@ -1836,11 +1837,14 @@ class EDI_condensation:
         Carries ``number_of_macro_groups`` and ``energy_groups_bounds``.
     """
 
-    def __init__(self, edition_step):
+    def __init__(self, edition_step, lib_name=None):
         self.step = edition_step
         n = edition_step.number_of_macro_groups
+        if lib_name is None:
+            self.lib_name = f"LIB{n}G"
+        else:
+            self.lib_name = lib_name
         self.cond_name = f"COND{n}"
-        self.lib_name  = f"LIB{n}G"
 
     def build_edi_call(self, flux_ll, lib_ll, trk_ll):
         """Return the ``EDI:`` call block as a string.
@@ -1885,8 +1889,10 @@ class SPH_correction:
     Generate the ``SPH:`` equivalence correction call applied to the
     condensed library after a cross-section condensation step.
 
+    If lib_name is not specified,
     Produces:
       ``LIB<N>G := SPH: LIB<N>G <trk> <trkfil> :: EDIT 1 GRMAX <n> ;``
+    else: uses the provided lib_name as a CLE-2000 variable
 
     Parameters
     ----------
@@ -1894,10 +1900,13 @@ class SPH_correction:
         Carries ``number_of_macro_groups`` and ``max_sph_group``.
     """
 
-    def __init__(self, edition_step):
+    def __init__(self, edition_step, lib_name=None):
         self.step = edition_step
         n = edition_step.number_of_macro_groups
-        self.lib_name = f"LIB{n}G"
+        if lib_name is None:
+            self.lib_name = f"LIB{n}G"
+        else:
+            self.lib_name = lib_name
 
     def build_sph_call(self, trk_ll, trkfil_ll):
         """Return the ``SPH:`` call block as a string.
@@ -1918,3 +1927,291 @@ class SPH_correction:
             lines.append(f"    GRMAX {self.step.max_sph_group}")
         lines.append(";")
         return "\n".join(lines) + "\n"
+
+
+class MIXEQ:
+    """
+    Class for generating DRAGON5 MIXEQ procedure files (.c2m).
+
+    When calculation steps use different mix numbering strategies,
+    DRAGON requires a MIXEQ module to map mixtures between steps.
+    This class generates the required correspondence using library edit mode.
+
+    The MIXEQ procedure duplicates mixtures from an initial "by material"
+    library to a comprehensive "by pin" or other numbering scheme using
+    the LIB: module in library edit mode.
+
+    Usage
+    -----
+    ::
+        # Assuming assembly has steps with different strategies recorded
+        mixeq = MIXEQ(assembly, lib_name, "SSH", "FLUX_L2")
+        mixeq.write_to_c2m("./procs", "MIXEQ_SSH_to_L2")
+    """
+
+    def __init__(self, assembly_model, lib_name, from_step, to_step):
+        """
+        Initialize MIXEQ procedure generator.
+
+        Parameters
+        ----------
+        assembly_model : CartesianAssemblyModel
+            Assembly with mix state history from multiple steps.
+            Must have run different numbering strategies and recorded
+            the state history for both from_step and to_step.
+        from_step : str
+            Source step name (e.g., "SSH") - typically uses by_material strategy
+        to_step : str
+            Target step name (e.g., "FLUX_L2") - typically uses by_pin strategy
+        """
+        self.assembly = assembly_model
+        self.lib_name = lib_name
+        self.from_step = from_step
+        self.to_step = to_step
+
+        # Get correspondence table using existing method
+        try:
+            self.correspondence_table = assembly_model.build_mixeq_correspondence_table(
+                from_step, to_step
+            )
+        except AttributeError:
+            raise RuntimeError(
+                f"Assembly model does not have build_mixeq_correspondence_table method. "
+                f"This indicates the assembly may not support MIXEQ generation."
+            )
+
+        # Validate that correspondence table is not empty
+        if not self.correspondence_table:
+            raise ValueError(
+                f"No correspondence found between steps '{from_step}' and '{to_step}'. "
+                f"Ensure both steps have been processed with different numbering strategies."
+            )
+
+    def _determine_max_mix_count(self):
+        """
+        Calculate maximum mixture index needed for the library.
+
+        Returns
+        -------
+        int
+            Maximum mixture index from correspondence table
+        """
+        if not self.correspondence_table:
+            return 0
+
+        # Get max index from correspondence table
+        max_from = max(entry[2] for entry in self.correspondence_table)  # from_idx
+        max_to = max(entry[3] for entry in self.correspondence_table)    # to_idx
+        return max(max_from, max_to)
+
+    def _validate_correspondence_completeness(self):
+        """
+        Validate that correspondence table covers required mixtures.
+
+        Returns
+        -------
+        bool
+            True if validation passes
+
+        Raises
+        ------
+        ValueError
+            If validation fails
+        """
+        if not self.correspondence_table:
+            raise ValueError(f"Empty correspondence table for {self.from_step} → {self.to_step}")
+
+        # Check if step mix states exist in assembly history
+        if hasattr(self.assembly, 'mix_state_history'):
+            from_state = self.assembly.get_step_mix_state(self.from_step)
+            to_state = self.assembly.get_step_mix_state(self.to_step)
+
+            if not from_state:
+                raise ValueError(f"No mix state found for step '{self.from_step}'")
+            if not to_state:
+                raise ValueError(f"No mix state found for step '{self.to_step}'")
+
+        return True
+
+    def build_lib_module_call(self):
+        """
+        Generate LIB: module call in library edit mode for mixture duplication.
+
+        Returns
+        -------
+        str
+            Complete LIB: module call with COMB statements for mixture duplication
+        """
+        if not self.correspondence_table:
+            raise ValueError(f"No correspondence found between {self.from_step} and {self.to_step}")
+
+        # Validate correspondence before building
+        self._validate_correspondence_completeness()
+
+        max_mix = self._determine_max_mix_count()
+
+        # Start LIB: call in library edit mode (EDIT 0)
+        call = (
+            f"{self.lib_name} := LIB: {self.lib_name} ::\n"
+            "  EDIT 0\n"  # Library edit mode - read existing microlib
+            f"  NMIX {max_mix}\n"
+            f"  DEPL LIB: DRAGON FIL: {self.lib_name}\n"
+            f"  MIXS LIB: MICROLIB FIL: {self.lib_name}\n"
+            "\n"
+        )
+
+        # Generate COMB statements for mixture duplication
+        # Sort by target index to ensure consistent output
+        sorted_table = sorted(self.correspondence_table, key=lambda x: x[3])
+
+        for from_name, to_name, from_idx, to_idx in sorted_table:
+            if from_idx == to_idx:
+                # No duplication needed, but we can still add a comment for clarity
+                call += f"  ! {from_name} → {to_name}\n"
+                continue
+            else:
+                call += f"  ! {from_name} → {to_name}\n"
+                call += f"  MIX {to_idx}\n"
+                call += f"    COMB {from_idx} 1.0\n"
+                call += "\n"
+
+        call += ";"
+        return call
+
+    def _validate_max_mix_count(self, expected_max=None):
+        """
+        Validate max mix count against expected value.
+
+        Parameters
+        ----------
+        expected_max : int, optional
+            Expected maximum mixture count. If provided, raises error if
+            calculated max exceeds this value.
+
+        Returns
+        -------
+        int
+            Calculated maximum mixture count
+        """
+        calculated_max = self._determine_max_mix_count()
+
+        if expected_max and calculated_max > expected_max:
+            raise ValueError(
+                f"Calculated max mix count ({calculated_max}) exceeds "
+                f"expected maximum ({expected_max}) for transition "
+                f"{self.from_step} → {self.to_step}"
+            )
+
+        return calculated_max
+
+    def build_mix_index_comment_block(self):
+        """
+        Build comment block showing mixture correspondence mapping.
+
+        Returns
+        -------
+        str
+            Comment block with mixture mapping information
+        """
+        if not self.correspondence_table:
+            return "! No mixture correspondences found\n"
+
+        comment = (
+            f"! --------------------------------\n"
+            f"! MIXTURE CORRESPONDENCE MAPPING\n"
+            f"! {self.from_step} → {self.to_step}\n"
+            f"! --------------------------------\n"
+        )
+
+        for from_name, to_name, from_idx, to_idx in self.correspondence_table:
+            comment += f"! MIX {from_idx:<3} → MIX {to_idx:<3} ({from_name} → {to_name})\n"
+
+        comment += f"! --------------------------------\n"
+        return comment
+
+    def write_to_c2m(self, path_to_procs, proc_name):
+        """
+        Write complete MIXEQ procedure to .c2m file.
+
+        The generated file is a standalone CLE-2000 procedure that receives
+        an input microlib and returns an enhanced microlib with additional
+        mixture duplications.
+
+        Parameters
+        ----------
+        path_to_procs : str
+            Directory path for the output file.
+        proc_name : str
+            Procedure name (without .c2m extension).
+
+        Returns
+        -------
+        str
+            Relative path of the written file.
+        """
+        from .CLE2000 import validate_varname
+
+        # Validate procedure name (CLE-2000 limitation)
+        validate_varname(proc_name[:12])
+
+        # Validate correspondence before writing
+        self._validate_correspondence_completeness()
+
+        header = (
+            f"*PROCEDURE {proc_name}.c2m\n"
+            "* --------------------------------\n"
+            "* MIXEQ procedure generated by starterDD\n"
+            "* Mixture duplication for numbering strategy transitions\n"
+            "* Author: R. Guasch\n"
+            "* --------------------------------\n"
+            "*    INPUT & OUTPUT PARAMETERS\n"
+            "* --------------------------------\n"
+            f"PARAMETER {self.lib_name} ::\n"
+            "       EDIT 0\n"
+            f"           ::: LINKED_LIST {self.lib_name} ;\n"
+            "   ;\n"
+            "\n"
+            "* --------------------------------\n"
+            "*    STRUCTURES AND MODULES\n"
+            "* --------------------------------\n"
+            "MODULE LIB: END: ;\n"
+            "\n"
+        )
+
+        mix_comment = self.build_mix_index_comment_block()
+        lib_call = self.build_lib_module_call()
+
+        footer = (
+            "* -----------------------------------------\n"
+            "*         END OF MIXEQ PROCEDURE\n"
+            "* -----------------------------------------\n"
+            "END: ;\n"
+            "QUIT ."
+        )
+
+        content = (
+            f"{header}"
+            f"{mix_comment}"
+            "\n"
+            "* --------------------------------\n"
+            "*    MIXTURE DUPLICATION\n"
+            "*    CALL TO LIB: MODULE\n"
+            "* --------------------------------\n"
+            f"{lib_call}\n"
+            f"{footer}"
+        )
+
+        # Ensure output directory exists
+        if path_to_procs and not os.path.exists(path_to_procs):
+            os.makedirs(path_to_procs)
+
+        # Write file
+        filepath = os.path.join(path_to_procs, f"{proc_name}.c2m")
+        with open(filepath, 'w') as f:
+            f.write(content)
+
+        print(f"[MIXEQ] Wrote procedure to {filepath}")
+        print(f"[MIXEQ] Generated {len(self.correspondence_table)} mixture correspondences")
+        print(f"[MIXEQ] Max mixture index: {self._determine_max_mix_count()}")
+
+        return filepath

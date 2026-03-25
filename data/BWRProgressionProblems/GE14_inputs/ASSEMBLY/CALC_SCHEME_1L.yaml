@@ -21,6 +21,7 @@ FLUX_CALCULATION_SCHEME:
     # ------------------------------------------------------------------
     - name: "SSH"
       step_type: "self_shielding"
+      mix_numbering_strategy: "by_pin"
       self_shielding_module: "USS"
       self_shielding_method: "RSE"
       transport_correction: "NONE"
@@ -44,6 +45,7 @@ FLUX_CALCULATION_SCHEME:
     # ------------------------------------------------------------------
     - name: "FLUX"
       step_type: "flux"
+      mix_numbering_strategy: "by_pin"
       spatial_method: "MOC"
       tracking: "TSPC"
       num_angles_2d: 24

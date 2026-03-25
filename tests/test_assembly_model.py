@@ -222,10 +222,10 @@ def test_number_fuel_material_mixtures_by_pin():
     # Indices must be sequential starting from 1
     assert mixture_indices == list(range(1, n_unique + 1)), f"Indices must be sequential 1..{n_unique}"
 
-    # Every name must follow the convention <material>_zone<N>_pin<M>
+    # Every name must follow the convention <material>_zone_<N>_pin_<M>
     for name in mixture_names:
-        assert "_zone" in name and "_pin" in name, \
-            f"Name '{name}' does not follow the <material>_zone<N>_pin<M> convention."
+        assert "_zone_" in name and "_pin_" in name, \
+            f"Name '{name}' does not follow the <material>_zone_<N>_pin_<M> convention."
 
     # All names must be unique
     assert len(set(mixture_names)) == len(mixture_names), "Mixture names must be unique."
@@ -239,8 +239,8 @@ def test_number_fuel_material_mixtures_by_pin():
                 pin_indices_seen.add(pin.pin_idx)
                 # Check that the pin's mixture names contain its pin_idx
                 for mname in pin.fuel_material_mixture_names:
-                    assert f"_pin{pin.pin_idx}" in mname, \
-                        f"Pin mixture name '{mname}' should contain '_pin{pin.pin_idx}'."
+                    assert f"_pin_{pin.pin_idx}" in mname, \
+                        f"Pin mixture name '{mname}' should contain '_pin_{pin.pin_idx}'."
 
     assert len(pin_indices_seen) == n_unique, \
         f"Expected {n_unique} unique pin indices (anti-diagonal symmetry), got {len(pin_indices_seen)}"
@@ -695,12 +695,12 @@ def test_lib_write_to_c2m():
     assert len(assembly.daughter_mixes) == 49
 
     # The generating mix for UOX16 should be the one with TDT index 5
-    # (UOX16_zone1_pin1 is the first UOX16 in fuel_material_mixtures)
+    # (UOX16_zone_1_pin_1 is the first UOX16 in fuel_material_mixtures)
     gen_uox16 = [m for m in assembly.generating_mixes if m.material_name == "UOX16"][0]
-    assert gen_uox16.material_mixture_index == tdt_indices["UOX16_zone1_pin1"]
+    assert gen_uox16.material_mixture_index == tdt_indices["UOX16_zone_1_pin_1"]
 
     gen_gd = [m for m in assembly.generating_mixes if m.material_name == "UOX40Gd8"][0]
-    assert gen_gd.material_mixture_index == tdt_indices["UOX40Gd8_zone1_pin13"]
+    assert gen_gd.material_mixture_index == tdt_indices["UOX40Gd8_zone_1_pin_13"]
 
     # ------------------------------------------------------------------
     # Step 5: Build LIB and write .c2m
@@ -711,8 +711,8 @@ def test_lib_write_to_c2m():
 
     # --- Generating mix lines use SALOME indices ---
     gen_lines = lib.build_generating_mix_lines()
-    gen_uox16_idx = tdt_indices["UOX16_zone1_pin1"]
-    gen_gd_idx = tdt_indices["UOX40Gd8_zone1_pin13"]
+    gen_uox16_idx = tdt_indices["UOX16_zone_1_pin_1"]
+    gen_gd_idx = tdt_indices["UOX40Gd8_zone_1_pin_13"]
     assert f"MIX {gen_uox16_idx} <<TFUEL>>" in gen_lines
     assert f"MIX {gen_gd_idx} <<TFUEL>>" in gen_lines
     assert "U235" in gen_lines
@@ -721,10 +721,10 @@ def test_lib_write_to_c2m():
     # --- Daughter mix lines reference the generating SALOME index ---
     daughter_lines = lib.build_daughter_mix_lines()
     assert daughter_lines.count("COMB") == 49
-    # Spot-check: UOX16_zone1_pin2 (TDT idx 15) should be COMB of gen UOX16 (TDT idx 5)
-    assert f"MIX {tdt_indices['UOX16_zone1_pin2']} COMB {gen_uox16_idx} 1.0" in daughter_lines
-    # UOX40Gd8_zone1_pin21 (TDT idx 17) should be COMB of gen UOX40Gd8 (TDT idx 25)
-    assert f"MIX {tdt_indices['UOX40Gd8_zone1_pin21']} COMB {gen_gd_idx} 1.0" in daughter_lines
+    # Spot-check: UOX16_zone_1_pin_2 (TDT idx 15) should be COMB of gen UOX16 (TDT idx 5)
+    assert f"MIX {tdt_indices['UOX16_zone_1_pin_2']} COMB {gen_uox16_idx} 1.0" in daughter_lines
+    # UOX40Gd8_zone_1_pin_21 (TDT idx 17) should be COMB of gen UOX40Gd8 (TDT idx 25)
+    assert f"MIX {tdt_indices['UOX40Gd8_zone_1_pin_21']} COMB {gen_gd_idx} 1.0" in daughter_lines
 
     # --- Non-fuel lines from TDT enforcement (automatic, not manual) ---
     non_fuel_lines = lib.build_non_fuel_mix_lines()
@@ -750,7 +750,7 @@ def test_lib_write_to_c2m():
     assert "(generating)" in comment_block
     assert "(daughter of mix" in comment_block
     # SALOME indices should appear in the comment
-    assert f"{gen_uox16_idx:4d} : UOX16_zone1_pin1 (generating)" in comment_block
+    assert f"{gen_uox16_idx:4d} : UOX16_zone_1_pin_1 (generating)" in comment_block
 
     # --- Write to file ---
     tmpdir = tempfile.mkdtemp()
@@ -910,7 +910,7 @@ def test_edi_merg_mix_by_pin():
 
     # Check that fuel mixes carry the pin_idx from their name
     for mix in assembly.fuel_material_mixtures:
-        expected_pin_idx = int(mix.unique_material_mixture_name.rsplit("_pin", 1)[1])
+        expected_pin_idx = int(mix.unique_material_mixture_name.split("_")[-1])
         actual = vector[mix.material_mixture_index - 1]
         assert actual == expected_pin_idx, \
             f"Mix '{mix.unique_material_mixture_name}' should have pin_idx {expected_pin_idx}, got {actual}"
@@ -1205,6 +1205,296 @@ def test_edi_compo_write_to_c2m():
     finally:
         shutil.rmtree(tmpdir)
 
+
+def test_name_based_correspondence_by_material_to_by_pin():
+    """
+    Test name-based correspondence tracking from by_material to by_pin.
+
+    Verifies that the mix_strategy_correspondences dict correctly maps
+    material-based mix names to their corresponding pin-based mix names,
+    and that bidirectional mappings are created.
+    """
+    path_to_yaml_compositions = GE14_COMPOSITIONS_YAML
+    path_to_yaml_geometry = GE14_SIMPLE_GEOMETRY_YAML
+
+    ROD_to_material = associate_material_to_rod_ID(path_to_yaml_compositions,
+                                                   path_to_yaml_geometry)
+
+    assembly = CartesianAssemblyModel(name="test_correspondence",
+                                     tdt_file="dummy.tdt",
+                                     geometry_description_yaml=path_to_yaml_geometry)
+    assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+    assembly.analyze_lattice_description(build_pins=True)
+
+    compositions = parse_all_compositions_from_yaml(path_to_yaml_compositions)
+    assembly.set_material_compositions(compositions)
+
+    # Apply by_material strategy first
+    assembly.apply_mix_numbering_strategy("by_material")
+
+    assert assembly.current_mix_numbering_strategy == "by_material"
+    assert len(assembly.mix_state_history) == 1
+    by_material_names = list(assembly.fuel_material_mixture_names)
+    assert len(by_material_names) > 0
+
+    # Apply by_pin strategy - this should trigger correspondence recording
+    assembly.apply_mix_numbering_strategy("by_pin")
+
+    assert assembly.current_mix_numbering_strategy == "by_pin"
+    assert len(assembly.mix_state_history) == 2
+    by_pin_names = list(assembly.fuel_material_mixture_names)
+    assert len(by_pin_names) > len(by_material_names)  # More pin mixes than material mixes
+
+    # Check that forward correspondence was created
+    forward_key = ("by_material", "by_pin")
+    assert forward_key in assembly.mix_strategy_correspondences, \
+        f"Forward correspondence {forward_key} should exist"
+
+    forward_correspondence = assembly.mix_strategy_correspondences[forward_key]
+    assert len(forward_correspondence) > 0, "Forward correspondence should have entries"
+
+    # Check that reverse correspondence was created
+    reverse_key = ("by_pin", "by_material")
+    assert reverse_key in assembly.mix_strategy_correspondences, \
+        f"Reverse correspondence {reverse_key} should exist"
+
+    reverse_correspondence = assembly.mix_strategy_correspondences[reverse_key]
+    assert len(reverse_correspondence) > 0, "Reverse correspondence should have entries"
+
+    # Verify correspondence structure: each by_material mix maps to list of by_pin mixes
+    for mat_name, pin_names in forward_correspondence.items():
+        assert isinstance(pin_names, list), f"Expected list for {mat_name}, got {type(pin_names)}"
+        assert len(pin_names) > 0, f"Each material mix should correspond to at least one pin mix"
+
+        # Extract base material from mat_name
+        base_material = mat_name.rsplit("_zone", 1)[0]
+
+        # Verify all corresponding pin names have the same base material
+        for pin_name in pin_names:
+            pin_base = pin_name.rsplit("_zone", 1)[0]
+            assert pin_base == base_material, \
+                f"Pin mix {pin_name} should have same base as {mat_name}"
+
+    # Verify reverse correspondence: each by_pin mix maps back to by_material mix
+    for pin_name, mat_names in reverse_correspondence.items():
+        assert isinstance(mat_names, list), f"Expected list for {pin_name}, got {type(mat_names)}"
+        assert len(mat_names) == 1, f"Each pin mix should correspond to exactly one material mix"
+
+    print("  -> test_name_based_correspondence_by_material_to_by_pin PASSED")
+    print(f"     Forward correspondences: {len(forward_correspondence)}")
+    print(f"     Reverse correspondences: {len(reverse_correspondence)}")
+    print(f"     Example: {list(forward_correspondence.items())[0]}")
+
+
+def test_get_corresponding_mixes():
+    """
+    Test the get_corresponding_mixes() query API method.
+    """
+    path_to_yaml_compositions = GE14_COMPOSITIONS_YAML
+    path_to_yaml_geometry = GE14_SIMPLE_GEOMETRY_YAML
+
+    ROD_to_material = associate_material_to_rod_ID(path_to_yaml_compositions,
+                                                   path_to_yaml_geometry)
+
+    assembly = CartesianAssemblyModel(name="test_query",
+                                     tdt_file="dummy.tdt",
+                                     geometry_description_yaml=path_to_yaml_geometry)
+    assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+    assembly.analyze_lattice_description(build_pins=True)
+
+    compositions = parse_all_compositions_from_yaml(path_to_yaml_compositions)
+    assembly.set_material_compositions(compositions)
+
+    # Apply strategies to create correspondences
+    assembly.apply_mix_numbering_strategy("by_material")
+    mat_mix_name = assembly.fuel_material_mixture_names[0]  # e.g., "UOX16_zone_1"
+
+    assembly.apply_mix_numbering_strategy("by_pin")
+
+    # Query forward: by_material → by_pin
+    corresponding_pins = assembly.get_corresponding_mixes(
+        mat_mix_name, "by_material", "by_pin"
+    )
+
+    assert isinstance(corresponding_pins, list), "Should return a list"
+    assert len(corresponding_pins) > 0, f"{mat_mix_name} should have corresponding pin mixes"
+
+    # All returned pin names should have same base material
+    base_material = mat_mix_name.rsplit("_zone", 1)[0]
+    for pin_name in corresponding_pins:
+        assert pin_name.startswith(base_material), \
+            f"Pin mix {pin_name} should start with {base_material}"
+
+    # Query reverse: by_pin → by_material
+    first_pin_name = corresponding_pins[0]
+    corresponding_mats = assembly.get_corresponding_mixes(
+        first_pin_name, "by_pin", "by_material"
+    )
+
+    assert isinstance(corresponding_mats, list), "Should return a list"
+    assert len(corresponding_mats) == 1, "Each pin should map to exactly one material mix"
+    assert corresponding_mats[0] == mat_mix_name, "Reverse mapping should return original material mix"
+
+    # Query non-existent correspondence
+    empty_result = assembly.get_corresponding_mixes(
+        "fake_mix", "by_material", "by_pin"
+    )
+    assert empty_result == [], "Non-existent mix should return empty list"
+
+    print("  -> test_get_corresponding_mixes PASSED")
+    print(f"     {mat_mix_name} → {corresponding_pins}")
+    print(f"     {first_pin_name} → {corresponding_mats}")
+
+
+def test_step_mix_state_tracking():
+    """
+    Test per-step mix state tracking with TDT enforcement and step names.
+    """
+    from pathlib import Path
+
+    path_to_yaml_compositions = GE14_COMPOSITIONS_YAML
+    path_to_yaml_geometry = GE14_SIMPLE_GEOMETRY_YAML
+    path_to_tdt = GE14_TDT_DIR
+    tdt_file_name = "GE14_simplified"
+
+    ROD_to_material = associate_material_to_rod_ID(path_to_yaml_compositions,
+                                                   path_to_yaml_geometry)
+
+    assembly = CartesianAssemblyModel(name="test_step_state",
+                                     tdt_file=path_to_tdt + "/" + tdt_file_name + ".tdt",
+                                     geometry_description_yaml=path_to_yaml_geometry)
+    assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+    assembly.analyze_lattice_description(build_pins=True)
+
+    compositions = parse_all_compositions_from_yaml(path_to_yaml_compositions)
+    assembly.set_material_compositions(compositions)
+
+    # Apply by_material for "SSH" step
+    assembly.apply_mix_numbering_strategy("by_material")
+
+    # Read TDT and enforce with step_name
+    tdt_indices = read_material_mixture_indices_from_tdt_file(
+        tdt_file_path=path_to_tdt,
+        tdt_file_name=tdt_file_name,
+        tracking_option="TISO",
+        include_macros=True,
+        material_names=None,
+    )
+    assembly.enforce_material_mixture_indices_from_tdt(tdt_indices, step_name="SSH")
+
+    # Verify step state was recorded
+    ssh_state = assembly.get_step_mix_state("SSH")
+    assert ssh_state is not None, "SSH step state should exist"
+    assert ssh_state["strategy"] == "by_material"
+    assert ssh_state["step_name"] == "SSH"
+    assert ssh_state["tdt_enforced"] == True
+    assert len(ssh_state["tdt_indices"]) > 0, "TDT indices should be recorded"
+    assert len(ssh_state["mix_names"]) > 0, "Mix names should be recorded"
+
+    # Test get_step_mix_names_and_indices
+    names, indices = assembly.get_step_mix_names_and_indices("SSH")
+    assert names is not None
+    assert indices is not None
+    assert len(names) > 0
+    assert len(indices) > 0
+    assert names == ssh_state["mix_names"]
+    assert indices == ssh_state["tdt_indices"]
+
+    # Test for non-existent step
+    fake_state = assembly.get_step_mix_state("FAKE_STEP")
+    assert fake_state is None, "Non-existent step should return None"
+
+    fake_names, fake_indices = assembly.get_step_mix_names_and_indices("FAKE_STEP")
+    assert fake_names is None
+    assert fake_indices is None
+
+    print("  -> test_step_mix_state_tracking PASSED")
+    print(f"     SSH state: {len(names)} mixes, {len(indices)} TDT indices")
+    print(f"     First mix: {names[0]} → index {indices[names[0]]}")
+
+
+def test_build_mixeq_correspondence_table():
+    """
+    Test building MIXEQ correspondence table between steps with different strategies.
+    """
+    path_to_yaml_compositions = GE14_COMPOSITIONS_YAML
+    path_to_yaml_geometry = GE14_SIMPLE_GEOMETRY_YAML
+    path_to_tdt = GE14_TDT_DIR
+    tdt_file_name = "GE14_simplified"
+
+    ROD_to_material = associate_material_to_rod_ID(path_to_yaml_compositions,
+                                                   path_to_yaml_geometry)
+
+    assembly = CartesianAssemblyModel(name="test_mixeq",
+                                     tdt_file=path_to_tdt + "/" + tdt_file_name + ".tdt",
+                                     geometry_description_yaml=path_to_yaml_geometry)
+    assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+    assembly.analyze_lattice_description(build_pins=True)
+
+    compositions = parse_all_compositions_from_yaml(path_to_yaml_compositions)
+    assembly.set_material_compositions(compositions)
+
+    # Simulate SSH step with by_material
+    assembly.apply_mix_numbering_strategy("by_material")
+    tdt_indices_ssh = read_material_mixture_indices_from_tdt_file(
+        tdt_file_path=path_to_tdt,
+        tdt_file_name=tdt_file_name,
+        tracking_option="TISO",
+        include_macros=True,
+        material_names=None,
+    )
+    assembly.enforce_material_mixture_indices_from_tdt(tdt_indices_ssh, step_name="SSH")
+
+    # Simulate FLUX_L1 step with by_pin
+    assembly.apply_mix_numbering_strategy("by_pin")
+    # For testing, reuse same TDT indices (in reality would be different file)
+    # Create fake TDT indices for by_pin mixes
+    tdt_indices_l1 = {}
+    for i, name in enumerate(assembly.fuel_material_mixture_names):
+        tdt_indices_l1[name] = 200 + i  # Fake indices starting at 200
+
+    assembly.enforce_material_mixture_indices_from_tdt(tdt_indices_l1, step_name="FLUX_L1")
+
+    # Build MIXEQ table
+    table = assembly.build_mixeq_correspondence_table("SSH", "FLUX_L1")
+
+    assert isinstance(table, list), "Should return a list"
+    assert len(table) > 0, "Table should have correspondence entries"
+
+    # Each entry should be a tuple of (from_name, to_name, from_idx, to_idx)
+    for entry in table:
+        assert isinstance(entry, tuple), "Each entry should be a tuple"
+        assert len(entry) == 4, "Each entry should have 4 elements"
+        from_name, to_name, from_idx, to_idx = entry
+
+        assert isinstance(from_name, str), "from_name should be string"
+        assert isinstance(to_name, str), "to_name should be string"
+        assert isinstance(from_idx, int), "from_idx should be int"
+        assert isinstance(to_idx, int), "to_idx should be int"
+
+        # Verify base materials match
+        from_base = from_name.rsplit("_zone", 1)[0]
+        to_base = to_name.rsplit("_zone", 1)[0]
+        assert from_base == to_base, f"Base materials should match: {from_name} vs {to_name}"
+
+    # Test same-strategy case (should create 1-to-1 mapping)
+    assembly.apply_mix_numbering_strategy("by_material")
+    tdt_indices_l2 = {}
+    for i, name in enumerate(assembly.fuel_material_mixture_names):
+        tdt_indices_l2[name] = 300 + i  # Fake indices starting at 300
+    assembly.enforce_material_mixture_indices_from_tdt(tdt_indices_l2, step_name="FLUX_L2")
+
+    table_same = assembly.build_mixeq_correspondence_table("SSH", "FLUX_L2")
+    assert len(table_same) > 0, "Same-strategy table should have entries"
+    for from_name, to_name, from_idx, to_idx in table_same:
+        assert from_name == to_name, "Same strategy should create 1-to-1 name mapping"
+
+    print("  -> test_build_mixeq_correspondence_table PASSED")
+    print(f"     SSH → FLUX_L1 (by_material → by_pin): {len(table)} correspondences")
+    print(f"     SSH → FLUX_L2 (by_material → by_material): {len(table_same)} correspondences")
+    print(f"     Example entry: {table[0]}")
+
+
 if __name__ == "__main__":
     test_assembly_model_creation()
     test_number_fuel_material_mixtures_by_pin()
@@ -1221,4 +1511,9 @@ if __name__ == "__main__":
     test_edi_spatial_mode_validation()
     test_compo_init_and_store()
     test_edi_compo_write_to_c2m()
+    # New name-based correspondence tests
+    test_name_based_correspondence_by_material_to_by_pin()
+    test_get_corresponding_mixes()
+    test_step_mix_state_tracking()
+    test_build_mixeq_correspondence_table()
     print("All tests passed successfully!")
