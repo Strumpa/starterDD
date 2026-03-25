@@ -110,7 +110,28 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
                 )
                 for radius in radii:
                     tmp_cell.add_circle(radius)
-                list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["GAP", "CLAD", "COOLANT"]
+                # Recover FuelPinModel technologocal radii to assign materials in the correct order (from innermost to outermost regions)
+                techo_radii = pin.technological_radii
+                fuel_radius = techo_radii[0]
+                gap_radius = techo_radii[1] if len(techo_radii) > 1 else None
+                clad_radius = techo_radii[2] if len(techo_radii) > 2 else None
+                if gap_radius is not None and gap_radius < fuel_radius:
+                    # gap is inner most region, so the order of materials from innermost to outermost is : gap, fuel zones, clad (if clad radius provided and larger than fuel radius)
+                    list_of_cell_mats = ["GAP"] + [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures]
+                    if clad_radius is not None and clad_radius > fuel_radius:
+                        list_of_cell_mats.append("CLAD")
+                if gap_radius is not None and gap_radius > fuel_radius and clad_radius is not None and clad_radius > fuel_radius:
+                    # Fuel regions are inner most, then gap, then clad as outer most region, so the order of materials from innermost to outermost is : fuel zones, gap, clad
+                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["GAP", "CLAD", "COOLANT"]
+                if gap_radius is None and clad_radius is not None and clad_radius > fuel_radius:
+                    # No gap, clad is outer most region, so the order of materials from innermost to outermost is : fuel zones, clad
+                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["CLAD", "COOLANT"]
+                if gap_radius is not None and gap_radius > fuel_radius and clad_radius is None:
+                    # No clad, gap is outer most region, so the order of materials from innermost to outermost is : fuel zones, gap
+                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["GAP", "COOLANT"]
+                if gap_radius is None and clad_radius is None:
+                    # No gap, no clad, so only fuel zones, order of materials from innermost to outermost is : fuel zones
+                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["COOLANT"]
 
                 # Apply sectorization from calculation step if provided
                 if calculation_step is not None:
@@ -949,7 +970,7 @@ def build_assembly_box(assembly_model, center=None):
     channel_box_inner_side = ap - 2.0 * cbt - 2.0 * gap
     channel_box_outer_side = ap - 2.0 * gap
     if corner_r_inner > 0.0:
-        corner_r_outer = corner_r_inner + cbt
+            corner_r_outer = corner_r_inner + cbt
     else:
         corner_r_outer = 0.0
 

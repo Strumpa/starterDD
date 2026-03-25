@@ -69,6 +69,17 @@ DEFAULT_THERMAL_SCATTERING = {
     # Extensible – add graphite, Be, ZrH, etc. as needed.
 } 
 
+NATURAL_ABUNDANCES = {
+    "H": {"1001": 99.9855, "1002": 0.0115},
+    "C": {"6012": 98.94, "6013": 1.06, "6014": 0.0},
+    "O": {"8016": 99.757, "8017": 0.03835, "8018": 0.2045},
+    "Cr": {"24050": 4.345, "24052": 83.789, "24053": 9.501, "24054": 2.365},
+    "Fe":{ "26054": 5.845, "26056": 91.754, "26057": 2.119, "26058": 0.282},
+    "Zr": {"40090": 51.45, "40091": 11.22, "40092": 17.15, "40094": 17.38, "40096": 2.80},
+
+    # Extend as needed for other elements
+}
+
 class Composition:
     """Isotopic composition of a material.
 
@@ -122,6 +133,55 @@ class Composition:
         # identify if the isotopes are in zaid format or in isotope name format and convert to isotope name format if needed
         if all(zaid.isdigit() for zaid in isotopic_composition.keys()):
             self.zaid_to_isotope()
+        # Treatment for natural elements : decompose into isotopic composition based on natural abundances:
+        # identify if any nuclides are in "natural" element format : ends in 0 or in "_nat" or in "_NAT" or doesnt have a nucleon number and just atomic symbol, and convert to isotopic composition based on natural abundances using mendeleev package
+        if any(nuclide.endswith('_nat') or nuclide.endswith('_NAT') or nuclide.isalpha() for nuclide in isotopic_composition.keys()):            
+            self.convert_nat_to_iso() 
+
+    def convert_nat_to_iso(self):
+
+        """
+        Convert the natural isotopic composition to isotopic composition.
+        Updates the composition attribute with the isotopic values.
+        """
+        
+        if not hasattr(self, 'isotopic_composition'):
+            raise ValueError("Isotopic composition is not defined for this material mixture.")
+        
+        # Check if any nuclides are present in the composition
+        if not self.isotopic_composition:
+            raise ValueError("Isotopic composition is empty. Cannot convert natural to isotopic composition.")
+        
+        # Check if any nuclides are in "natural" element format :
+        nat_nuclides = []
+        iso_composition = {}
+        for nuclide in self.isotopic_composition.keys():
+            ## Identify if the nuclide is in natural format : ends in 0 or in "_nat" or in "_NAT" or doesnt have a nucleon number and just atomic symbol.
+            if nuclide.endswith('_nat') or nuclide.endswith('_NAT') or nuclide.isalpha():
+                # try converting to isotopic composition
+                nuclide_symbol = nuclide.replace('_nat', '').replace('_NAT', '').replace('0', '')
+                nat_nuclides.append(nuclide_symbol)
+                try:
+                    ## use mendeleev to get the isotopes of element
+                    isotopes_to_abundances = NATURAL_ABUNDANCES.get(nuclide_symbol, {})
+                    if not isotopes_to_abundances:
+                        raise ValueError(f"No isotopes found for element {nuclide_symbol}.")
+                    # create a dictionary to hold the isotopic composition
+                    for iso in isotopes_to_abundances.keys():
+                        iso_composition[f"{nuclide_symbol}{iso}"] = self.isotopic_composition[nuclide] * isotopes_to_abundances[iso]/100 # convert natural element density to densities of natural isotopic abundances
+                
+                    # remove the natural element from the composition
+                except Exception as e:
+                    raise ValueError(f"Error converting nuclide {nuclide_symbol} to isotopic composition: {e}")
+                
+        # remove the natural elements from the composition
+        for nuclide in nat_nuclides:
+            if nuclide in self.isotopic_composition:
+                del self.isotopic_composition[nuclide]
+        # update the composition with the isotopic composition
+        for iso in iso_composition.keys():
+            self.isotopic_composition[iso] = iso_composition[iso]
+
 
     def setDepletable(self, depletable: bool):
         """
