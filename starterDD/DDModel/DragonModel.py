@@ -87,7 +87,7 @@ class CartesianAssemblyModel:
         self.assembly_pitch = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("assembly_pitch", None)
         self.gap_wide = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("gap_wide", None)
         self.channel_box_thickness = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("channel_box_thickness", None)
-        self.corner_inner_radius_of_curvature = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("corner_inner_radius_of_curvature", None)
+        self.corner_inner_radius_of_curvature = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("corner_inner_radius_of_curvature", 0.0)
         self.Gd_rod_ids = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("Gd_rod_ids", [])
         self.non_fuel_rod_ids = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("non_fuel_rod_ids", [])
         self.geometry_type = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("lattice_type", "cartesian") # by default, assume cartesian geometry for the assembly
@@ -1743,6 +1743,7 @@ class FuelPinModel:
         self.technological_radii = radii # ordered fuel radius, gap radius, clad radius : test if gap radius is smaller or larger than fuel radius to define the order of the regions in the pin and the corresponding radii in the list, which can be used to automatically define the pin geometry based on the input radii and the self-shielding option selected for the pin.
         self.height = height
         self.isGd = isGd
+        self.hasGap = True if radii[1] is not None else False
         self.self_shielding_option = self_shielding_option
         self.isGeneratingCell = False # By default pins are not generating cells, this attribute is updated after creation if the pin is identified as a generating cell.
 

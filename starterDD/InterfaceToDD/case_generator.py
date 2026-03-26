@@ -54,6 +54,10 @@ class DragonCase:
        - **MIX.c2m** — material library (LIB:).
        - **TRK.c2m** — tracking (SALT:/MCCGT:).
        - **EDIR.c2m** — editions/COMPO export.
+    4. Generates additional MIXEQ procedures if mix numbering strategy
+        transitions are detected between consecutive trackable steps in the calculation scheme.
+        These map indices from the current step's strategy to the next step's strategy, ensuring correct material-mixture-index tracking across steps with different numbering schemes.
+        e.g. : use material-based numbering for self-shielding and first calculation level steps, use pin-based numbering for MOC flux calculation step. 
     """
 
     def __init__(self, case_name, call_glow,

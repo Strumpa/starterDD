@@ -69,6 +69,18 @@ DEFAULT_THERMAL_SCATTERING = {
     # Extensible – add graphite, Be, ZrH, etc. as needed.
 } 
 
+NATURAL_ABUNDANCES = {
+    "H": {("H1","1001"): 99.9855, ("H2","1002"): 0.0115},
+    "C": {("C12","6012"): 98.94, ("C13","6013"): 1.06, ("C14","6014"): 0.0},
+    "O": {("O16","8016"): 99.757, ("O17","8017"): 0.03835, ("O18","8018"): 0.2045},
+    "Cr": {("Cr50","24050"): 4.345, ("Cr52","24052"): 83.789, ("Cr53","24053"): 9.501, ("Cr54","24054"): 2.365},
+    "Fe": {("Fe54","26054"): 5.845, ("Fe56","26056"): 91.754, ("Fe57","26057"): 2.119, ("Fe58","26058"): 0.282},
+    "Zr": {("Zr90","40090"): 51.45, ("Zr91","40091"): 11.22, ("Zr92","40092"): 17.15, ("Zr94","40094"): 17.38, ("Zr96","40096"): 2.80},
+    "U": {("U235","92235"): 0.7204, ("U238","92238"): 99.2742, ("U234","92234"): 0.0054},
+
+    # Extend as needed for other elements
+}
+
 class Composition:
     """Isotopic composition of a material.
 
@@ -122,6 +134,62 @@ class Composition:
         # identify if the isotopes are in zaid format or in isotope name format and convert to isotope name format if needed
         if all(zaid.isdigit() for zaid in isotopic_composition.keys()):
             self.zaid_to_isotope()
+        # Treatment for natural elements : decompose into isotopic composition based on natural abundances:
+        # identify if any nuclides are in "natural" element format : ends in 0 or in "_nat" or in "_NAT" or doesnt have a nucleon number and just atomic symbol, and convert to isotopic composition based on natural abundances using mendeleev package
+        if any(nuclide.endswith('_nat') or nuclide.endswith('_NAT') or nuclide.isalpha() for nuclide in isotopic_composition.keys()):            
+            self.convert_nat_to_iso() 
+
+    def convert_nat_to_iso(self):
+        """
+        Convert the natural isotopic composition to isotopic composition.
+        Updates the composition attribute with the isotopic values.
+        """
+        
+        if not hasattr(self, 'isotopic_composition'):
+            raise ValueError("Isotopic composition is not defined for this material mixture.")
+        
+        # Check if any nuclides are present in the composition
+        if not self.isotopic_composition:
+            raise ValueError("Isotopic composition is empty. Cannot convert natural to isotopic composition.")
+        
+        # Check if any nuclides are in "natural" element format :
+        nat_nuclides = []
+        iso_composition = {}
+        for nuclide in self.isotopic_composition.keys():
+            ## Identify if the nuclide is in natural format : ends in 0 or in "_nat" or in "_NAT" or doesnt have a nucleon number and just atomic symbol.
+            if nuclide.endswith('_nat') or nuclide.endswith('_NAT') or nuclide.isalpha():
+                # try converting to isotopic composition
+                nuclide_symbol = nuclide.replace('_nat', '').replace('_NAT', '').replace('0', '')
+                nat_nuclides.append(nuclide)
+                try:
+                    ## use look up NATURAL_ABUNDANCES dict to get the isotopic composition of the natural element
+                    isotopes_to_abundances = NATURAL_ABUNDANCES.get(nuclide_symbol, {})
+                    if not isotopes_to_abundances:
+                        raise ValueError(f"No isotopes found for element {nuclide_symbol}.")
+                    # create a dictionary to hold the isotopic composition
+                    for iso,zaid in isotopes_to_abundances.keys():
+                        if iso in self.isotopic_composition:
+                            print(f"Warning: Isotope {iso} already present in the composition. Adding the natural abundance contribution to the existing density.")
+                            iso_composition[iso] += self.isotopic_composition[iso] + self.isotopic_composition[nuclide] * isotopes_to_abundances[(iso,zaid)]/100 # convert natural element density to densities of natural isotopic abundances and add to existing density if the isotope is already present in the composition
+                        else:
+                            iso_composition[f"{iso}"] = self.isotopic_composition[nuclide] * isotopes_to_abundances[(iso,zaid)]/100 # convert natural element density to densities of natural isotopic abundances
+                
+                    # remove the natural element from the composition
+                except Exception as e:
+                    raise ValueError(f"Error converting nuclide {nuclide_symbol} to isotopic composition: {e}")
+                
+        # remove the natural elements from the composition
+        for nuclide in nat_nuclides:
+            if nuclide in self.isotopic_composition:
+                del self.isotopic_composition[nuclide]
+            if f"{nuclide}_NAT" in self.isotopic_composition:
+                del self.isotopic_composition[f"{nuclide}_NAT"]
+            if f"{nuclide}_nat" in self.isotopic_composition:
+                del self.isotopic_composition[f"{nuclide}_nat"]
+        # update the composition with the isotopic composition
+        for iso in iso_composition.keys():
+            self.isotopic_composition[iso] = iso_composition[iso]
+
 
     def setDepletable(self, depletable: bool):
         """
