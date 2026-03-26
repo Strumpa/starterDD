@@ -168,7 +168,11 @@ class Composition:
                         raise ValueError(f"No isotopes found for element {nuclide_symbol}.")
                     # create a dictionary to hold the isotopic composition
                     for iso,zaid in isotopes_to_abundances.keys():
-                        iso_composition[f"{iso}"] = self.isotopic_composition[nuclide] * isotopes_to_abundances[(iso,zaid)]/100 # convert natural element density to densities of natural isotopic abundances
+                        if iso in self.isotopic_composition:
+                            print(f"Warning: Isotope {iso} already present in the composition. Adding the natural abundance contribution to the existing density.")
+                            iso_composition[iso] += self.isotopic_composition[iso] + self.isotopic_composition[nuclide] * isotopes_to_abundances[(iso,zaid)]/100 # convert natural element density to densities of natural isotopic abundances and add to existing density if the isotope is already present in the composition
+                        else:
+                            iso_composition[f"{iso}"] = self.isotopic_composition[nuclide] * isotopes_to_abundances[(iso,zaid)]/100 # convert natural element density to densities of natural isotopic abundances
                 
                     # remove the natural element from the composition
                 except Exception as e:

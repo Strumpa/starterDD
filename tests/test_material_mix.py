@@ -118,7 +118,7 @@ def test_natural_elements():
         assert variant not in material_mixture.composition.isotopic_composition.keys()  # Check that the original natural element specification is not in the isotopic composition
 
 
-    # Check the cladding material from OECD Phase IIIB BWR benchmark, which is composed of natural Zirconium, Iron and Cromium
+    # Check the cladding material from OECD Phase IIIB BWR benchmark, which is composed of natural Zirconium, Iron and Chromium
     cladding_composition = Composition(
         material_name="Cladding",
         isotopic_composition={"Zr_NAT": 4.2982E-02, "Fe_NAT": 1.4838E-04, "Cr_NAT": 7.5891E-05}  # This indicates the isotopic composition of the cladding material
@@ -150,7 +150,8 @@ def test_natural_elements():
     for nuclide, expected_value in reference_values.items():
         rel_diff_percent = abs(material_mixture.composition.isotopic_composition[nuclide] - expected_value)*100/expected_value
         assert rel_diff_percent < 1e-3 # Check that the relative difference is less than 0.001%
-    assert variant not in material_mixture.composition.isotopic_composition.keys() # Check that the original natural element specification is not in the isotopic composition
+    for nat_key in ["Zr_NAT", "Fe_NAT", "Cr_NAT"]:
+        assert nat_key not in material_mixture.composition.isotopic_composition.keys()  # 
 
 
 if __name__ == "__main__":
