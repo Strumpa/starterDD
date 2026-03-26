@@ -86,6 +86,8 @@ class CartesianAssemblyModel:
         self.lattice_description = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("lattice_description", [])
         self.assembly_pitch = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("assembly_pitch", None)
         self.gap_wide = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("gap_wide", None)
+        self.gap_narrow = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("gap_narrow", None)
+        self.gap = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("gap", None)
         self.channel_box_thickness = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("channel_box_thickness", None)
         self.corner_inner_radius_of_curvature = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("corner_inner_radius_of_curvature", 0.0)
         self.Gd_rod_ids = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("Gd_rod_ids", [])
@@ -93,6 +95,16 @@ class CartesianAssemblyModel:
         self.geometry_type = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("lattice_type", "cartesian") # by default, assume cartesian geometry for the assembly
         self.reactor_type = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("reactor_type", "BWR") # by default, assume BWR type for the assembly, which can be used to define default self-shielding treatment strategies for the pins in the assembly based on the reactor type if no specific self-shielding option is provided for the pins in the geometry description.
 
+        # check gap_wide and gap_narrow consistency if both are provided
+        if self.gap_wide is not None and self.gap_narrow is not None:
+            if self.gap_wide <= self.gap_narrow:
+                raise ValueError(f"Inconsistent gap widths: 'gap_wide' ({self.gap_wide}) must be greater than 'gap_narrow' ({self.gap_narrow}).")
+        if self.gap_wide is not None and self.gap_narrow is None:
+            self.gap_narrow = self.gap_wide
+        if self.gap_narrow is not None and self.gap_wide is None:
+            self.gap_wide = self.gap_narrow
+        if self.gap_narrow is None and self.gap_wide is None:
+            self.gap_wide = self.gap_narrow = self.gap
         # Pincell information
         self.pin_geometry_dict = yaml_data.get("PIN_GEOMETRY", {})
         
@@ -109,10 +121,16 @@ class CartesianAssemblyModel:
             self.water_box_corner_radius = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("corner_radius", None)
         self.water_rod_centers = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("centers", [])
         self.number_of_water_rods = len(self.water_rod_centers)
-        self.channel_box_inner_side = self.assembly_pitch - 2 * self.channel_box_thickness - 2 * self.gap_wide if self.channel_box_thickness is not None and self.gap_wide is not None else None
+        self.channel_box_inner_side = self.assembly_pitch - 2 * self.channel_box_thickness - self.gap_wide - self.gap_narrow if self.channel_box_thickness is not None and self.gap_wide is not None and self.gap_narrow is not None else None
         n_cols = len(self.lattice_description[0]) if self.lattice_description else 0
         pin_pitch = self.pin_geometry_dict.get("pin_pitch", 0)
         self.intra_assembly_coolant_width = (self.channel_box_inner_side - n_cols * pin_pitch) / 2.0 if self.channel_box_inner_side is not None else None
+        # translation offset needs to become a tupple as narrow and wide gaps can be different.
+        # TODO: think of where to compute translation gap : need to be avaialble when building the lattice in geomtry builder, 
+        # also needs information about the lattice symmmetry : if quarter or eighth, gap_narrow == gap_wide,
+        # if the lattice is anti-diagonally symmetric, translation_offset = (gap_wide + ...., gap_narrow + ...)
+        # if the lattice is diagonally symmetric, translation_offset = (gap_wide + ..., gap_wide + ...)
+        # 
         self.translation_offset = self.gap_wide + self.channel_box_thickness + self.intra_assembly_coolant_width if self.gap_wide is not None and self.channel_box_thickness is not None and self.intra_assembly_coolant_width is not None else None
 
         # Control cross information (optional)
