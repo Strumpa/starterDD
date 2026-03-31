@@ -505,7 +505,7 @@ class DragonCase:
                     scheme.has_branches()
                     and scheme.get_branch("coolant_density") is not None
                 )
-                lib = LIB(assembly, density_branch=has_density)
+                lib = LIB(assembly, density_branch=has_density, ssh_calculation_step=ssh_step)
                 mix_path = lib.write_to_c2m(
                     self.output_path, mix_proc_name,
                 )

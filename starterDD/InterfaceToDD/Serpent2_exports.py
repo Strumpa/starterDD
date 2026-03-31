@@ -2,7 +2,7 @@
 # Goal: generate a complete Serpent2 input deck equivalent to a Dragon5 model
 #
 # Author : R. Guasch
-# Date : 02/24/2026
+# Date : 24/02/2026
 
 import re
 import string

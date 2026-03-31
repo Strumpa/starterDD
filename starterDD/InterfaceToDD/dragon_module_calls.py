@@ -66,7 +66,7 @@ class LIB:
         "SHEATH":      "TCTRL",
     }
 
-    def __init__(self, assembly_model, density_branch=False):
+    def __init__(self, assembly_model, density_branch=False, ssh_calculation_step = None):
         """
         Initialize LIB procedure generator.
 
@@ -115,12 +115,23 @@ class LIB:
         # --- Register control cross material temperature variables --------
         self._register_control_cross_temp_vars()
 
+        if ssh_calculation_step:
+            # Override self-shielding configuration based on the provided calculation step
+            if ssh_calculation_step.fuel_self_shielded_isotopes is not None:
+                self.set_self_shielded_fuel_isotopes(ssh_calculation_step.fuel_self_shielded_isotopes)
+            if ssh_calculation_step.clad_self_shielded_isotopes is not None:
+                self.set_non_fuel_self_shielding(
+                    "CLAD",
+                    {iso: 2 for iso in ssh_calculation_step.clad_self_shielded_isotopes}
+                )
+
     # ------------------------------------------------------------------
     #  Configuration helpers
     # ------------------------------------------------------------------
 
     def set_self_shielded_fuel_isotopes(self, isotopes):
         """Override the list of self-shielded fuel isotopes (default: HM + Gd)."""
+        print(f"[LIB] Setting self-shielded fuel isotopes to: {isotopes}")
         self.self_shielded_fuel_isotopes = list(isotopes)
 
     def set_non_fuel_self_shielding(self, material_name, isotope_inrs_dict):
@@ -261,7 +272,7 @@ class LIB:
                 lib_name = self.isotope_aliases.get(
                     (mix.material_name, isotope), isotope
                 )
-                line = f"    {isotope} = {lib_name} {density:.5E}"
+                line = f"    {isotope} = {lib_name} {density:.8E}"
                 if isotope in self.correlation_isotopes:
                     line += " CORR 1"
                 elif isotope in self.self_shielded_fuel_isotopes:

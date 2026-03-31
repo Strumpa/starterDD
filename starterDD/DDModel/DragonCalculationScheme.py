@@ -597,6 +597,12 @@ class CalculationStep:
     self_shielding_method : str or None
         Energy self-shielding method: ``"RSE"`` or ``"PT"``.
         Only applicable for ``step_type="self_shielding"``, ignored otherwise.
+    fuel_self_shielded_isotopes : list[str] or None
+        Optional list of fuel isotopes to be self-shielded (e.g. ``["U235", "Gd155"]``).
+        When ``None`` (default), default fuel isotopes are self-shielded (see LIB).
+    clad_self_shielded_isotopes : list[str] or None
+        Optional list of cladding isotopes to be self-shielded (e.g. ``["Zr90"]``).
+        When ``None`` (default), default cladding isotopes are self-shielded (see LIB).
     spatial_method : str
         Spatial solution method: ``"CP"``, ``"IC"``, or ``"MOC"``.
         ``"MOC"`` is only valid for flux steps.
@@ -642,6 +648,8 @@ class CalculationStep:
         spatial_method,
         self_shielding_module=None,
         self_shielding_method=None,
+        fuel_self_shielded_isotopes=None,
+        clad_self_shielded_isotopes=None,
         tracking="TISO",
         flux_level=None,
         radial_scheme="Santamarina",
@@ -765,6 +773,8 @@ class CalculationStep:
         self.step_type = step_type
         self.self_shielding_module = self_shielding_module
         self.self_shielding_method = self_shielding_method
+        self.fuel_self_shielded_isotopes = fuel_self_shielded_isotopes
+        self.clad_self_shielded_isotopes = clad_self_shielded_isotopes
         self.spatial_method = spatial_method
         self.tracking = tracking
         self.flux_level = flux_level
@@ -1683,6 +1693,8 @@ class DragonCalculationScheme:
                     "self_shielding_method", "RSE"),
                 spatial_method=d.get("spatial_method", "CP"),
                 transport_correction=d.get("transport_correction", None),
+                fuel_self_shielded_isotopes=d.get("fuel_self_shielded_isotopes", None),
+                clad_self_shielded_isotopes=d.get("clad_self_shielded_isotopes", None),
                 **common_kwargs,
             )
         else:
