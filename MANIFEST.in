@@ -1,0 +1,8 @@
+# Exclude repository build artifacts from source distributions
+# Prevent recursive inclusion of top-level build/ directory when building
+# wheels/sdist (this caused deep recursion during packaging).
+prune build
+
+# Exclude other common artifacts
+global-exclude __pycache__
+global-exclude *.py[cod]

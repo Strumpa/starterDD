@@ -27,4 +27,7 @@ docs = [
 ]
 
 [tool.setuptools.packages]
-find = {}
+    # Restrict package discovery to the starterDD package only to avoid
+    # including unrelated top-level folders (like the repository `build/`).
+[tool.setuptools.packages.find]
+include = ["starterDD*"]

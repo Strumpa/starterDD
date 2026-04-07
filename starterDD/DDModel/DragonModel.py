@@ -27,6 +27,7 @@ class CartesianAssemblyModel:
         self.tdt_file = tdt_file
         self.parse_geometry_description(geometry_description_yaml)
         self.rod_ID_to_material_dict = None # this will be set later based on the material composition definition selected for the assembly, which can be based on rod IDs in the lattice description for example, in which case this dictionary will map rod IDs to material names for the fuel in the assembly.
+        self.material_to_temperature = None # this will be set later based on the material composition definition selected for the assembly, which can be based on rod IDs in the lattice description for example, in which case this dictionary will map material names to temperatures for the fuel in the assembly.
         self.lattice = None # this will be a data structure representing the lattice of the assembly, which can be a 2D list of pin models corresponding to the lattice description, for example.
         self.set_uniform_temperatures(fuel_temperature=900.0, gap_temperature=600.0, coolant_temperature=600.0, moderator_temperature=600.0, structural_temperature=600.0) # default uniform temperatures for the assembly, which can be updated later based on the core description or other information provided for the assembly.
 
@@ -292,6 +293,14 @@ class CartesianAssemblyModel:
                     f"[YAML validation] Missing required key(s) in "
                     f"'{section_name}' of '{source_path}': {missing_required}."
                 )
+            
+    def set_material_to_temperature_mapping(self, material_to_temperature):
+        """
+        Import temperatures defined in the materials composition yaml in the assembly model.
+        """
+        print("Setting material to temperature mapping in assembly model...")
+        print(f"[assembly_model] Provided material to temperature mapping: {material_to_temperature}")
+        self.material_to_temperature = material_to_temperature
 
     def analyze_lattice_description(self, build_pins=True, apply_self_shielding=None):
         """
@@ -367,10 +376,17 @@ class CartesianAssemblyModel:
                                 center_y = self.translation_offset + y_index * pin_pitch + pin_pitch / 2.0
                                 pin_model.set_center(center_x, center_y)
                             # set the temperatures for the pin based on the uniform temperatures defined for the assembly
-                            pin_model.set_fuel_temperature(self.fuel_temperature)
-                            pin_model.set_clad_temperature(self.structural_temperature)
-                            pin_model.set_gap_temperature(self.gap_temperature)
-                            pin_model.set_coolant_temperature(self.coolant_temperature)
+                            if self.material_to_temperature:
+                                material_temp = self.material_to_temperature.get(material_name, None)
+                                print(f"[lattice analysis] Setting temperatures for pin with material '{material_name}': {material_temp}")
+                                if material_temp is not None:
+                                    pin_model.set_fuel_temperature(material_temp)
+                            else:
+                                # if no specific temperature defined for the material, use the default uniform temperatures defined for the assembly       
+                                pin_model.set_fuel_temperature(self.default_fuel_temperature)
+                                pin_model.set_clad_temperature(self.default_structural_temperature)
+                                pin_model.set_gap_temperature(self.default_gap_temperature)
+                                pin_model.set_coolant_temperature(self.default_coolant_temperature)
                             # Set the generating cell status for self-shielding treatment and order of mix creation in glow
                             if material_name not in material_descriptors_used:
                                 pin_model.set_generating_cell_status(True)
@@ -429,17 +445,46 @@ class CartesianAssemblyModel:
         # add the pin model to the lattice at the corresponding position
         self.lattice[x_index][y_index] = pin_model
 
-    def set_material_compositions(self, compositions):
+    def set_material_compositions(self, compositions, fuel_temps=None, non_fuel_temps=None):
         """
         Set the list of Composition objects for the assembly, typically parsed from a material compositions YAML file
         using parse_all_compositions_from_yaml. This must be called before number_fuel_material_mixtures so that
         each created MaterialMixture can be associated with the correct isotopic composition.
 
         :param compositions (list[Composition]): List of Composition objects for the materials in the assembly.
+        :param fuel_temps (dict): Optional mapping of fuel material names to temperatures in K
+        :param non_fuel_temps (dict): Optional mapping of non-fuel material types to temperatures in K
+                                      (e.g., {'structural': 625, 'gap': 600, 'coolant': 560, 'moderator': 600})
         """
         self.compositions = compositions
+        self._fuel_temps = fuel_temps or {}
+        self._non_fuel_temps = non_fuel_temps or {}
+
         # Build a lookup dict: material_name -> Composition
         self.composition_lookup = {comp.material_name: comp for comp in compositions}
+
+        # Create MaterialMixture objects for non-fuel materials once to store temperatures
+        # These will be accessed during temperature extraction in case_generator
+        self.non_fuel_material_mixtures = []
+        mix_index = 5001  # Start non-fuel indices at a high offset to avoid collision with fuel indices
+
+        for comp in compositions:
+            material_type_key = getattr(comp, 'material_type_key', None)
+            if material_type_key and material_type_key != 'fuel':
+                # This is a non-fuel material, create a MaterialMixture for it
+                temp = self._non_fuel_temps.get(material_type_key, 600.0)
+                depletable = getattr(comp, 'depletable', False)
+
+                mix = MaterialMixture(
+                    material_name=comp.material_name,
+                    material_mixture_index=mix_index,
+                    composition=comp,
+                    temperature=temp,
+                    isdepletable=depletable,
+                    material_type_key=material_type_key,
+                )
+                self.non_fuel_material_mixtures.append(mix)
+                mix_index += 1
 
     def number_fuel_material_mixtures_by_material(self):
         """
@@ -517,16 +562,22 @@ class CartesianAssemblyModel:
                     f"Ensure the material compositions YAML contains an entry with name='{base_material_name}'."
                 )
 
-            # Get fuel temperature from any pin with this material
-            temperature = self._get_fuel_temperature_for_material(base_material_name)
+            # Get fuel temperature from registered temperatures or fallback to pin temperature
+            material_temp = self._fuel_temps.get(base_material_name)
+            if material_temp is None:
+                # Fallback: get temperature from any pin with this material
+                material_temp = self._get_fuel_temperature_for_material(base_material_name)
+
             depletable = getattr(composition, 'depletable', False)
+            material_type_key = getattr(composition, 'material_type_key', 'fuel')
 
             mix = MaterialMixture(
                 material_name=base_material_name,
                 material_mixture_index=mix_index,
                 composition=composition,
-                temperature=temperature,
+                temperature=material_temp,
                 isdepletable=depletable,
+                material_type_key=material_type_key,
             )
             mix.set_unique_material_mixture_name(unique_name)
             self.fuel_material_mixtures.append(mix)
@@ -787,14 +838,20 @@ class CartesianAssemblyModel:
                 )
 
             temperature = self._get_fuel_temperature_for_material(base_material_name)
+            material_temp = self._fuel_temps.get(base_material_name)
+            if material_temp is None:
+                material_temp = temperature
+
             depletable = getattr(composition, 'depletable', False)
+            material_type_key = getattr(composition, 'material_type_key', 'fuel')
 
             mix = MaterialMixture(
                 material_name=base_material_name,
                 material_mixture_index=mix_index,
                 composition=composition,
-                temperature=temperature,
+                temperature=material_temp,
                 isdepletable=depletable,
+                material_type_key=material_type_key,
             )
             mix.set_unique_material_mixture_name(unique_name)
             self.fuel_material_mixtures.append(mix)
@@ -1571,11 +1628,15 @@ class CartesianAssemblyModel:
         """
         set uniform temperatures for the different materials in the assembly, which can be used for temperature-dependent self-shielding treatment in Dragon.
         """
-        self.fuel_temperature = fuel_temperature
-        self.gap_temperature = gap_temperature
-        self.coolant_temperature = coolant_temperature
-        self.moderator_temperature = moderator_temperature
-        self.structural_temperature = structural_temperature
+        print(f"[set_uniform_temperatures] Setting uniform temperatures: "
+              f"fuel={fuel_temperature} K, gap={gap_temperature} K, "
+              f"coolant={coolant_temperature} K, moderator={moderator_temperature} K, "
+              f"structural={structural_temperature} K.")
+        self.default_fuel_temperature = fuel_temperature
+        self.default_gap_temperature = gap_temperature
+        self.default_coolant_temperature = coolant_temperature
+        self.default_moderator_temperature = moderator_temperature
+        self.default_structural_temperature = structural_temperature
         return
 
     def update_lattice_description(self, new_lattice_description):
@@ -1688,6 +1749,7 @@ class CartesianAssemblyModel:
                 composition=composition,
                 temperature=temperature,
                 isdepletable=depletable,
+                material_type_key=getattr(composition, 'material_type_key', 'structural'),
             )
             mix.set_unique_material_mixture_name(unique_name)
             self.control_cross_absorber_mixtures.append(mix)

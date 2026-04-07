@@ -119,6 +119,7 @@ class Composition:
         """
         self.material_name = material_name
         self.isotopic_composition = isotopic_composition  # isotopic_composition is a dict of {isotope_name: density}
+        self.material_type_key = None  # Will be set from YAML MATERIAL_TYPES section if available
 
         # Thermal scattering flag & metadata
         # ----------------------------------
@@ -266,7 +267,7 @@ class Composition:
         return getattr(self, 'isotope_name_composition', self.isotopic_composition)
 
 class MaterialMixture:
-    def __init__(self, material_name: str, material_mixture_index: int, composition: Composition, temperature:float, isdepletable: bool = False):
+    def __init__(self, material_name: str, material_mixture_index: int, composition: Composition, temperature:float, isdepletable: bool = False, material_type_key: str = None):
         """
         Material mixture initialization.
 
@@ -285,13 +286,15 @@ class MaterialMixture:
         :param composition: Composition object defining the isotopic composition
         :param temperature: Temperature of the material mixture in Kelvin
         :param isdepletable: Flag indicating if the material mixture is depletable
+        :param material_type_key: Material type identifier (e.g., "fuel", "structural", "gap", "coolant", "moderator")
         """
-        
+
         self.material_name = material_name
         self.material_mixture_index = material_mixture_index
         self.composition = composition
         self.temperature = temperature
         self.isdepletable = isdepletable
+        self.material_type_key = material_type_key
         self.is_generating = False  # True if this is a "generating" mix (first mix with a given composition)
         self.generating_mix = None  # reference to the generating MaterialMixture if this is a "daughter" mix
 
@@ -394,6 +397,10 @@ def parse_all_compositions_from_yaml(path_to_yaml_data: str):
 
     compositions = []
     mix_list = yaml_data.get('MIX_COMPOSITIONS', [])
+
+    # Load MATERIAL_TYPES mapping if available
+    material_types = yaml_data.get('MATERIAL_TYPES', {})
+
     for entry in mix_list:
         name = entry.get('name')
         if 'isotopic_composition' in entry:
@@ -425,12 +432,16 @@ def parse_all_compositions_from_yaml(path_to_yaml_data: str):
             )
         compositions.append(Composition(name, iso_densities))
 
-    # recover depletable flag and therm flag for each composition from the yaml file
+    # recover depletable flag, therm flag, and material type for each composition from the yaml file
     for comp in compositions:
         for entry in mix_list:
             if entry['name'] == comp.material_name:
                 comp.setDepletable(entry.get('depletable', False))
                 comp.setTherm(entry.get('therm', False))
+                # Set material_type_key from MATERIAL_TYPES mapping
+                if comp.material_name in material_types:
+                    comp.material_type_key = material_types[comp.material_name]
+
     return compositions
 
 

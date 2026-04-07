@@ -41,6 +41,8 @@ class LIB:
         lib.write_to_c2m("./procs", "MIX_LIB")
     """
 
+    SUPPORTED_SELF_SHIELDING_METHODS = ("PT", "RSE", "SUBG")
+
     # Heavy-metal + Gd isotopes that receive self-shielding treatment (INRS)
     DEFAULT_SELF_SHIELDED_FUEL_ISOTOPES = [
         "U234", "U235", "U236", "U238",
@@ -88,6 +90,7 @@ class LIB:
         """
         self.assembly = assembly_model
         self.density_branch = density_branch
+        self.ssh_calculation_step = ssh_calculation_step
 
         # Fuel self-shielding configuration
         self.self_shielded_fuel_isotopes = list(self.DEFAULT_SELF_SHIELDED_FUEL_ISOTOPES)
@@ -115,7 +118,7 @@ class LIB:
         # --- Register control cross material temperature variables --------
         self._register_control_cross_temp_vars()
 
-        if ssh_calculation_step:
+        if ssh_calculation_step is not None:
             # Override self-shielding configuration based on the provided calculation step
             if ssh_calculation_step.fuel_self_shielded_isotopes is not None:
                 self.set_self_shielded_fuel_isotopes(ssh_calculation_step.fuel_self_shielded_isotopes)
@@ -272,9 +275,9 @@ class LIB:
                 lib_name = self.isotope_aliases.get(
                     (mix.material_name, isotope), isotope
                 )
-                line = f"    {isotope} = {lib_name} {density:.8E}"
+                line = f"    {isotope} = {lib_name} {density:.6E}"
                 if isotope in self.correlation_isotopes:
-                    line += " CORR 1"
+                    line += f" CORR {self.fuel_inrs}"
                 elif isotope in self.self_shielded_fuel_isotopes:
                     line += f" {self.fuel_inrs}"
                 lines += line + "\n"
@@ -357,7 +360,7 @@ class LIB:
                     var_name = _WATER_ISO_MAPPING[isotope]
                     line = f"    {isotope} = {lib_name} <<{var_name}>>"
                 else:
-                    line = f"    {isotope} = {lib_name} {density:.5E}"
+                    line = f"    {isotope} = {lib_name} {density:.6E}"
                 if isotope in inrs_map:
                     line += f" {inrs_map[isotope]}"
                 lines += line + "\n"
@@ -396,7 +399,7 @@ class LIB:
                 lib_name = self.isotope_aliases.get(
                     (mix.material_name, isotope), isotope
                 )
-                line = f"    {isotope} = {lib_name} {density:.5E}"
+                line = f"    {isotope} = {lib_name} {density:.6E}"
                 if isotope in inrs_map:
                     line += f" {inrs_map[isotope]}"
                 lines += line + "\n"
@@ -485,13 +488,31 @@ class LIB:
         ctrl_daughters = self.build_control_cross_daughter_mix_lines()
         non_fuel = self.build_non_fuel_mix_lines()
 
+        if hasattr(self, 'ssh_calculation_step') and self.ssh_calculation_step is not None:
+            ssh_method = self.ssh_calculation_step.self_shielding_method
+            if ssh_method not in self.SUPPORTED_SELF_SHIELDING_METHODS:
+                raise ValueError(
+                    f"Unsupported self-shielding method '{ssh_method}' in "
+                    f"SSH calculation step '{self.ssh_calculation_step.name}'. "
+                    f"Supported methods: {self.SUPPORTED_SELF_SHIELDING_METHODS}"
+                )
+            if ssh_method == "PT":
+                ssh_method_str = "PT CALENDF 4"
+            elif ssh_method == "RSE":
+                ssh_method_str = "RSE"
+            elif ssh_method == "SUBG":
+                ssh_method_str = "SUBG"
+        else:
+            ssh_method_str = "<<ssh_method>>"  # receive as input parameter when not fixed
+
         call = (
             "LIBRARY := LIB: ::\n"
             "EDIT 0\n"
             f"NMIX {max_mix}  ! MAXIMUM OF MATERIAL MIXTURES\n"
-            "<<ssh_method>>\n"
+            f"{ssh_method_str}\n"
             "ANIS <<anis_level>>\n"
             "CTRA <<tran_correc>>\n"
+            "ADED 4 NELAS N2N N3N N4N\n"
             "DEPL LIB: DRAGON FIL: <<Library>>\n"
             "MIXS LIB: DRAGON FIL: <<Library>>\n"
             f"{generating}"
@@ -1546,26 +1567,24 @@ class SALT:
             f"{self.track_name} {self.trkfil_name} "
             f":= SALT: {self.tdt_var_name} ::"
         )
-        lines.append("    EDIT 1")
+        lines.append("    EDIT 2")
         lines.append(f"    TITLE '{self.title}'")
 
-        if s.spatial_method == "MOC":
-            lines.append("    ALLG LONG")
-
         lines.append(f"    BATCH {self.batch}")
-
+        lines.append(f"    ANIS {s.anisotropy_level}")
+        
         if s.spatial_method == "MOC":
-            lines.append(f"    {s.polar_angles_quadrature}")
-            lines.append(f"    ANIS <<o_anis>>")
+            #lines.append(f"    {s.polar_angles_quadrature}")    
+            lines.append("    ALLG")
             lines.append(
-                f"    {s.tracking} EQW2 "
+                f"    {s.tracking} "
                 f"{s.num_angles_2d} "
                 f"{s.line_density:.1f} REND"
             )
             lines.append("    NOIC")
         elif s.spatial_method == "IC":
             lines.append(
-                f"    {s.tracking} EQW "
+                f"    {s.tracking} "
                 f"{s.num_angles_2d} "
                 f"{s.line_density:.1f}"
             )
@@ -1573,10 +1592,11 @@ class SALT:
         else:
             # CP
             lines.append(
-                f"    {s.tracking} EQW "
+                f"    {s.tracking} "
                 f"{s.num_angles_2d} "
                 f"{s.line_density:.1f}"
             )
+            lines.append("    NOIC")
 
         lines.append(";")
         return "\n".join(lines) + "\n"
@@ -1612,7 +1632,9 @@ class MCCGT:
         self.track_name = track_name or f"TRK{step_tag}"
         self.trkfil_name = f"TRKFIL{step_tag}"
         self.max_inner_iterations = max_inner_iterations
-        self.krylov_dim = krylov_dim
+        self.nmu = 4  # default number of polar angles for quadrature
+        if self.step.anisotropy_level > 4:
+            self.nmu = 6
 
     def build_mccgt_call(self):
         """Return the full ``MCCGT:`` call block as a string."""
@@ -1624,11 +1646,8 @@ class MCCGT:
         )
         lines.append("    EDIT 1")
         lines.append(
-            f"    {s.polar_angles_quadrature} <<o_anis>> "
-            f"AAC {self.max_inner_iterations} ILU0"
-        )
-        lines.append(
-            f"    HDD 0.0 SC KRYL {self.krylov_dim}"
+            f"    {s.polar_angles_quadrature} {self.nmu} "
+            f"AAC 80 TMT EPSI 1E-5"
         )
         lines.append(";")
         return "\n".join(lines) + "\n"
@@ -1661,6 +1680,10 @@ class TRK:
     def _build_tracking_objects(self):
         """Create SALT (and MCCGT) objects for each trackable step."""
         for step in self.scheme.get_trackable_steps():
+            if step.step_type == "self_shielding":
+                self.problem_anisotropy_level = step.anisotropy_level
+            else:
+                step.anisotropy_level = getattr(self, "problem_anisotropy_level", 1)
             tdt_var = self._tdt_var_name(step)
             salt = SALT(step, tdt_var)
             self._salt_objects.append(salt)
@@ -1769,12 +1792,6 @@ class TRK:
         # TDT vars are SEQ_ASCII (no linked-list decl)
         param_block += ";\n"
 
-        # Variable input: anisotropy level
-        var_block = (
-            "INTEGER o_anis ;\n"
-            ":: >>o_anis<< ;\n"
-        )
-
         # MODULE declaration
         mod_block = "MODULE SALT: MCCGT: END: ;\n"
 
@@ -1783,7 +1800,7 @@ class TRK:
         footer = "END: ;\nQUIT .\n"
 
         content = (
-            f"{header}{param_block}\n{var_block}\n"
+            f"{header}{param_block}\n"
             f"{mod_block}\n{body}{footer}"
         )
 
@@ -2061,10 +2078,10 @@ class MIXEQ:
 
         max_mix = self._determine_max_mix_count()
 
-        # Start LIB: call in library edit mode (EDIT 0)
+        # Start LIB: call in library edit mode
         call = (
-            f"{self.lib_name} := LIB: {self.lib_name} ::\n"
-            "  EDIT 0\n"  # Library edit mode - read existing microlib
+            f"{self.lib_name} := LIB: {self.lib_name} ::\n" # Library edit mode - read existing microlib
+            "  EDIT 0\n"  
             f"  NMIX {max_mix}\n"
             f"  DEPL LIB: DRAGON FIL: {self.lib_name}\n"
             f"  MIXS LIB: MICROLIB FIL: {self.lib_name}\n"

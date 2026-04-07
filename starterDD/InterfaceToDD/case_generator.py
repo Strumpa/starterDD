@@ -99,6 +99,10 @@ class DragonCase:
         self.enable_g2s = enable_g2s
         self.tdt_base_name = tdt_base_name or case_name
 
+        # Temperature dictionaries for material-specific temperatures
+        self._fuel_material_temperatures = {}  # {material_name: temperature_K}
+        self._non_fuel_temperatures = {}  # {material_type: temperature_K}
+
         # ----------------------------------------------------------
         # Resolve all paths to absolute so the case is
         # independent of later CWD changes.
@@ -155,9 +159,98 @@ class DragonCase:
             "CALC_SCHEME"
         ]
 
+    def set_fuel_material_temperatures(self, material_temps: dict):
+        """
+        Register fuel material temperatures by name.
+
+        Parameters
+        ----------
+        material_temps : dict
+            Mapping of fuel material name → temperature in K.
+            Example: {'UOX_4.5': 900.0, 'MOX_8.0': 1100.0}
+        """
+        self._fuel_material_temperatures.update(material_temps)
+
+    def set_non_fuel_temperatures(self, structural_temperature: float = 600.0,
+                                   gap_temperature: float = 600.0,
+                                   coolant_temperature: float = 600.0,
+                                   moderator_temperature: float = 600.0):
+        """
+        Register non-fuel material temperatures (single value per type).
+
+        These apply to all non-fuel materials of their type across the assembly.
+
+        Parameters
+        ----------
+        structural_temperature : float
+            Temperature for cladding/absorber tubes in K
+        gap_temperature : float
+            Temperature for gas gaps (helium, void) in K
+        coolant_temperature : float
+            Temperature for coolant (single temperature across assembly)
+        moderator_temperature : float
+            Temperature for moderator (single temperature across assembly)
+        """
+        self._non_fuel_temperatures.update({
+            'structural': structural_temperature,
+            'gap': gap_temperature,
+            'coolant': coolant_temperature,
+            'moderator': moderator_temperature,
+        })
+
     # -----------------------------------------------------------
     # Assembly model construction
     # -----------------------------------------------------------
+
+    def _extract_cle2000_temperatures(self):
+        """
+        Extract representative temperatures for CLE2000 MIX procedure call.
+
+        Returns dict: {'TFUEL': float, 'TBOX': float, 'TCLAD': float, ...}
+
+        Logic:
+        - For fuel: collect temperatures from fuel mixtures
+          (all UOX_4.5 instances share one temp, all MOX_8.0 share another, etc.)
+        - For non-fuel: all instances of a type share one temp, so take first instance of each type
+        """
+        if self.assembly is None or self.assembly.compositions is None or len(self.assembly.compositions) == 0:
+            # Fallback: use assembly defaults
+            return {
+                'TFUEL': self.assembly.default_fuel_temperature if self.assembly else 900.0,
+                'TBOX': self.assembly.default_structural_temperature if self.assembly else 600.0,
+                'TCLAD': self.assembly.default_gap_temperature if self.assembly else 600.0,
+                'TCOOL': self.assembly.default_coolant_temperature if self.assembly else 600.0,
+                'TMODE': self.assembly.default_moderator_temperature if self.assembly else 600.0,
+                'TCTRL': self.assembly.default_structural_temperature if self.assembly else 600.0,
+            }
+
+        # Group mixtures by material type
+        temps_by_type = {}  # {material_type: temp}
+        fuels = []  # Collect fuel temps to extract representative value
+
+        # Collect fuel material mixture temps
+        if hasattr(self.assembly, 'fuel_material_mixtures') and self.assembly.fuel_material_mixtures:
+            for mix in self.assembly.fuel_material_mixtures:
+                if hasattr(mix, 'temperature') and mix.temperature is not None:
+                    fuels.append(mix.temperature)
+
+        # Collect non-fuel material mixture temps (first instance of each type)
+        if hasattr(self.assembly, 'non_fuel_material_mixtures') and self.assembly.non_fuel_material_mixtures:
+            for mix in self.assembly.non_fuel_material_mixtures:
+                material_type = getattr(mix, 'material_type_key', None)
+                if material_type and material_type not in temps_by_type:
+                    if hasattr(mix, 'temperature') and mix.temperature is not None:
+                        temps_by_type[material_type] = mix.temperature
+
+        # Map to CLE2000 variables with fallback to assembly defaults
+        return {
+            'TFUEL': fuels[0] if fuels else self.assembly.default_fuel_temperature,
+            'TBOX': temps_by_type.get('structural', self.assembly.default_structural_temperature),
+            'TCLAD': temps_by_type.get('gap', self.assembly.default_gap_temperature),
+            'TCOOL': temps_by_type.get('coolant', self.assembly.default_coolant_temperature),
+            'TMODE': temps_by_type.get('moderator', self.assembly.default_moderator_temperature),
+            'TCTRL': temps_by_type.get('structural', self.assembly.default_structural_temperature),
+        }
 
     def _build_assembly_model(self):
         """Build and return a ``CartesianAssemblyModel``."""
@@ -176,6 +269,8 @@ class DragonCase:
             geometry_description_yaml=self.geom_yaml,
         )
         assembly.set_rod_ID_to_material_mapping(rod_to_mat)
+
+        # Set assembly-level defaults (used as fallback if temperatures not registered via API)
         assembly.set_uniform_temperatures(
             fuel_temperature=900.0,
             gap_temperature=600.0,
@@ -184,7 +279,15 @@ class DragonCase:
             structural_temperature=600.0,
         )
         assembly.analyze_lattice_description(build_pins=True)
-        assembly.set_material_compositions(compositions)
+
+        # Pass temperature dicts to set_material_compositions
+        fuel_temps = self._fuel_material_temperatures
+        non_fuel_temps = self._non_fuel_temperatures
+        assembly.set_material_compositions(
+            compositions,
+            fuel_temps=fuel_temps,
+            non_fuel_temps=non_fuel_temps
+        )
         return assembly, compositions
 
     def _generate_mixeq_procedures(self, scheme, assembly):
@@ -453,6 +556,10 @@ class DragonCase:
                         geometry_type_to_show=GeometryType.SECTORIZED,
                         property_type_to_show=PropertyType.MACRO,
                     )
+                    lattice.show(
+                        geometry_type_to_show=GeometryType.SECTORIZED,
+                        property_type_to_show=PropertyType.MATERIAL,
+                    )
 
             # 4b. Read TDT and enforce material indices for THIS step
             #     This records the TDT-assigned indices in the step's state history
@@ -681,18 +788,8 @@ class DragonCase:
         )
 
         # Temperature variables
-        temp_mapping = {
-            "TFUEL": "fuel_temperature",
-            "TBOX": "structural_temperature",
-            "TCLAD": "gap_temperature",
-            "TCOOL": "coolant_temperature",
-            "TMODE": "moderator_temperature",
-            "TCTRL": "structural_temperature",
-        }
-        for tname, attr in temp_mapping.items():
-            temp_val = getattr(
-                self.assembly, attr, 600.0
-            )
+        temps = self._extract_cle2000_temperatures()
+        for tname, temp_val in temps.items():
             proc.add_variable(tname, "REAL", temp_val)
 
         # --- TDT file SEQ_ASCII imports ---
@@ -716,7 +813,7 @@ class DragonCase:
 
         trk_call = wrap_cle2000_line(
             f"{lhs} := {trk_proc_name} "
-            f"{rhs_tdts} :: <<o_anis>> ;"
+            f"{rhs_tdts} ;"
         )
         proc.add_body_line(
             "*" * 50
@@ -771,6 +868,7 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(uss_line)
         )
+        proc.add_body_line(" PASS 3")
 
         if mixeq_procedures:
             for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
@@ -989,7 +1087,7 @@ class DragonCase:
 
         trk_call = wrap_cle2000_line(
             f"{lhs} := {trk_proc_name} "
-            f"{rhs_tdts} :: <<o_anis>> ;"
+            f"{rhs_tdts} ;"
         )
         proc.add_body_line("*" * 50)
         proc.add_body_line("* Tracking sub-procedure call")
@@ -1198,6 +1296,7 @@ class DragonCase:
         proc.add_body_line(
             f"{inner_indent}    EDIT 1 {ssh_asm_keyword}"
         )
+        proc.add_body_line("    PASS 3")
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line("")
 
@@ -1334,15 +1433,12 @@ class DragonCase:
         proc.add_body_line("*" * 50)
         proc.add_body_line("_COMPO := COMPO ;")
 
+        # Extract temperatures for non-fuel materials
+        temps = self._extract_cle2000_temperatures()
+
         # Map temperature branch values to assembly temps
         # for the non-loop temperature variables (structural etc.)
-        temp_mapping = {
-            "TBOX": "structural_temperature",
-            "TCLAD": "gap_temperature",
-            "TCTRL": "structural_temperature",
-        }
-        # For branch-driven temps, use default values as fallback
-        # (they will be overridden in the loop via GREP)
+        # For branch-driven temps, use branch values as override
         fuel_temp_branch = scheme.get_branch(
             "fuel_temperature"
         )
@@ -1352,23 +1448,22 @@ class DragonCase:
         proc.add_variable(
             "TFUEL", "REAL",
             fuel_temp_branch.values[0]
-            if fuel_temp_branch else 900.0,
+            if fuel_temp_branch else temps.get('TFUEL', 900.0),
         )
         proc.add_variable(
             "TCOOL", "REAL",
             cool_temp_branch.values[0]
-            if cool_temp_branch else 600.0,
+            if cool_temp_branch else temps.get('TCOOL', 600.0),
         )
         proc.add_variable(
             "TMODE", "REAL",
             cool_temp_branch.values[0]
-            if cool_temp_branch else 600.0,
+            if cool_temp_branch else temps.get('TMODE', 600.0),
         )
-        for tname, attr in temp_mapping.items():
-            temp_val = getattr(
-                self.assembly, attr, 600.0
-            )
-            proc.add_variable(tname, "REAL", temp_val)
+        # Non-fuel temperatures from extracted values
+        proc.add_variable("TBOX", "REAL", temps.get('TBOX', 600.0))
+        proc.add_variable("TCLAD", "REAL", temps.get('TCLAD', 600.0))
+        proc.add_variable("TCTRL", "REAL", temps.get('TCTRL', 600.0))
 
         return proc.write_to_x2m(self.output_path)
 
@@ -1440,17 +1535,10 @@ class DragonCase:
         proc.add_variable("keffL1", "REAL")
         proc.add_variable("keffL2", "REAL")
 
-        temp_mapping = {
-            "TFUEL": "fuel_temperature",
-            "TBOX": "structural_temperature",
-            "TCLAD": "gap_temperature",
-            "TCOOL": "coolant_temperature",
-            "TMODE": "moderator_temperature",
-            "TCTRL": "structural_temperature",
-        }
-        for tname, attr in temp_mapping.items():
-            proc.add_variable(tname, "REAL",
-                              getattr(self.assembly, attr, 600.0))
+        # Temperature variables
+        temps = self._extract_cle2000_temperatures()
+        for tname, temp_val in temps.items():
+            proc.add_variable(tname, "REAL", temp_val)
 
         # --- TDT SEQ_ASCII imports ---
         tdt_map = trk.get_tdt_file_mapping()
@@ -1513,6 +1601,7 @@ class DragonCase:
             )
         )
         proc.add_body_line(f"    EDIT 1 {uss_keyword}")
+        proc.add_body_line("    PASS 3")
         proc.add_body_line(";")
         proc.add_body_line("")
 
@@ -1909,6 +1998,7 @@ class DragonCase:
             )
         )
         proc.add_body_line(f"{inner_indent}    EDIT 1 {uss_keyword}")
+        proc.add_body_line(f"{inner_indent}    PASS 3")
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line("")
 
@@ -2102,18 +2192,11 @@ class DragonCase:
         proc.add_body_line("*" * 50)
         proc.add_body_line("_COMPO := COMPO ;")
 
-        # Temperature variables (structural etc.)
-        temp_mapping = {
-            "TFUEL": "fuel_temperature",
-            "TBOX": "structural_temperature",
-            "TCLAD": "gap_temperature",
-            "TCOOL": "coolant_temperature",
-            "TMODE": "moderator_temperature",
-            "TCTRL": "structural_temperature",
-        }
-        for tname, attr in temp_mapping.items():
+        # Temperature variables (from MaterialMixture objects)
+        temps = self._extract_cle2000_temperatures()
+        for tname, temp_val in temps.items():
             proc.add_variable(
-                tname, "REAL", getattr(self.assembly, attr, 600.0)
+                tname, "REAL", temp_val
             )
 
         return proc.write_to_x2m(self.output_path)

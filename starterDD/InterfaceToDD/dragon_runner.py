@@ -249,9 +249,9 @@ class DragonRunner:
                     resolved[draglib_name] = os.path.abspath(p)
                     continue
                 # Also check .gz
-                if os.path.isfile(p + ".gz"):
+                if os.path.isfile(str(p) + ".gz"):
                     resolved[draglib_name] = os.path.abspath(
-                        p + ".gz"
+                        str(p) + ".gz"
                     )
                     continue
 
