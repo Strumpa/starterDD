@@ -40,6 +40,12 @@ class CartesianAssemblyModel:
         """
         Parse the geometry description YAML file for the assembly.
 
+        All coordinates are relative to the origin set at the bottom-left corner of the assembly.
+        In Cartesian gometries : this is the xmin, ymin corner of the assembly, this can be specified as : 
+            - A "problem_boundaries" if present in the assembly_box_description of the input yaml file.
+            - Implicitly as xmin=0, ymin=0 of in a [0, assembly_pitch] x [0, assembly_pitch] square if the "assembly_box_description" is not provided in the input yaml file.
+            In this case the assembly_pitch parameter must be set in the ASSEMBLY_GEOMETRY section of the geometry description yaml file to define the size of the assembly.
+
         Expected YAML structure::
 
             ASSEMBLY_GEOMETRY:
@@ -47,19 +53,55 @@ class CartesianAssemblyModel:
                 lattice_description: n by m grid describing the material composition of each pin
                 (e.g. for a 10x10 BWR assembly, entries like ``"ROD1"``, ``"ROD5G"``, etc.)
 
-            Convention is x-increasing, y-increasing:
+                    Convention is x-increasing, y-increasing:
 
-                - the first row is the bottom of the lattice, ordered in x-increasing direction
-                - the last row is the top of the lattice
-                - the first column is the left, ordered in y-increasing direction
-                - the last column is the right
+                    - the first row is the bottom of the lattice, ordered in x-increasing direction
+                    - the last row is the top of the lattice
+                    - the first column is the left, ordered in y-increasing direction
+                    - the last column is the right
 
-                assembly_pitch: pitch of the assembly lattice
-                gap_wide: width of the gap between fuel pins
-                channel_box_thickness: thickness of the channel box (if any)
-                corner_inner_radius_of_curvature: inner radius of curvature for corners (if any)
                 Gd_rod_ids: material descriptors for Gd-bearing fuel pins
                 non_fuel_rod_ids: material descriptors for water rods, guide tubes, etc.
+
+                The following parameters are optional and make starterDD retrocompatible with early versions of the geometry description YAML file.
+                For a more flexible and explicit geometry definition 
+                assembly_pitch [optional]: pitch of the assembly lattice
+                channel_box_thickness [optional]: thickness of the channel box (if any)
+                corner_inner_radius_of_curvature [optional]: inner radius of curvature for corners (if any)
+
+                gap [optional]: width of the moderator gap between the outer channel box and outer boundaries
+                gap_wide [optional]: width of the moderator gap between the outer channel box and outer boundaries (wide side)
+                gap_narrow [optional]: width of the moderator gap between the outer channel box and outer boundaries (narrow side)
+
+                Note : if either "gap", "gap_wide" or "gap_narrow" is provided, the other missing gap parameters will be set to the same value as the provided one to ensure consistency. If none of the gap parameters are provided, the gap width will be set to 0.
+                if both "gap_wide" and "gap_narrow" are provided, their consistency will be checked to ensure that gap_wide is greater than or equal to gap_narrow, otherwise an error will be raised.
+                For anti-diagonally symmetric assemblies :
+                If both "gap_wide" and "gap_narrow" are provided : it will be assumed that the wide-wide corner is the top-left corner of the assembly for anti-diagonal symmetry.
+                Conversely, the bottom-right corner of the assembly will be assumed to be the narrow-narrow corner, and the other two corners will be assumed to be wide-narrow corners.
+                For diagonally symmetric assemblies :
+                If both "gap_wide" and "gap_narrow" are provided : it will be assumed that the wide-wide, and narrow-narrow corners are the bottom-left and top-right corners.
+                
+                The wide-wide corner will be the only corner available for control cross insertion.
+
+                If you wish to define a control cross in a different corner : use the assembly_box_description to explicitly define the geometry of the assembly box.
+
+                assembly_box_description [optional, replaces implicit definition through assembly_pitch, gap, channel_box_thickness, etc.]: 
+                description of the assembly box geometry, which can be used to define more complex assembly box geometries with different gap widths on different sides of the assembly for example, and to explicitly set the origin of the coordinate system for the assembly geometry:
+                    user provided list of surfaces : 
+                    supported surfaces types are Square and Rectangle for now. See GeometryBuilder/surfaces.py for the definition of the surface classes and their parameters.
+                    - surfaces: 
+                        name: user friendly name for the surface
+                        surface_id: unique integer to identify the surface in the geometry building process.
+                            special names / id pairs : 
+                                ("problem_boundaries", 0) for the outer boundaries inscribing the problem.
+                                ("lattice_bounding_box", -1) for the surface bounding the pin lattice: this is the only type that can be filled with the "lattice" structure.
+                        type: "square" or "rectangle" for now, but this can be extended later to support more complex surface types if needed.
+                        parameters: parameters defining the surface geometry, which depend on the surface type. For example, for a square :
+                            center: (x, y) coordinates of the center of the square
+                            side_length: side length of the square
+                        fill_material: (for non-lattice_bounding_box surfaces) material to fill the region defined by the inside surface.
+
+
 
             PIN_GEOMETRY:
                 fuel_radius: radius of the fuel region
@@ -68,6 +110,7 @@ class CartesianAssemblyModel:
                 height: height of the pin
                 self_shielding_option: ``"Santamarina"``, ``"user_defined"``, or ``"automatic"``
                 options_dict: additional options (user-defined radii, number of radial zones, etc.)
+                Note : It is recommended to provide discretization options through the CalculationScheme definition in the corresponding yaml format.
 
             WATER_ROD_GEOMETRY:
                 type: "circular" or "square"
@@ -76,7 +119,7 @@ class CartesianAssemblyModel:
                 inner_side : <value> (for square water rods)
                 outer_side : <value> (for square water rods)
                 corner_radius : <value> (optional, for square water rods with rounded corners)
-                centers: [(x, y) coordinates for the centers of the water rods in the lattice, e.g. [(0.5, 0.5), (2.5, 0.5)] for two water rods centered in the middle of the first and third cells of the first row of the lattice)]
+                centers: [(x, y) coordinates for the centers of the water rods in the assembly, relative to the origin defined for the assembly geometry]
         """
         with open(geometry_description_yaml, 'r') as file:
             yaml_data = yaml.safe_load(file)
@@ -98,14 +141,17 @@ class CartesianAssemblyModel:
 
         # check gap_wide and gap_narrow consistency if both are provided
         if self.gap_wide is not None and self.gap_narrow is not None:
-            if self.gap_wide <= self.gap_narrow:
-                raise ValueError(f"Inconsistent gap widths: 'gap_wide' ({self.gap_wide}) must be greater than 'gap_narrow' ({self.gap_narrow}).")
+            if self.gap_wide < self.gap_narrow:
+                raise ValueError(f"Inconsistent gap widths: 'gap_wide' ({self.gap_wide}) must be greater than or equal to 'gap_narrow' ({self.gap_narrow}).")
         if self.gap_wide is not None and self.gap_narrow is None:
             self.gap_narrow = self.gap_wide
         if self.gap_narrow is not None and self.gap_wide is None:
             self.gap_wide = self.gap_narrow
         if self.gap_narrow is None and self.gap_wide is None:
-            self.gap_wide = self.gap_narrow = self.gap
+            if self.gap is not None:
+                self.gap_wide = self.gap_narrow = self.gap
+            else:
+                self.gap_wide = self.gap_narrow = self.gap = 0.0
         # Pincell information
         self.pin_geometry_dict = yaml_data.get("PIN_GEOMETRY", {})
         
@@ -126,13 +172,15 @@ class CartesianAssemblyModel:
         n_cols = len(self.lattice_description[0]) if self.lattice_description else 0
         pin_pitch = self.pin_geometry_dict.get("pin_pitch", 0)
         self.intra_assembly_coolant_width = (self.channel_box_inner_side - n_cols * pin_pitch) / 2.0 if self.channel_box_inner_side is not None else None
-        # translation offset needs to become a tupple as narrow and wide gaps can be different.
-        # TODO: think of where to compute translation gap : need to be avaialble when building the lattice in geomtry builder, 
-        # also needs information about the lattice symmmetry : if quarter or eighth, gap_narrow == gap_wide,
-        # if the lattice is anti-diagonally symmetric, translation_offset = (gap_wide + ...., gap_narrow + ...)
-        # if the lattice is diagonally symmetric, translation_offset = (gap_wide + ..., gap_wide + ...)
-        # 
-        self.translation_offset = self.gap_wide + self.channel_box_thickness + self.intra_assembly_coolant_width if self.gap_wide is not None and self.channel_box_thickness is not None and self.intra_assembly_coolant_width is not None else None
+
+        # Initialize asymmetric translation offsets
+        self.translation_offset_x = None
+        self.translation_offset_y = None
+
+        # Compute translation offsets based on detected lattice symmetry
+        self._compute_translation_offsets()
+
+
 
         # Control cross information (optional)
         ctrl_data = yaml_data.get("CONTROL_CROSS_GEOMETRY", None)
@@ -168,6 +216,7 @@ class CartesianAssemblyModel:
         "lattice_description": True,
         "assembly_pitch": True,
         "gap_wide": False,
+        "gap_narrow": False,
         "channel_box_thickness": False,
         "corner_inner_radius_of_curvature": False,
         "Gd_rod_ids": False,
@@ -371,9 +420,9 @@ class CartesianAssemblyModel:
                             # set the position of the pin in the lattice based on its indices in the lattice description
                             pin_model.set_position_in_lattice(x_index, y_index)
                             # compute and set the center of the pin in the assembly coordinate system
-                            if self.translation_offset is not None and pin_pitch > 0:
-                                center_x = self.translation_offset + x_index * pin_pitch + pin_pitch / 2.0
-                                center_y = self.translation_offset + y_index * pin_pitch + pin_pitch / 2.0
+                            if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
+                                center_x = self.translation_offset_x + x_index * pin_pitch + pin_pitch / 2.0
+                                center_y = self.translation_offset_y + y_index * pin_pitch + pin_pitch / 2.0
                                 pin_model.set_center(center_x, center_y)
                             # set the temperatures for the pin based on the uniform temperatures defined for the assembly
                             if self.material_to_temperature:
@@ -401,9 +450,9 @@ class CartesianAssemblyModel:
                             dummy_pin_model = DummyPinModel(descriptor)
                             dummy_pin_model.set_position_in_lattice(x_index, y_index)
                             # compute and set the center of the dummy pin in the assembly coordinate system
-                            if self.translation_offset is not None and pin_pitch > 0:
-                                center_x = self.translation_offset + x_index * pin_pitch + pin_pitch / 2.0
-                                center_y = self.translation_offset + y_index * pin_pitch + pin_pitch / 2.0
+                            if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
+                                center_x = self.translation_offset_x + x_index * pin_pitch + pin_pitch / 2.0
+                                center_y = self.translation_offset_y + y_index * pin_pitch + pin_pitch / 2.0
                                 dummy_pin_model.set_center(center_x, center_y)
                             lattice_row.append(dummy_pin_model)
                     else:
@@ -722,6 +771,53 @@ class CartesianAssemblyModel:
                 if self.lattice_description[i][j] != self.lattice_description[j][i]:
                     return False
         return True
+
+    def _compute_translation_offsets(self):
+        """
+        Compute asymmetric translation offsets based on detected lattice symmetry and gap configuration.
+
+        For symmetric lattice or when gap_wide == gap_narrow:
+            translation_offset_x = translation_offset_y = gap_wide + cbt + intra_assembly_coolant_width
+
+        For anti-diagonal symmetry (axis from top-left to bottom-right):
+            translation_offset_x = gap_wide + cbt + intra_assembly_coolant_width  (wide on left)
+            translation_offset_y = gap_narrow + cbt + intra_assembly_coolant_width  (narrow on bottom)
+
+        For main-diagonal symmetry (transpose symmetry):
+            translation_offset_x = gap_wide + cbt + intra_assembly_coolant_width
+            translation_offset_y = gap_wide + cbt + intra_assembly_coolant_width  (both use wide)
+        """
+        # Check prerequisites
+        if (self.gap_wide is None or self.channel_box_thickness is None
+                or self.intra_assembly_coolant_width is None):
+            self.translation_offset_x = None
+            self.translation_offset_y = None
+            return
+
+        # Base offset using gap_wide (applies to wide-gap configuration)
+        offset_wide = self.gap_wide + self.channel_box_thickness + self.intra_assembly_coolant_width
+
+        # Narrow offset for asymmetric side (only used in anti-diagonal for y-axis)
+        offset_narrow = self.gap_narrow + self.channel_box_thickness + self.intra_assembly_coolant_width
+
+        # Detect lattice symmetry
+        sym_type = self.check_diagonal_symmetry()
+
+        if sym_type == "anti-diagonal":
+            # Top-left corner is wide-wide, bottom-right is narrow-narrow
+            # X-axis (left-right): wide on left (low x), narrow on right (high x)
+            # Y-axis (bottom-top): narrow on bottom (low y), wide on top (high y)
+            self.translation_offset_x = offset_wide
+            self.translation_offset_y = offset_narrow
+        elif sym_type == "main-diagonal":
+            # Both bottom-left and top-right are wide-wide corners
+            # Equal distribution needed on both axes
+            self.translation_offset_x = offset_wide
+            self.translation_offset_y = offset_wide
+        else:
+            # No symmetry or symmetric (quarter/eighth) - treat as isotropic
+            self.translation_offset_x = offset_wide
+            self.translation_offset_y = offset_wide
 
     def number_fuel_material_mixtures_by_pin(self):
         """

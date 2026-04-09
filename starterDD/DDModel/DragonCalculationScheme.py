@@ -664,10 +664,12 @@ class CalculationStep:
         num_angles_2d=8,
         line_density=25.0,
         anisotropy_level=1,
+        batch_size=None,
         transport_correction=None,
         polar_angles_quadrature=None,
         number_of_polar_angles=None,
         mix_numbering_strategy="by_material",
+        tdt_file_id=None,
     ):
         # --- Validate step type ---
         if step_type not in VALID_STEP_TYPES:
@@ -790,10 +792,12 @@ class CalculationStep:
         self.num_angles_2d = num_angles_2d
         self.line_density = line_density
         self.anisotropy_level = anisotropy_level
+        self.batch_size = batch_size
         self.transport_correction = transport_correction
         self.polar_angles_quadrature = polar_angles_quadrature
         self.number_of_polar_angles = number_of_polar_angles
         self.mix_numbering_strategy = mix_numbering_strategy
+        self.tdt_file_id = tdt_file_id
 
     # ------------------------------------------------------------------
     # Radii application
@@ -1669,6 +1673,7 @@ class DragonCalculationScheme:
         # Common kwargs shared by both branches
         common_kwargs = dict(
             tracking=d.get("tracking", "TISO"),
+            batch_size=d.get("batch_size", None),
             flux_level=d.get("flux_level", None),
             radial_scheme=d.get("radial_scheme", "Santamarina"),
             radial_params=d.get("radial_params", {}),
@@ -1680,6 +1685,7 @@ class DragonCalculationScheme:
             export_macros=d.get("export_macros", False),
             box_discretization=box_disc,
             mix_numbering_strategy=d.get("mix_numbering_strategy", "by_material"),
+            tdt_file_id=d.get("tdt_file_identifier", None),
             **tracking_kwargs,
         )
 
