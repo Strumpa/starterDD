@@ -526,11 +526,16 @@ class DragonCase:
             # generating geometry for this particular calculation step.
             assembly.apply_mix_numbering_strategy(step.mix_numbering_strategy)
             
-
-            tdt_file_name = (
-                f"{self.tdt_base_name}_{step.name}"
+            if step.tdt_file_id is not None:
+                tdt_file_name = (
+                f"{self.tdt_base_name}_{self.step.tdt_file_id}"
                 f"_{step.spatial_method}"
             )
+            else:
+                tdt_file_name = (
+                    f"{self.tdt_base_name}_{step.name}"
+                    f"_{step.spatial_method}"
+                )
 
             # 4a. Optionally build geometry with glow
             if self.call_glow:

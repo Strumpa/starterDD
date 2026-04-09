@@ -21,18 +21,18 @@ REAL TCOOL := 600.0 ;
 REAL TMODE := 600.0 ;
 REAL TCTRL := 600.0 ;
 
-SEQ_ASCII tdt_ssh :: FILE 'AT10_4x4_mix_splitting_SSH_IC_TISO_MACRO.dat'
+SEQ_ASCII tdtssh :: FILE 'AT10_4x4_mix_splitting_SSH_IC_TISO_MACRO.dat'
   ;
-SEQ_ASCII tdt_fluxl1 :: FILE
+SEQ_ASCII tdtfluxl1 :: FILE
   'AT10_4x4_mix_splitting_FLUXL1_IC_TISO_MACRO.dat' ;
-SEQ_ASCII tdt_fluxl2 :: FILE
-  'AT10_4x4_mix_splitting_FLUXL2_MOC_TSPC.dat' ;
+SEQ_ASCII tdtfluxl2 :: FILE 'AT10_4x4_mix_splitting_FLUXL2_MOC_TSPC.dat'
+  ;
 
 **************************************************
 * Tracking sub-procedure call
 **************************************************
 TRKSSH TRKFILSSH TRKFLUXL1 TRKFILFLUXL1 TRKFLUXL2 TRKFILFLUXL2 := TRK
-  tdt_ssh tdt_fluxl1 tdt_fluxl2 :: <<o_anis>> ;
+  tdtssh tdtfluxl1 tdtfluxl2 :: <<o_anis>> ;
 
 **************************************************
 * LIBRARY creation

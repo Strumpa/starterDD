@@ -201,6 +201,8 @@ class DragonRunner:
     @staticmethod
     def _resolve_executable(explicit_path):
         """Resolve the Dragon executable path.
+        
+        Dragon executable is located in Dragon/bin/<platform>/Dragon
 
         Resolution order:
         1. Explicit argument (if given and exists).
@@ -223,6 +225,7 @@ class DragonRunner:
             "Provide dragon_executable= argument, or set "
             "$dragon_exec or $DRAGON_EXEC environment variable. "
             f"Searched: {searched}"
+            "Dragon executable is located in Dragon/bin/<platform>/Dragon"
         )
 
     def _resolve_draglib_paths(self, explicit_paths):

@@ -1545,13 +1545,7 @@ class SALT:
         self.title = title or (
             f"{step_tag} - {self.step.spatial_method}"
         )
-        if batch is not None:
-            self.batch = batch
-        else:
-            self.batch = (
-                2000 if self.step.spatial_method == "MOC"
-                else 200
-            )
+        self.batch = calculation_step.batch_size
 
         if self.step.tracking == "TSPC" and self.step.num_angles_2d not in self.AVAILABLE_TSPC_ANGLES:
             raise ValueError(
@@ -1569,8 +1563,8 @@ class SALT:
         )
         lines.append("    EDIT 2")
         lines.append(f"    TITLE '{self.title}'")
-
-        lines.append(f"    BATCH {self.batch}")
+        if self.batch is not None:
+            lines.append(f"    BATCH {self.batch}")
         lines.append(f"    ANIS {s.anisotropy_level}")
         
         if s.spatial_method == "MOC":
@@ -1693,8 +1687,11 @@ class TRK:
 
     def _tdt_var_name(self, step):
         """CLE-2000 variable name for the TDT file import."""
-        tag = step.name.lower()
-        return f"tdt_{tag}"
+        if len(step.name) > 9:
+            tag = step.name[:9].lower()
+        else:
+            tag = step.name.lower()
+        return f"tdt{tag}"
 
     def _tdt_file_name(self, step):
         """Physical TDT file name as produced by glow."""
@@ -1721,8 +1718,16 @@ class TRK:
         """
         result = []
         for step in self.scheme.get_trackable_steps():
-            tag = step.name[:12].upper()
-            result.append((f"TRK{tag}", f"TRKFIL{tag}"))
+            if len(step.name) > 9:
+                tagTRK = step.name[:9].upper()
+            else:
+                tagTRK = step.name.upper()
+            if len(step.name) > 6:
+                tagTRKFIL = step.name[:6].upper()
+            else:                
+                tagTRKFIL = step.name.upper()
+            result.append((f"TRK{tagTRK}", f"TRKFIL{tagTRKFIL}"))
+            print(result)
         return result
 
     def build_procedure_body(self):
@@ -1761,6 +1766,7 @@ class TRK:
         # --- PARAMETER block ---
         param_items = []
         for trk_ll, trkfil in track_names:
+            print(f"Validating track names: {trk_ll}, {trkfil}")
             validate_varname(trk_ll)
             validate_varname(trkfil)
             param_items.append(trk_ll)

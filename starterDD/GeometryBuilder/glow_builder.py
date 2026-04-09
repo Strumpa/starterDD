@@ -154,7 +154,7 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
     return lattice_components
 
 
-def add_cells_to_regular_lattice(lattice, lattice_components, cell_pitch, translation=0.0):
+def add_cells_to_regular_lattice(lattice, lattice_components, cell_pitch, translation_x=0.0, translation_y=0.0):
     """
     Add fuel cells to the lattice, skipping water rod placeholders.
     Generating cells are added last in order to enforce order of mix attribution in SALOME (cells added last are assigned first mix numbers)
@@ -167,8 +167,10 @@ def add_cells_to_regular_lattice(lattice, lattice_components, cell_pitch, transl
         Dictionary mapping positions to lists of RectCell objects and their associated pin models
     cell_pitch : float
         Pitch of each cell in the lattice
-    translation : float
-        Translation to apply to cell positions
+    translation_x : float
+        X-axis translation offset to apply to cell positions (supports asymmetric gaps)
+    translation_y : float
+        Y-axis translation offset to apply to cell positions (supports asymmetric gaps)
     """
     # Import here to avoid circular import issues
     from ..DDModel.DragonModel import FuelPinModel
@@ -178,8 +180,8 @@ def add_cells_to_regular_lattice(lattice, lattice_components, cell_pitch, transl
         if pin is not None and isinstance(pin, FuelPinModel):
             if pin.isGeneratingCell is False: # add all non generating cells first
                 lattice.add_cell(
-                    cell, ((pos[0] + 0.5) * cell_pitch + translation,
-                            (pos[1] + 0.5) * cell_pitch + translation,
+                    cell, ((pos[0] + 0.5) * cell_pitch + translation_x,
+                            (pos[1] + 0.5) * cell_pitch + translation_y,
                             0.0)
                 )
     for pos, cell_and_pin in lattice_components.items():
@@ -187,8 +189,8 @@ def add_cells_to_regular_lattice(lattice, lattice_components, cell_pitch, transl
         if pin is not None and isinstance(pin, FuelPinModel):
             if pin.isGeneratingCell: # add generating cells last
                 lattice.add_cell(
-                    cell, ((pos[0] + 0.5) * cell_pitch + translation,
-                            (pos[1] + 0.5) * cell_pitch + translation,
+                    cell, ((pos[0] + 0.5) * cell_pitch + translation_x,
+                            (pos[1] + 0.5) * cell_pitch + translation_y,
                             0.0)
                 )
 
@@ -362,7 +364,7 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
     return tmp_cell
 
 
-def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation=0.0, windmill=False, calculation_step=None):
+def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=0.0, translation_y=0.0, windmill=False, calculation_step=None):
     """
     Create water rod cells from the assembly model and add them to the lattice at their centers.
 
@@ -373,8 +375,12 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation=0.
     assembly_model : CartesianAssemblyModel
         The assembly model containing the water rod geometry parameters
         (water_rod_type, water_rods list with center, radii, materials, etc.)
-    translation : float
-        Translation offset to apply to water rod center positions
+    translation_x : float
+        Unused. Water rod centers are already in assembly coordinates (from YAML).
+        Kept for function signature consistency with pin positioning.
+    translation_y : float
+        Unused. Water rod centers are already in assembly coordinates (from YAML).
+        Kept for function signature consistency with pin positioning.
     windmill : bool
         Whether to apply windmill sectorization to the water rod coolant region.
         Ignored if ``calculation_step`` is provided.
@@ -521,12 +527,12 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation=0.
                 water_rod_model, calculation_step=calculation_step,
             )
 
-        # water_rod_model.center is set by analyze_lattice_description and
-        # expressed in lattice coordinates (pin-pitch units already resolved)
+        # water_rod_model.center is in assembly coordinates (from YAML).
+        # No translation applied - centers are already positioned within the assembly frame [0, assembly_pitch].
         cx, cy = water_rod_model.center
         lattice.add_cell(
             tmp_cell,
-            (cx + translation, cy + translation, 0.0),
+            (cx, cy, 0.0),
         )
 
     return lattice
@@ -936,51 +942,102 @@ def _build_control_cross_shapes(ctrl, ap):
     }
 
 
-def build_assembly_box(assembly_model, center=None):
+def _compute_asymmetric_coolant_channel_box_rects(assembly_model, center):
     """
-    Build the assembly box cell from the assembly model dimensions.
+    Compute coolant and channel box rectangles with asymmetric gap support.
 
-    Without a control cross the result is a 3-region cell (intra-assembly
-    coolant / channel box / inter-assembly moderator).
+    With asymmetric gaps (gap_wide ≠ gap_narrow), the rectangles must be
+    off-centered to account for different moderator widths on different sides.
+    This function derives the correct dimensions and center positions based on
+    the detected lattice symmetry.
 
-    When ``assembly_model.has_control_cross`` is ``True`` the control
-    cross shapes (sheath, inner cavity, absorber tubes) are also
-    included in the partition and materials are assigned by geometric
-    containment against all reference shapes.
+    For **anti-diagonal symmetry** (top-left to bottom-right):
+        - X-axis: gap_wide on left, gap_narrow on right → asymmetric
+        - Y-axis: gap_narrow on bottom, gap_wide on top → asymmetric (reversed)
+        - Rectangle dimensions differ on X and Y
+
+    For **main-diagonal symmetry** (transpose):
+        - Both axes use gap_wide (symmetric despite different gaps)
+        - Rectangles remain centered
+
+    For **no symmetry** or **quarter/eighth symmetry**:
+        - Treat as isotropic (both axes use gap_wide)
+        - Rectangles remain centered (backward compatible)
 
     Parameters
     ----------
     assembly_model : CartesianAssemblyModel
-        Assembly model providing ``assembly_pitch``, ``gap_wide``,
-        ``channel_box_thickness``, ``corner_inner_radius_of_curvature``,
-        and optionally ``control_cross``.
-    center : tuple or None
-        ``(x, y, z)`` centre of the box.  Defaults to
-        ``(assembly_pitch / 2, assembly_pitch / 2, 0)``.
+        Assembly model providing gap_wide, gap_narrow, channel_box_thickness,
+        and corner_inner_radius_of_curvature
+    center : tuple
+        (x, y, z) center of the assembly box
 
     Returns
     -------
-    assembly_box_cell : RectCell
-        The partitioned assembly box cell with material properties set
-        on every sub-face.
+    coolant_rect : Rectangle
+        Inner coolant boundary with proper centering for asymmetric gaps
+    channel_box_rect : Rectangle
+        Outer channel box boundary with proper centering for asymmetric gaps
     """
+    from glow.geometry_layouts.geometries import Rectangle
+
     ap = assembly_model.assembly_pitch
-    gap = assembly_model.gap_wide
     cbt = assembly_model.channel_box_thickness
+    gap_wide = assembly_model.gap_wide
+    gap_narrow = assembly_model.gap_narrow
     corner_r_inner = assembly_model.corner_inner_radius_of_curvature
 
-    if center is None:
-        center = (ap / 2.0, ap / 2.0, 0.0)
+    # Detect lattice symmetry to determine offset strategy
+    sym_type = assembly_model.check_diagonal_symmetry()
 
-    channel_box_inner_side = ap - 2.0 * cbt - 2.0 * gap
-    channel_box_outer_side = ap - 2.0 * gap
+    if sym_type == "anti-diagonal":
+        # Asymmetric configuration: wide-wide corner on top-left, narrow-narrow on bottom-right
+        # X-axis: gap_wide on left (low x), gap_narrow on right (high x)
+        # Y-axis: gap_narrow on bottom (low y), gap_wide on top (high y)
+
+        channel_box_outer_x = ap - gap_wide - gap_narrow
+        channel_box_outer_y = ap - gap_narrow - gap_wide 
+
+        channel_box_inner_x = channel_box_outer_x - 2.0 * cbt
+        channel_box_inner_y = channel_box_outer_y - 2.0 * cbt
+
+        # Center offset: shift to balance the asymmetric gaps
+        # For anti-diagonal: gap_wide on left/top, gap_narrow on right/bottom
+        # Channel box occupies:
+        #   X range: [gap_wide + cbt, ap - gap_narrow - cbt]
+        #   Y range: [gap_narrow + cbt, ap - gap_wide - cbt]
+        # Center X = (gap_wide + ap - gap_narrow) / 2
+        # Center Y = (gap_narrow + ap - gap_wide) / 2
+        # Offsets from (ap/2, ap/2):
+        offset_x = (gap_wide - gap_narrow) / 2.0
+        offset_y = (gap_narrow - gap_wide) / 2.0
+
+        rect_center = (center[0] + offset_x, center[1] + offset_y, center[2])
+
+    elif sym_type == "main-diagonal":
+        # Symmetric on both axes (both use gap_wide due to symmetry)
+        channel_box_outer_x = ap - 2.0 * gap_wide
+        channel_box_outer_y = ap - 2.0 * gap_wide
+
+        channel_box_inner_x = channel_box_outer_x - 2.0 * cbt
+        channel_box_inner_y = channel_box_outer_y - 2.0 * cbt
+
+        rect_center = center
+
+    else:
+        # No symmetry or quarter/eighth symmetry
+        # Treat as isotropic (both axes use gap_wide)
+        channel_box_outer_x = ap - 2.0 * gap_wide
+        channel_box_outer_y = ap - 2.0 * gap_wide
+
+        channel_box_inner_x = channel_box_outer_x - 2.0 * cbt
+        channel_box_inner_y = channel_box_outer_y - 2.0 * cbt
+
+        rect_center = center
+
+    # Configure rounded corners if applicable
     if corner_r_inner > 0.0:
         corner_r_outer = corner_r_inner + cbt
-    else:
-        corner_r_outer = 0.0
-
-    if corner_r_inner > 0.0 and corner_r_outer > 0.0:
-        print("Using rounded corners for assembly box boundaries.")
         rounded_corners_coolant = [
             (0, corner_r_inner),
             (1, corner_r_inner),
@@ -997,22 +1054,71 @@ def build_assembly_box(assembly_model, center=None):
         rounded_corners_coolant = None
         rounded_corners_chanbox = None
 
-    # Inner coolant boundary (rounded-corner rectangle)
+    # Build rectangles with potentially asymmetric dimensions
     coolant_rect = Rectangle(
         name="intra_assembly_coolant",
-        height=channel_box_inner_side,
-        width=channel_box_inner_side,
-        center=center,
+        height=channel_box_inner_y,
+        width=channel_box_inner_x,
+        center=rect_center,
         rounded_corners=rounded_corners_coolant,
     )
-    # Channel box boundary (rounded-corner rectangle)
+
     channel_box_rect = Rectangle(
         name="channel_box",
-        height=channel_box_outer_side,
-        width=channel_box_outer_side,
-        center=center,
+        height=channel_box_outer_y,
+        width=channel_box_outer_x,
+        center=rect_center,
         rounded_corners=rounded_corners_chanbox,
     )
+
+    return coolant_rect, channel_box_rect
+
+
+def build_assembly_box(assembly_model, center=None):
+    """
+    Build the assembly box cell from the assembly model dimensions.
+
+    Supports both symmetric and asymmetric gap configurations. With asymmetric
+    gaps (gap_wide ≠ gap_narrow), the coolant and channel box rectangles are
+    automatically off-centered to account for different moderator widths on
+    different sides, based on the detected lattice symmetry.
+
+    Without a control cross the result is a 3-region cell (intra-assembly
+    coolant / channel box / inter-assembly moderator).
+
+    When ``assembly_model.has_control_cross`` is ``True`` the control
+    cross shapes (sheath, inner cavity, absorber tubes) are also
+    included in the partition and materials are assigned by geometric
+    containment against all reference shapes.
+
+    Parameters
+    ----------
+    assembly_model : CartesianAssemblyModel
+        Assembly model providing ``assembly_pitch``, ``gap_wide``, ``gap_narrow``,
+        ``channel_box_thickness``, ``corner_inner_radius_of_curvature``,
+        and optionally ``control_cross``.
+    center : tuple or None
+        ``(x, y, z)`` centre of the box.  Defaults to
+        ``(assembly_pitch / 2, assembly_pitch / 2, 0)``.
+
+    Returns
+    -------
+    assembly_box_cell : RectCell
+        The partitioned assembly box cell with material properties set
+        on every sub-face.
+    """
+    ap = assembly_model.assembly_pitch
+    cbt = assembly_model.channel_box_thickness
+
+    if center is None:
+        center = (ap / 2.0, ap / 2.0, 0.0)
+
+    # Compute asymmetry-aware coolant and channel box rectangles
+    # This handles both symmetric (backward compatible) and asymmetric gap configurations
+    coolant_rect, channel_box_rect = _compute_asymmetric_coolant_channel_box_rects(
+        assembly_model, center
+    )
+
     # Outer moderator cell
     assembly_box_cell = RectCell(
         name="assembly_box",
@@ -1229,44 +1335,13 @@ def _reassign_materials_by_containment(assembly_box_cell, assembly_model):
     from collections import Counter
 
     ap = assembly_model.assembly_pitch
-    gap = assembly_model.gap_wide
-    cbt = assembly_model.channel_box_thickness
-    corner_r_inner = assembly_model.corner_inner_radius_of_curvature
     center = (ap / 2.0, ap / 2.0, 0.0)
 
-    channel_box_inner_side = ap - 2.0 * cbt - 2.0 * gap
-    channel_box_outer_side = ap - 2.0 * gap
-    if corner_r_inner > 0.0:
-        corner_r_outer = corner_r_inner + cbt
-    else:
-        corner_r_outer = 0.0
-
-    if corner_r_inner > 0.0 and corner_r_outer > 0.0:
-        coolant_corners = [
-            (0, corner_r_inner), (1, corner_r_inner),
-            (2, corner_r_inner), (3, corner_r_inner),
-        ]
-        chanbox_corners = [
-            (0, corner_r_outer), (1, corner_r_outer),
-            (2, corner_r_outer), (3, corner_r_outer),
-        ]
-    else:
-        coolant_corners = None
-        chanbox_corners = None
-
-    coolant_boundary = Rectangle(
-        name="_coolant_ref_disc",
-        height=channel_box_inner_side,
-        width=channel_box_inner_side,
-        center=center,
-        rounded_corners=coolant_corners,
-    )
-    channel_box_boundary = Rectangle(
-        name="_chanbox_ref_disc",
-        height=channel_box_outer_side,
-        width=channel_box_outer_side,
-        center=center,
-        rounded_corners=chanbox_corners,
+    # Use the asymmetry-aware helper to build reference rectangles
+    # This ensures material classification matches the actual geometry
+    # (which may be off-centered with asymmetric gaps)
+    coolant_boundary, channel_box_boundary = _compute_asymmetric_coolant_channel_box_rects(
+        assembly_model, center
     )
 
     # ------------------------------------------------------------------
@@ -1813,8 +1888,9 @@ def subdivide_box_into_macros(assembly_box_cell, assembly_model):
     lattice_pitch_y = n_rows * pin_pitch
 
     # Pin-lattice footprint corners
-    x0 = (ap - lattice_pitch_x) / 2.0
-    y0 = (ap - lattice_pitch_y) / 2.0
+    # Use translation offsets instead of centered assumption to support asymmetric gaps
+    x0 = assembly_model.translation_offset_x if assembly_model.translation_offset_x is not None else (ap - lattice_pitch_x) / 2.0
+    y0 = assembly_model.translation_offset_y if assembly_model.translation_offset_y is not None else (ap - lattice_pitch_y) / 2.0
     x1 = x0 + lattice_pitch_x
     y1 = y0 + lattice_pitch_y
 
@@ -1996,48 +2072,13 @@ def subdivide_box_into_macros(assembly_box_cell, assembly_model):
     # ------------------------------------------------------------------
     # Build reference boundary faces for material classification.
     # ------------------------------------------------------------------
-    gap = assembly_model.gap_wide
-    cbt = assembly_model.channel_box_thickness
-    corner_r_inner = assembly_model.corner_inner_radius_of_curvature
     center = (ap / 2.0, ap / 2.0, 0.0)
 
-    channel_box_inner_side = ap - 2.0 * cbt - 2.0 * gap
-    channel_box_outer_side = ap - 2.0 * gap
-    if corner_r_inner > 0.0:
-        corner_r_outer = corner_r_inner + cbt
-    else:
-        corner_r_outer = 0.0
-        
-    if corner_r_inner > 0.0 and corner_r_outer > 0.0:
-        coolant_corners = [
-            (0, corner_r_inner),
-            (1, corner_r_inner),
-            (2, corner_r_inner),
-            (3, corner_r_inner),
-        ]
-        chanbox_corners = [
-            (0, corner_r_outer),
-            (1, corner_r_outer),
-            (2, corner_r_outer),
-            (3, corner_r_outer),
-        ]
-    else:
-        coolant_corners = None
-        chanbox_corners = None
-
-    coolant_boundary = Rectangle(
-        name="_coolant_ref",
-        height=channel_box_inner_side,
-        width=channel_box_inner_side,
-        center=center,
-        rounded_corners=coolant_corners,
-    )
-    channel_box_boundary = Rectangle(
-        name="_chanbox_ref",
-        height=channel_box_outer_side,
-        width=channel_box_outer_side,
-        center=center,
-        rounded_corners=chanbox_corners,
+    # Use the asymmetry-aware helper to build reference rectangles
+    # This ensures material classification matches the actual geometry
+    # (which may be off-centered with asymmetric gaps)
+    coolant_boundary, channel_box_boundary = _compute_asymmetric_coolant_channel_box_rects(
+        assembly_model, center
     )
 
     # If control cross present, rebuild tube/sheath reference faces for
@@ -2758,8 +2799,9 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
     lattice_pitch_y = n_rows * pin_pitch
 
     # Pin-lattice footprint corners
-    x0 = (ap - lattice_pitch_x) / 2.0
-    y0 = (ap - lattice_pitch_y) / 2.0
+    # Use translation offsets instead of centered assumption to support asymmetric gaps
+    x0 = assembly_model.translation_offset_x if assembly_model.translation_offset_x is not None else (ap - lattice_pitch_x) / 2.0
+    y0 = assembly_model.translation_offset_y if assembly_model.translation_offset_y is not None else (ap - lattice_pitch_y) / 2.0
     x1 = x0 + lattice_pitch_x
     y1 = y0 + lattice_pitch_y
 
@@ -2943,8 +2985,7 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
 
 
 def build_full_assembly_geometry(assembly_model, calculation_step,
-                                 output_path, output_file_name,
-                                 translation=None):
+                                 output_path, output_file_name):
     """
     High-level function that builds a complete assembly geometry —
     including the assembly box with automatic MACRO subdivision for
@@ -2965,6 +3006,8 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
     ----------
     assembly_model : CartesianAssemblyModel
         Assembly model with lattice built and material mixtures numbered.
+        Must have ``translation_offset_x`` and ``translation_offset_y`` computed
+        from asymmetric gap configuration (done automatically in model init).
     calculation_step : CalculationStep
         The calculation step whose discretization config drives the geometry.
     output_path : str
@@ -2972,10 +3015,6 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
     output_file_name : str
         Base name for the output TDT file (tracking suffix is appended
         automatically by ``export_glow_geom``).
-    translation : float or None
-        Translation offset applied to cell positions in the lattice.
-        If ``None``, computed automatically from assembly dimensions as
-        ``gap_wide + channel_box_thickness + coolant_intra_assembly_width``.
 
     Returns
     -------
@@ -2986,17 +3025,14 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
     """
     from ..DDModel.DragonModel import CartesianAssemblyModel  # type check only
 
+    # ----- Extract asymmetric translation offsets from model -----
+    translation_x = assembly_model.translation_offset_x if assembly_model.translation_offset_x is not None else 0.0
+    translation_y = assembly_model.translation_offset_y if assembly_model.translation_offset_y is not None else 0.0
+
     # ----- Derived dimensions -----
     ap = assembly_model.assembly_pitch
     pin_pitch = assembly_model.pin_geometry_dict["pin_pitch"]
-    gap = assembly_model.gap_wide
-    cbt = assembly_model.channel_box_thickness
     n_cols = len(assembly_model.lattice_description[0])
-    channel_box_inner_side = ap - 2.0 * cbt - 2.0 * gap
-    coolant_intra_assembly_width = (channel_box_inner_side - n_cols * pin_pitch) / 2.0
-
-    if translation is None:
-        translation = gap + cbt + coolant_intra_assembly_width
 
     center = (ap / 2.0, ap / 2.0, 0.0)
 
@@ -3037,13 +3073,13 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
     )
 
     lattice = add_cells_to_regular_lattice(
-        lattice, ordered_cells, pin_pitch, translation=translation
+        lattice, ordered_cells, pin_pitch, translation_x=translation_x, translation_y=translation_y
     )
     # Build optional water rods if present in the model and add to lattice
     if hasattr(assembly_model, "water_rods") and assembly_model.water_rods:
         lattice = create_and_add_water_rods_to_lattice(
             lattice, assembly_model,
-            translation=translation,
+            translation_x=translation_x, translation_y=translation_y,
             calculation_step=calculation_step,
         )
     
