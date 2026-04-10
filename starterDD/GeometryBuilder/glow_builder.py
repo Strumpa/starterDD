@@ -2805,17 +2805,173 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
     x1 = x0 + lattice_pitch_x
     y1 = y0 + lattice_pitch_y
 
-    # Resolve split counts (uses lattice dims as defaults for sides)
-    corner, side_h, side_v = box_discretization_config.resolve_splits(
-        n_cols, n_rows
+    # Resolve split counts
+    # Check if asymmetric gap splits are configured
+    has_asym_gap_splits = (
+        box_discretization_config.gap_wide_splits or
+        box_discretization_config.gap_narrow_splits or
+        box_discretization_config.wide_wide_corner_splits or
+        box_discretization_config.narrow_narrow_corner_splits or
+        box_discretization_config.mixed_corner_splits
     )
+
+    if has_asym_gap_splits:
+        # Use symmetry-aware resolution for asymmetric gaps
+        region_splits = box_discretization_config.resolve_splits_with_symmetry(
+            n_cols, n_rows, assembly_model
+        )
+        # Extract splits for later use
+        corner_bl = region_splits['corner_bl']
+        corner_br = region_splits['corner_br']
+        corner_tl = region_splits['corner_tl']
+        corner_tr = region_splits['corner_tr']
+        side_bottom = region_splits['side_bottom']
+        side_top = region_splits['side_top']
+        side_left = region_splits['side_left']
+        side_right = region_splits['side_right']
+    else:
+        # Use traditional uniform resolution (backward compatible)
+        corner, side_h, side_v = box_discretization_config.resolve_splits(
+            n_cols, n_rows
+        )
+        # Apply uniform splits to all regions
+        corner_bl = corner_br = corner_tl = corner_tr = corner
+        side_bottom = side_top = side_h
+        side_left = side_right = side_v
 
     has_cross = getattr(assembly_model, "has_control_cross", False)
 
     if has_cross:
-        # --------------------------------------------------------------
-        # Cross-aware discretization
-        # --------------------------------------------------------------
+        # Determine which sides are affected by cross placement
+        cross_corner = assembly_model.control_cross.center
+        cross_on_left = cross_corner in ("north-west", "south-west")
+        cross_on_right = cross_corner in ("north-east", "south-east")
+        cross_on_top = cross_corner in ("north-west", "north-east")
+        cross_on_bottom = cross_corner in ("south-west", "south-east")
+
+        # Get cross-specific discretization if available
+        cross_mod_disc = box_discretization_config.cross_moderator_discretization
+        gap_ref = box_discretization_config.gap_splits or (n_cols, 1)
+
+        # Resolve cross-specific splits for affected sides
+        cross_side_gap = None
+        if cross_mod_disc is not None:
+            cross_side_gap, _, _ = cross_mod_disc.resolve(
+                gap_splits=gap_ref,
+                lattice_pitch=lattice_pitch_x,
+                wide_gap_width=x0,
+                narrow_gap_width=x0 - (assembly_model.control_cross.blade_thickness / 2.0),
+                cross_corner_dims=(x0 - assembly_model.control_cross.blade_thickness / 2.0,
+                                   y0 - assembly_model.control_cross.blade_thickness / 2.0),
+                stub_dims=(0, assembly_model.control_cross.blade_thickness / 2.0),
+            )
+
+        # Determine splits for each side (affected vs unaffected)
+        # For affected sides, use cross-specific splits; for unaffected, use original splits
+        if has_asym_gap_splits:
+            # Use region-specific splits from resolve_splits_with_symmetry
+            if cross_on_top:
+                side_top_used = cross_side_gap if cross_side_gap else region_splits['side_top']
+            else:
+                side_top_used = region_splits['side_top']
+
+            if cross_on_bottom:
+                side_bottom_used = cross_side_gap if cross_side_gap else region_splits['side_bottom']
+            else:
+                side_bottom_used = region_splits['side_bottom']
+
+            if cross_on_left:
+                side_left_used = (cross_side_gap[1], cross_side_gap[0]) if cross_side_gap else region_splits['side_left']
+            else:
+                side_left_used = region_splits['side_left']
+
+            if cross_on_right:
+                side_right_used = (cross_side_gap[1], cross_side_gap[0]) if cross_side_gap else region_splits['side_right']
+            else:
+                side_right_used = region_splits['side_right']
+        else:
+            # Use uniform splits but distinguish affected/unaffected
+            corner, side_h, side_v = box_discretization_config.resolve_splits(n_cols, n_rows)
+            if cross_on_top:
+                side_top_used = cross_side_gap if cross_side_gap else side_h
+            else:
+                side_top_used = side_h
+
+            if cross_on_bottom:
+                side_bottom_used = cross_side_gap if cross_side_gap else side_h
+            else:
+                side_bottom_used = side_h
+
+            if cross_on_left:
+                side_left_used = (cross_side_gap[1], cross_side_gap[0]) if cross_side_gap else side_v
+            else:
+                side_left_used = side_v
+
+            if cross_on_right:
+                side_right_used = (cross_side_gap[1], cross_side_gap[0]) if cross_side_gap else side_v
+            else:
+                side_right_used = side_v
+
+        # For cross-aware building, pass unaffected splits (which could be affected by symmetry)
+        # Use unaffected horizontal (TOP/BOTTOM unaffected) and vertical (LEFT/RIGHT unaffected)
+        # The _build_cross_aware_discretization_rects function will use narrow_gap_splits for affected
+        # and unaffected_side_* for unaffected
+
+        # Choose reference sides for unaffected
+        if cross_on_bottom:
+            unaffected_side_h = side_top_used  # TOP is unaffected
+        else:
+            unaffected_side_h = side_bottom_used  # BOTTOM is unaffected
+
+        if cross_on_right:
+            unaffected_side_v = side_left_used  # LEFT is unaffected
+        else:
+            unaffected_side_v = side_right_used  # RIGHT is unaffected
+
+        # Show debug info about which mode is used
+        mode_str = "asymmetric gaps" if has_asym_gap_splits else "symmetric"
+        print(f"discretize_box [cross-aware, {mode_str}, {cross_corner}]: "
+              f"affected: top={cross_on_top}, bottom={cross_on_bottom}, left={cross_on_left}, right={cross_on_right}, "
+              f"cross_side_gap={cross_side_gap}, unaffected_h={unaffected_side_h}, unaffected_v={unaffected_side_v}")
+    else:
+        # Standard 8 peripheral rectangles (no control cross)
+        rectangles_and_splits = [
+            # Bottom-left corner
+            (Rectangle(height=y0, width=x0,
+                       center=(x0 / 2.0, y0 / 2.0, 0.0)),
+             corner_bl),
+            # Bottom-middle strip
+            (Rectangle(height=y0, width=lattice_pitch_x,
+                       center=((x0 + x1) / 2.0, y0 / 2.0, 0.0)),
+             side_bottom),
+            # Bottom-right corner
+            (Rectangle(height=y0, width=(ap - x1),
+                       center=((x1 + ap) / 2.0, y0 / 2.0, 0.0)),
+             corner_br),
+            # Middle-left strip
+            (Rectangle(height=lattice_pitch_y, width=x0,
+                       center=(x0 / 2.0, (y0 + y1) / 2.0, 0.0)),
+             side_left),
+            # Middle-right strip
+            (Rectangle(height=lattice_pitch_y, width=(ap - x1),
+                       center=((x1 + ap) / 2.0, (y0 + y1) / 2.0, 0.0)),
+             side_right),
+            # Top-left corner
+            (Rectangle(height=(ap - y1), width=x0,
+                       center=(x0 / 2.0, (y1 + ap) / 2.0, 0.0)),
+             corner_tl),
+            # Top-middle strip
+            (Rectangle(height=(ap - y1), width=lattice_pitch_x,
+                       center=((x0 + x1) / 2.0, (y1 + ap) / 2.0, 0.0)),
+             side_top),
+            # Top-right corner
+            (Rectangle(height=(ap - y1), width=(ap - x1),
+                       center=((x1 + ap) / 2.0, (y1 + ap) / 2.0, 0.0)),
+             corner_tr),
+        ]
+
+    # For control cross, build the cross-aware discretization
+    if has_cross:
         ctrl = assembly_model.control_cross
         bt2 = ctrl.blade_thickness / 2.0
 
@@ -2838,7 +2994,7 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
         stub_par_v = max(0.0, lattice_pitch_y - (bhs - y0))
         stub_perp = bt2
 
-        # Resolve cross splits from density or explicit config
+        # Get cross-specific discretization if available (already resolved above for affected sides)
         cross_mod_disc = box_discretization_config.cross_moderator_discretization
         gap_ref = box_discretization_config.gap_splits or (n_cols, 1)
 
@@ -2875,9 +3031,9 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
             lattice_pitch_x, lattice_pitch_y,
             n_cols, n_rows,
             ctrl.center, ctrl,
-            unaffected_side_h=side_h,
-            unaffected_side_v=side_v,
-            unaffected_corner=corner,
+            unaffected_side_h=unaffected_side_h,
+            unaffected_side_v=unaffected_side_v,
+            unaffected_corner=corner_bl if has_asym_gap_splits else (corner_bl if has_asym_gap_splits else box_discretization_config.corner_splits),
             narrow_gap_splits_h=narrow_gap_splits_h,
             narrow_gap_splits_v=narrow_gap_splits_v,
             moderator_at_cross_corner_splits=cc_splits,
@@ -2885,47 +3041,10 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
             stub_splits_v=stub_splits_v,
         )
 
-        print(f"discretize_box [cross-aware]: narrow_gap={narrow_gap}, "
+        mode_str = "asymmetric gaps" if has_asym_gap_splits else "symmetric"
+        print(f"discretize_box [cross-aware, {mode_str}]: narrow_gap={narrow_gap}, "
               f"moderator_at_cross_corner={cc_splits}, stub={stub}, "
-              f"unaffected_side_h={side_h}, corner={corner}")
-    else:
-        # --------------------------------------------------------------
-        # Standard 8 peripheral rectangles (no control cross)
-        # --------------------------------------------------------------
-        rectangles_and_splits = [
-            # Bottom-left corner
-            (Rectangle(height=y0, width=x0,
-                       center=(x0 / 2.0, y0 / 2.0, 0.0)),
-             corner),
-            # Bottom-middle strip
-            (Rectangle(height=y0, width=lattice_pitch_x,
-                       center=((x0 + x1) / 2.0, y0 / 2.0, 0.0)),
-             side_h),
-            # Bottom-right corner
-            (Rectangle(height=y0, width=(ap - x1),
-                       center=((x1 + ap) / 2.0, y0 / 2.0, 0.0)),
-             corner),
-            # Middle-left strip
-            (Rectangle(height=lattice_pitch_y, width=x0,
-                       center=(x0 / 2.0, (y0 + y1) / 2.0, 0.0)),
-             side_v),
-            # Middle-right strip
-            (Rectangle(height=lattice_pitch_y, width=(ap - x1),
-                       center=((x1 + ap) / 2.0, (y0 + y1) / 2.0, 0.0)),
-             side_v),
-            # Top-left corner
-            (Rectangle(height=(ap - y1), width=x0,
-                       center=(x0 / 2.0, (y1 + ap) / 2.0, 0.0)),
-             corner),
-            # Top-middle strip
-            (Rectangle(height=(ap - y1), width=lattice_pitch_x,
-                       center=((x0 + x1) / 2.0, (y1 + ap) / 2.0, 0.0)),
-             side_h),
-            # Top-right corner
-            (Rectangle(height=(ap - y1), width=(ap - x1),
-                       center=((x1 + ap) / 2.0, (y1 + ap) / 2.0, 0.0)),
-             corner),
-        ]
+              f"unaffected_side_h={unaffected_side_h}, unaffected_corner={corner_bl if has_asym_gap_splits else box_discretization_config.corner_splits}")
 
     splitting_faces = []
     for rect, (nx, ny) in rectangles_and_splits:
@@ -2968,9 +3087,17 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
 
     n_subfaces = len(assembly_box_cell.extract_subfaces())
     if not has_cross:
-        print(f"discretize_box: split assembly box into "
-              f"{n_subfaces} sub-regions (corner={corner}, "
-              f"side_h={side_h}, side_v={side_v}).")
+        if has_asym_gap_splits:
+            print(f"discretize_box: split assembly box into "
+                  f"{n_subfaces} sub-regions (asymmetric gaps - "
+                  f"corner_bl={corner_bl}, corner_br={corner_br}, "
+                  f"corner_tl={corner_tl}, corner_tr={corner_tr}, "
+                  f"side_bottom={side_bottom}, side_top={side_top}, "
+                  f"side_left={side_left}, side_right={side_right}).")
+        else:
+            print(f"discretize_box: split assembly box into "
+                  f"{n_subfaces} sub-regions (corner={corner_bl}, "
+                  f"side_h={side_bottom}, side_v={side_left}).")
     else:
         print(f"discretize_box: split assembly box into "
               f"{n_subfaces} sub-regions (cross-aware).")

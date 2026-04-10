@@ -318,9 +318,11 @@ class CrossModeratorDiscretizationConfig:
 
     Attributes
     ----------
-    narrow_gap_splits : tuple[int, int] or None
-        ``(n_parallel, n_perpendicular)`` grid for the narrow moderator
-        gap between the blade edge and the pin-lattice footprint edge.
+    cross_side_gap_splits : tuple[int, int] or None
+        ``(n_parallel, n_perpendicular)`` grid for the moderator gap
+        on the sides affected by the control cross (between the blade edge
+        and the pin-lattice footprint edge). This overrides general
+        ``gap_narrow_splits`` on affected sides only.
         Orientation follows the same convention as ``gap_splits``:
         ``n_parallel`` is along the lattice edge, ``n_perpendicular``
         is across the gap width.  Auto-permuted for horizontal vs
@@ -334,11 +336,25 @@ class CrossModeratorDiscretizationConfig:
         Auto-permuted for horizontal vs vertical stubs.
     """
 
-    def __init__(self, narrow_gap_splits=None,
+    def __init__(self, cross_side_gap_splits=None,
                  moderator_at_cross_corner_splits=None,
-                 stub_splits=None):
-        self.narrow_gap_splits = (
-            tuple(narrow_gap_splits) if narrow_gap_splits else None
+                 stub_splits=None,
+                 # Backward compatibility
+                 narrow_gap_splits=None):
+        import warnings
+
+        # Handle backward compatibility for narrow_gap_splits
+        if narrow_gap_splits is not None and cross_side_gap_splits is None:
+            warnings.warn(
+                "Parameter 'narrow_gap_splits' is deprecated. "
+                "Use 'cross_side_gap_splits' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            cross_side_gap_splits = narrow_gap_splits
+
+        self.cross_side_gap_splits = (
+            tuple(cross_side_gap_splits) if cross_side_gap_splits else None
         )
         self.moderator_at_cross_corner_splits = (
             tuple(moderator_at_cross_corner_splits)
@@ -351,7 +367,7 @@ class CrossModeratorDiscretizationConfig:
     def resolve(self, gap_splits, lattice_pitch, wide_gap_width,
                 narrow_gap_width, cross_corner_dims, stub_dims):
         """
-        Return resolved ``(narrow_gap, moderator_corner, stub)`` split
+        Return resolved ``(cross_side_gap, moderator_corner, stub)`` split
         tuples, auto-computing from mesh density when a field is ``None``.
 
         The reference density is derived from ``gap_splits`` applied to a
@@ -379,8 +395,8 @@ class CrossModeratorDiscretizationConfig:
 
         Returns
         -------
-        narrow_gap : tuple[int, int]
-            ``(n_parallel, n_perpendicular)`` for the narrow gap.
+        cross_side_gap : tuple[int, int]
+            ``(n_parallel, n_perpendicular)`` for the affected side gap.
         moderator_corner : tuple[int, int]
             ``(nx, ny)`` for the moderator corner rectangle.
         stub : tuple[int, int]
@@ -391,11 +407,11 @@ class CrossModeratorDiscretizationConfig:
             gap_splits[1] / wide_gap_width if wide_gap_width > 0 else 1.0
         )
 
-        # Narrow gap
-        if self.narrow_gap_splits is not None:
-            narrow_gap = self.narrow_gap_splits
+        # Cross-affected side gap
+        if self.cross_side_gap_splits is not None:
+            cross_side_gap = self.cross_side_gap_splits
         else:
-            narrow_gap = (
+            cross_side_gap = (
                 max(1, round(d_par * lattice_pitch)),
                 max(1, round(d_perp * narrow_gap_width)),
             )
@@ -418,12 +434,12 @@ class CrossModeratorDiscretizationConfig:
                 max(1, round(d_perp * stub_dims[1])),
             )
 
-        return narrow_gap, moderator_corner, stub
+        return cross_side_gap, moderator_corner, stub
 
     def __repr__(self):
         return (
             f"CrossModeratorDiscretizationConfig("
-            f"narrow_gap_splits={self.narrow_gap_splits}, "
+            f"cross_side_gap_splits={self.cross_side_gap_splits}, "
             f"moderator_at_cross_corner_splits="
             f"{self.moderator_at_cross_corner_splits}, "
             f"stub_splits={self.stub_splits})"
@@ -451,6 +467,16 @@ class BoxDiscretizationConfig:
       horizontal strips use ``(n_par, n_perp)`` as ``(nx, ny)``,
       vertical strips use ``(n_perp, n_par)``.
 
+    For asymmetric gap configurations (gap_wide ≠ gap_narrow), the following
+    optional parameters allow region-specific discretization:
+
+    * **gap_wide_splits** ``(n_parallel, n_perpendicular)`` — grid size for
+      regions bordering the wide gap (applies to sides and wide-gap corners).
+    * **gap_narrow_splits** ``(n_parallel, n_perpendicular)`` — grid size for
+      regions bordering the narrow gap (applies to sides and narrow-gap corners).
+    * **wide_wide_corner_splits**, **narrow_narrow_corner_splits**,
+      **mixed_corner_splits** — individual corner-specific splits for precise control.
+
     When a control cross is present, two optional sibling configs control
     the sub-meshing of the surrounding moderator regions and the cross
     structure itself:
@@ -466,10 +492,25 @@ class BoxDiscretizationConfig:
     enabled : bool
         Whether box discretization is active.
     corner_splits : tuple[int, int]
-        ``(nx, ny)`` grid subdivisions for each corner region.
+        ``(nx, ny)`` grid subdivisions for each corner region (default when
+        specific corner splits are not set).
     gap_splits : tuple[int, int] or None
         ``(n_parallel, n_perpendicular)`` grid subdivisions for
         gap side strips.  Defaults to ``(n_cols, 1)`` when ``None``.
+    gap_wide_splits : tuple[int, int] or None
+        Grid subdivisions for wide-gap regions. Overrides gap_splits for
+        regions bordering gap_wide. Only applicable with asymmetric gaps.
+    gap_narrow_splits : tuple[int, int] or None
+        Grid subdivisions for narrow-gap regions. Overrides gap_splits for
+        regions bordering gap_narrow. Only applicable with asymmetric gaps.
+    wide_wide_corner_splits : tuple[int, int] or None
+        Grid subdivisions for the corner with (gap_wide, gap_wide) on both axes.
+        Overrides gap_wide_splits if set.
+    narrow_narrow_corner_splits : tuple[int, int] or None
+        Grid subdivisions for the corner with (gap_narrow, gap_narrow) on both axes.
+        Overrides gap_narrow_splits if set.
+    mixed_corner_splits : tuple[int, int] or None
+        Grid subdivisions for mixed corners (one axis wide, one axis narrow).
     cross_moderator_discretization : CrossModeratorDiscretizationConfig or None
         Optional sub-meshing config for moderator regions surrounding
         the control cross.
@@ -489,7 +530,10 @@ class BoxDiscretizationConfig:
     """
 
     def __init__(self, enabled=False, corner_splits=None,
-                 gap_splits=None, cross_moderator_discretization=None,
+                 gap_splits=None, gap_wide_splits=None, gap_narrow_splits=None,
+                 wide_wide_corner_splits=None, narrow_narrow_corner_splits=None,
+                 mixed_corner_splits=None,
+                 cross_moderator_discretization=None,
                  control_cross_submesh=None,
                  reassign_materials=True,
                  # deprecated aliases kept for backward compatibility
@@ -498,6 +542,14 @@ class BoxDiscretizationConfig:
 
         self.enabled = enabled
         self.corner_splits = tuple(corner_splits) if corner_splits else (4, 4)
+
+        # Asymmetric gap split parameters (new)
+        self.gap_wide_splits = tuple(gap_wide_splits) if gap_wide_splits else None
+        self.gap_narrow_splits = tuple(gap_narrow_splits) if gap_narrow_splits else None
+        self.wide_wide_corner_splits = tuple(wide_wide_corner_splits) if wide_wide_corner_splits else None
+        self.narrow_narrow_corner_splits = tuple(narrow_narrow_corner_splits) if narrow_narrow_corner_splits else None
+        self.mixed_corner_splits = tuple(mixed_corner_splits) if mixed_corner_splits else None
+
         self.cross_moderator_discretization = cross_moderator_discretization
         self.control_cross_submesh = control_cross_submesh
         self.reassign_materials = reassign_materials
@@ -548,10 +600,164 @@ class BoxDiscretizationConfig:
         side_v = (gap[1], gap[0])      # permuted for vertical strips
         return corner, side_h, side_v
 
+    def resolve_splits_with_symmetry(self, n_cols, n_rows, assembly_model):
+        """
+        Resolve region-specific splits for all 8 box regions (4 corners + 4 sides)
+        based on detected lattice symmetry and gap_wide vs gap_narrow configuration.
+
+        For assemblies with asymmetric gaps (gap_wide ≠ gap_narrow), corners and
+        sides are classified based on symmetry type:
+
+        - **Main-diagonal symmetry** (BL=wide-wide, TR=narrow-narrow):
+          Grid structure: left=wide, right=narrow, bottom=wide, top=narrow
+
+        - **Anti-diagonal symmetry** (TL=wide-wide, BR=narrow-narrow):
+          Grid structure: left=wide, right=narrow, bottom=narrow, top=wide
+
+        - **No symmetry**: All regions treated uniformly (backward compatible)
+
+        **Mesh Alignment Convention:**
+
+        - **wide_wide and narrow_narrow corners** keep fixed splits (nx, ny) — their mesh
+          orientation is determined by which gaps they border, not affected by symmetry.
+
+        - **Mixed corners** have their splits transposed based on symmetry to maintain
+          consistent mesh alignment relative to the gap configuration:
+
+          * Main-diagonal: TL mixed corner gets transposed splits for consistent orientation
+          * Anti-diagonal: BL mixed corner gets transposed splits for consistent orientation
+
+        This ensures the mesh refinement pattern aligns consistently with the detected
+        gap structure and maintains geometric symmetry.
+
+        Parameters
+        ----------
+        n_cols : int
+            Number of pin columns in the lattice.
+        n_rows : int
+            Number of pin rows in the lattice.
+        assembly_model : CartesianAssemblyModel
+            Assembly model providing symmetry information via check_diagonal_symmetry().
+
+        Returns
+        -------
+        dict
+            A dictionary with keys for the 8 regions:
+            - 'corner_bl', 'corner_br', 'corner_tl', 'corner_tr': corners
+            - 'side_top', 'side_bottom', 'side_left', 'side_right': sides
+            Each maps to a tuple (nx, ny) of grid subdivisions.
+        """
+        # Get symmetry from assembly model
+        symmetry = assembly_model.check_diagonal_symmetry()
+
+        # Helper to resolve a single region's splits
+        def resolve_region_splits(gap_type):
+            """
+            Resolve splits for a region based on its gap type:
+            - 'wide_wide': use wide_wide_corner_splits else gap_wide_splits else gap_splits
+            - 'narrow_narrow': use narrow_narrow_corner_splits else gap_narrow_splits else gap_splits
+            - 'mixed': use mixed_corner_splits else gap_splits
+            - 'side_wide': use gap_wide_splits else gap_splits
+            - 'side_narrow': use gap_narrow_splits else gap_splits
+            """
+            if gap_type == 'wide_wide' and self.wide_wide_corner_splits:
+                return self.wide_wide_corner_splits
+            elif gap_type == 'narrow_narrow' and self.narrow_narrow_corner_splits:
+                return self.narrow_narrow_corner_splits
+            elif gap_type == 'mixed' and self.mixed_corner_splits:
+                return self.mixed_corner_splits
+            elif gap_type in ('wide_wide', 'side_wide') and self.gap_wide_splits:
+                return self.gap_wide_splits
+            elif gap_type in ('narrow_narrow', 'side_narrow') and self.gap_narrow_splits:
+                return self.gap_narrow_splits
+            else:
+                # Fall back to gap_splits
+                gap = self.gap_splits if self.gap_splits else (n_cols, 1)
+                if gap_type in ('side_wide', 'side_narrow'):
+                    # For sides, return horizontally oriented (will be permuted by caller if needed)
+                    return gap
+                elif gap_type in ('mixed', 'wide_wide', 'narrow_narrow'):
+                    # For corners, return as-is
+                    return self.corner_splits
+                return gap
+
+        # Initialize result dictionary
+        regions = {}
+
+        # Helper to transpose (nx, ny) → (ny, nx)
+        def transpose_splits(splits):
+            """Transpose a split tuple (nx, ny) → (ny, nx) for symmetry."""
+            if isinstance(splits, (tuple, list)) and len(splits) == 2:
+                return (splits[1], splits[0])
+            return splits
+
+        # Classify corners and sides based on symmetry
+        if symmetry == "main-diagonal":
+            # Main-diagonal: gap_wide on left & bottom, gap_narrow on right & top
+            # BL (bottom-left): both wide — no transpose (fixed by gap configuration)
+            regions['corner_bl'] = resolve_region_splits('wide_wide')
+            # BR (bottom-right): mixed (bottom=wide, right=narrow) — no transpose
+            regions['corner_br'] = resolve_region_splits('mixed')
+            # TL (top-left): mixed (left=wide, top=narrow) — transpose for consistent mesh orientation
+            regions['corner_tl'] = transpose_splits(resolve_region_splits('mixed'))
+            # TR (top-right): both narrow — no transpose (fixed by gap configuration)
+            regions['corner_tr'] = resolve_region_splits('narrow_narrow')
+            # Sides
+            regions['side_bottom'] = resolve_region_splits('side_wide')
+            regions['side_top'] = resolve_region_splits('side_narrow')
+            regions['side_left'] = resolve_region_splits('side_wide')
+            regions['side_right'] = resolve_region_splits('side_narrow')
+
+        elif symmetry == "anti-diagonal":
+            # Anti-diagonal: gap_wide on left & top, gap_narrow on right & bottom
+            # TL (top-left): both wide — no transpose (fixed by gap configuration)
+            regions['corner_tl'] = resolve_region_splits('wide_wide')
+            # TR (top-right): mixed (top=wide, right=narrow) — no transpose
+            regions['corner_tr'] = resolve_region_splits('mixed')
+            # BL (bottom-left): mixed (left=wide, bottom=narrow) — transpose for consistent mesh orientation
+            regions['corner_bl'] = transpose_splits(resolve_region_splits('mixed'))
+            # BR (bottom-right): both narrow — no transpose (fixed by gap configuration)
+            regions['corner_br'] = resolve_region_splits('narrow_narrow')
+            # Sides
+            regions['side_top'] = resolve_region_splits('side_wide')
+            regions['side_bottom'] = resolve_region_splits('side_narrow')
+            regions['side_left'] = resolve_region_splits('side_wide')
+            regions['side_right'] = resolve_region_splits('side_narrow')
+
+        else:
+            # No symmetry detected: use uniform splits (backward compatible)
+            uniform_corner = self.corner_splits
+            uniform_gap = self.gap_splits if self.gap_splits else (n_cols, 1)
+            for corner_key in ['corner_bl', 'corner_br', 'corner_tl', 'corner_tr']:
+                regions[corner_key] = uniform_corner
+            for side_key in ['side_top', 'side_bottom', 'side_left', 'side_right']:
+                regions[side_key] = uniform_gap
+
+        # Apply horizontal/vertical permutation for sides
+        # Horizontal sides (top/bottom): use (n_parallel, n_perpendicular) as (nx, ny)
+        # Vertical sides (left/right): permute to (n_perpendicular, n_parallel)
+        side_top_h = regions['side_top']  # horizontal strip
+        side_bottom_h = regions['side_bottom']  # horizontal strip
+        side_left_v = regions['side_left']  # vertical strip - permute for vertical
+        side_right_v = regions['side_right']  # vertical strip - permute for vertical
+
+        # Apply permutation to vertical sides
+        regions['side_top'] = side_top_h
+        regions['side_bottom'] = side_bottom_h
+        regions['side_left'] = (side_left_v[1], side_left_v[0]) if len(side_left_v) == 2 else side_left_v
+        regions['side_right'] = (side_right_v[1], side_right_v[0]) if len(side_right_v) == 2 else side_right_v
+
+        return regions
+
     def __repr__(self):
         return (f"BoxDiscretizationConfig(enabled={self.enabled}, "
                 f"corner_splits={self.corner_splits}, "
                 f"gap_splits={self.gap_splits}, "
+                f"gap_wide_splits={self.gap_wide_splits}, "
+                f"gap_narrow_splits={self.gap_narrow_splits}, "
+                f"wide_wide_corner_splits={self.wide_wide_corner_splits}, "
+                f"narrow_narrow_corner_splits={self.narrow_narrow_corner_splits}, "
+                f"mixed_corner_splits={self.mixed_corner_splits}, "
                 f"cross_moderator_discretization="
                 f"{self.cross_moderator_discretization}, "
                 f"control_cross_submesh={self.control_cross_submesh}, "
@@ -1624,8 +1830,22 @@ class DragonCalculationScheme:
                 "cross_moderator_discretization", {}
             )
             if cross_raw:
+                # Accept both old "narrow_gap_splits" and new "cross_side_gap_splits" with deprecation
+                cross_side_gap_splits_val = cross_raw.get("cross_side_gap_splits")
+                narrow_gap_splits_val = cross_raw.get("narrow_gap_splits")
+
+                if narrow_gap_splits_val is not None and cross_side_gap_splits_val is None:
+                    import warnings
+                    warnings.warn(
+                        "YAML key 'cross_moderator_discretization.narrow_gap_splits' is deprecated. "
+                        "Use 'cross_side_gap_splits' instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                    cross_side_gap_splits_val = narrow_gap_splits_val
+
                 cross_mod_disc = CrossModeratorDiscretizationConfig(
-                    narrow_gap_splits=cross_raw.get("narrow_gap_splits"),
+                    cross_side_gap_splits=cross_side_gap_splits_val,
                     moderator_at_cross_corner_splits=cross_raw.get(
                         "moderator_at_cross_corner_splits"
                     ),
@@ -1647,6 +1867,11 @@ class DragonCalculationScheme:
                 enabled=True,
                 corner_splits=box_disc_raw.get("corner_splits", None),
                 gap_splits=box_disc_raw.get("gap_splits", None),
+                gap_wide_splits=box_disc_raw.get("gap_wide_splits", None),
+                gap_narrow_splits=box_disc_raw.get("gap_narrow_splits", None),
+                wide_wide_corner_splits=box_disc_raw.get("wide_wide_corner_splits", None),
+                narrow_narrow_corner_splits=box_disc_raw.get("narrow_narrow_corner_splits", None),
+                mixed_corner_splits=box_disc_raw.get("mixed_corner_splits", None),
                 cross_moderator_discretization=cross_mod_disc,
                 control_cross_submesh=ctrl_cross_cfg,
                 reassign_materials=box_disc_raw.get(
@@ -1659,12 +1884,12 @@ class DragonCalculationScheme:
         # --- Tracking parameters (common to all flux step types) ---
         tracking_kwargs = dict(
             num_angles_2d=d.get("num_angles_2d", 8),
-            line_density=d.get("line_density", 25.0),
+            line_density=d.get("line_density", 10.0),
             anisotropy_level=d.get("anisotropy_level", 1),
             polar_angles_quadrature=d.get(
-                "polar_angles_quadrature", None),
+                "polar_angles_quadrature", "GAUS"),
             number_of_polar_angles=d.get(
-                "number_of_polar_angles", None),
+                "number_of_polar_angles", 1),
         )
 
         # --- Build CalculationStep with appropriate parameters ---

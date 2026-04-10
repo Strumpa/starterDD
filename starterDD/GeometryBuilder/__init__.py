@@ -7,8 +7,9 @@ This module works in two modes:
 
 # Import standalone helpers (always available)
 from .helpers import computeSantamarinaradii
+from .surfaces import Square, Rectangle
 
-__all__ = ["computeSantamarinaradii"]
+__all__ = ["computeSantamarinaradii", "Square", "Rectangle"]
 
 # Flag to check if glow integration is available
 GLOW_AVAILABLE = False

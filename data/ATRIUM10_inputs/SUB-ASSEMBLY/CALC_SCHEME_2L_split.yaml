@@ -31,7 +31,6 @@ FLUX_CALCULATION_SCHEME:
       tracking: "TISO"
       num_angles_2d: 8
       line_density: 25.0
-      
       anisotropy_level: 4
       radial_scheme: "Santamarina"
       export_macros: true
