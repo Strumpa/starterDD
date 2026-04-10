@@ -75,15 +75,37 @@ class CartesianAssemblyModel:
 
                 Note : if either "gap", "gap_wide" or "gap_narrow" is provided, the other missing gap parameters will be set to the same value as the provided one to ensure consistency. If none of the gap parameters are provided, the gap width will be set to 0.
                 if both "gap_wide" and "gap_narrow" are provided, their consistency will be checked to ensure that gap_wide is greater than or equal to gap_narrow, otherwise an error will be raised.
-                For anti-diagonally symmetric assemblies :
-                If both "gap_wide" and "gap_narrow" are provided : it will be assumed that the wide-wide corner is the top-left corner of the assembly for anti-diagonal symmetry.
-                Conversely, the bottom-right corner of the assembly will be assumed to be the narrow-narrow corner, and the other two corners will be assumed to be wide-narrow corners.
-                For diagonally symmetric assemblies :
-                If both "gap_wide" and "gap_narrow" are provided : it will be assumed that the wide-wide, and narrow-narrow corners are the bottom-left and top-right corners.
-                
-                The wide-wide corner will be the only corner available for control cross insertion.
 
-                If you wish to define a control cross in a different corner : use the assembly_box_description to explicitly define the geometry of the assembly box.
+                **Wide-Wide Corner Mapping (Critical for Control Cross Placement):**
+
+                For anti-diagonally symmetric assemblies:
+                - Wide-wide gap corner: **north-west** (top-left)
+                - Narrow-narrow gap corner: **south-east** (bottom-right)
+                - Mixed-gap corners: **north-east** (top-right) and **south-west** (bottom-left)
+
+                For main-diagonally (transpose) symmetric assemblies:
+                - Wide-wide gap corner: **south-west** (bottom-left)
+                - Narrow-narrow gap corner: **north-east** (top-right)
+                - Mixed-gap corners: **north-west** (top-left) and **south-east** (bottom-right)
+
+                For non-symmetric assemblies:
+                - Wide-wide corner is defined by the explicit gap_wide and gap_narrow values
+
+                **Control Cross Placement Rules:**
+
+                The control cross can ONLY be placed at the wide-wide corner of the assembly.
+                If the GEOM.yaml specifies a control cross at an incorrect corner:
+                - A warning is printed
+                - The control cross center is automatically reassigned to the wide-wide corner
+                - Geometry generation proceeds with the corrected placement
+
+                To avoid auto-correction, ensure GEOM.yaml CONTROL_CROSS_GEOMETRY.center matches:
+                - "north-west" for anti-diagonal symmetric assemblies
+                - "south-west" for main-diagonal symmetric assemblies
+
+                If you wish to define a control cross in a different corner, use the
+                assembly_box_description to explicitly define custom geometry bounds.
+
 
                 assembly_box_description [optional, replaces implicit definition through assembly_pitch, gap, channel_box_thickness, etc.]: 
                 description of the assembly box geometry, which can be used to define more complex assembly box geometries with different gap widths on different sides of the assembly for example, and to explicitly set the origin of the coordinate system for the assembly geometry:
@@ -664,19 +686,22 @@ class CartesianAssemblyModel:
 
     def validate_control_cross_symmetry(self):
         """
-        Check whether the control cross corner is compatible with the
-        lattice's diagonal symmetry and emit a warning if it breaks it.
+        Validate and auto-correct the control cross corner placement based on
+        lattice symmetry and gap configuration (wide-wide corner).
 
-        Compatibility rules:
+        **Gap Configuration & Wide-Wide Corner Mapping:**
 
-        - **Anti-diagonal** lattice symmetry (axis from top-left to
-          bottom-right): preserved by control crosses at ``"north-west"``
-          or ``"south-east"`` corners (the cross sits on the symmetry
-          axis).  ``"north-east"`` or ``"south-west"`` would break it.
-        - **Main-diagonal** (transpose) lattice symmetry: preserved by
-          ``"south-west"`` or ``"north-east"`` corners.
-          ``"north-west"`` or ``"south-east"`` would break it.
-        - **No diagonal symmetry**: all corners are acceptable.
+        - **Anti-diagonal symmetry** (axis top-left to bottom-right):
+          Wide-wide corner is **north-west** (top-left).
+          Narrow-narrow corner is **south-east** (bottom-right).
+        - **Main-diagonal symmetry** (transpose):
+          Wide-wide corner is **south-west** (bottom-left).
+          Narrow-narrow corner is **north-east** (top-right).
+        - **No symmetry**: Wide-wide corner determined by `gap_wide` vs `gap_narrow`.
+
+        **Auto-Correction:**
+        If the control cross is not placed at the wide-wide corner,
+        it is automatically reassigned with a warning message.
 
         This method is called automatically at the end of
         ``parse_geometry_description`` when a control cross is present.
@@ -687,25 +712,34 @@ class CartesianAssemblyModel:
             return
 
         sym = self.check_diagonal_symmetry()
-        if sym is None:
-            return  # no symmetry to break
-
         corner = self.control_cross.center
 
-        compatible = {
-            "anti-diagonal": {"north-west", "south-east"},
-            "main-diagonal": {"south-west", "north-east"},
-        }
+        # Determine the wide-wide corner based on symmetry and gap config
+        if sym == "anti-diagonal":
+            # Anti-diagonal: wide-wide at north-west, narrow-narrow at south-east
+            wide_wide_corner = "north-west"
+            wide_wide_description = "north-west (top-left, wide-wide gap corner)"
+        elif sym == "main-diagonal":
+            # Main-diagonal: wide-wide at south-west, narrow-narrow at north-east
+            wide_wide_corner = "south-west"
+            wide_wide_description = "south-west (bottom-left, wide-wide gap corner)"
+        else:
+            # No symmetry: both corners are acceptable (no auto-correction needed)
+            return
 
-        if corner not in compatible.get(sym, set()):
+        # Auto-correction: if cross is not at wide-wide corner, reassign it
+        if corner != wide_wide_corner:
             warnings.warn(
-                f"[control cross symmetry] The lattice has "
-                f"{sym} symmetry, but the control cross is placed at "
-                f"'{corner}'. Compatible corners for {sym} symmetry "
-                f"are {sorted(compatible[sym])}. The control cross "
-                f"placement will break the lattice symmetry.",
+                f"[control cross placement] The lattice has {sym} symmetry. "
+                f"The wide-wide gap corner (where both gaps are wide) is at "
+                f"{wide_wide_description}. The control cross was specified at "
+                f"'{corner}', which is incompatible. "
+                f"Auto-correcting: control cross center reassigned from "
+                f"'{corner}' to '{wide_wide_corner}'.",
+                UserWarning,
                 stacklevel=2,
             )
+            self.control_cross.center = wide_wide_corner
 
     def check_diagonal_symmetry(self):
         """
