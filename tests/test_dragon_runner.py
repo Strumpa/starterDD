@@ -367,6 +367,9 @@ class TestDraglibResolution:
         libs_dir.mkdir()
         draglib_gz = libs_dir / "draglibendfb8r1SHEM295_v5p1.gz"
         draglib_gz.write_text("fake compressed")
+        # Clear higher-priority env vars so DRAGLIBS is checked
+        monkeypatch.delenv("DRAGLIBS_DIR", raising=False)
+        monkeypatch.delenv("DRAGLIB_DIR", raising=False)
         monkeypatch.setenv("DRAGLIBS", str(libs_dir))
 
         case = DragonCase(
