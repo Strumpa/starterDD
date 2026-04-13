@@ -19,7 +19,7 @@ MODULE SALT: MCCGT: END: ;
 TRKSSH TRKFILSSH := SALT: tdtssh ::
     EDIT 2
     TITLE 'SSH - IC'
-    ANIS 4
+    ANIS 2
     TISO 8 25.0
     IC EPSJ 1.0E-5
 ;
@@ -28,7 +28,7 @@ TRKSSH TRKFILSSH := SALT: tdtssh ::
 TRKFLUXL1 TRKFILFLUXL1 := SALT: tdtfluxl1 ::
     EDIT 2
     TITLE 'FLUXL1 - IC'
-    ANIS 4
+    ANIS 2
     TISO 8 25.0
     IC EPSJ 1.0E-5
 ;
@@ -37,9 +37,9 @@ TRKFLUXL1 TRKFILFLUXL1 := SALT: tdtfluxl1 ::
 TRKFLUXL2 TRKFILFLUXL2 := SALT: tdtfluxl2 ::
     EDIT 2
     TITLE 'FLUXL2 - MOC'
-    ANIS 4
+    ANIS 2
     ALLG
-    TSPC 24 40.0 REND
+    TSPC 12 20.0 REND
     NOIC
 ;
 

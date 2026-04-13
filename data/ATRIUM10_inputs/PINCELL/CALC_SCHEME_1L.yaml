@@ -23,14 +23,13 @@ FLUX_CALCULATION_SCHEME:
       step_type: "self_shielding"
       mix_numbering_strategy: "by_pin"
       self_shielding_module: "USS"
-      self_shielding_method: "RSE"
-      transport_correction: "NONE"
+      self_shielding_method: "PT"
+      transport_correction: "APOL"
       spatial_method: "IC"
       tracking: "TISO"
       num_angles_2d: 8
-      line_density: 25.0
-      # No need for polar angles and nmu as not used outside of MOC. Should be supported 
-      anisotropy_level: 4
+      line_density: 20.0
+      anisotropy_level: 2
       radial_scheme: "Santamarina"
       export_macros: true
       sectorization:
@@ -48,11 +47,11 @@ FLUX_CALCULATION_SCHEME:
       mix_numbering_strategy: "by_pin"
       spatial_method: "MOC"
       tracking: "TSPC"
-      num_angles_2d: 24
-      line_density: 40.0
+      num_angles_2d: 12
+      line_density: 15.0
       polar_angles_quadrature: "GAUS"
       number_of_polar_angles: 4
-      anisotropy_level: 4
+      anisotropy_level: 1
       radial_scheme: "Santamarina"
       export_macros: False
       sectorization:

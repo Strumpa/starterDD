@@ -6,9 +6,9 @@
 * --------------------------------
 *    INPUT & OUTPUT PARAMETERS
 * --------------------------------
-PARAMETER LIBRARY2 LIBEQ ::
+PARAMETER LIBEQ LIBRARY2 ::
        EDIT 0
-           ::: LINKED_LIST LIBRARY2 LIBEQ ;
+           ::: LINKED_LIST LIBEQ LIBRARY2 ;
    ;
 
 * --------------------------------

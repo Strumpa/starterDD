@@ -7,11 +7,11 @@ MODULE LIB: G2S: SALT: MCCGT: USS: ASM: FLU: EDI: SPH: GREP: DELETE:
 PROCEDURE MIX TRK EDIR MIXEQ_FLUXL1 ;
 
 LINKED_LIST LIBRARY LIBRARY2 TRKSSH TRKFLUXL1 TRKFLUXL2 SYS FLUXL1
-  FLUXL2 EDITION LIBEQ COMPO ;
+  FLUXL2 EDITION LIBEQL1 LIBEQL2 COMPO ;
 SEQ_BINARY TRKFILSSH TRKFILFLUXL1 TRKFILFLUXL2 ;
 STRING name_compo := "_CPO_AT10_4x4_mix_splitting" ;
 STRING Draglib := "dummy_alias" ;
-INTEGER o_anis := 4 ;
+INTEGER o_anis := 2 ;
 REAL keffL1 ;
 REAL keffL2 ;
 REAL TFUEL := 900.0 ;
@@ -37,7 +37,7 @@ TRKSSH TRKFILSSH TRKFLUXL1 TRKFILFLUXL1 TRKFLUXL2 TRKFILFLUXL2 := TRK
 **************************************************
 * LIBRARY creation
 **************************************************
-LIBRARY := MIX :: <<Draglib>> 'RSE' <<o_anis>> 'NONE' <<TFUEL>> <<TBOX>>
+LIBRARY := MIX :: <<Draglib>> 'PT' <<o_anis>> 'APOL' <<TFUEL>> <<TBOX>>
   <<TCLAD>> <<TCOOL>> <<TMODE>> <<TCTRL>> ;
 
 **************************************************
@@ -72,12 +72,12 @@ COND 10 14 18 26 33 40 49 56 66 84 150 210 241 244 247 252 255 258 261
   268 273 277 281 286 291
     SAVE ON COND26
 ;
-LIBEQ := EDITION :: STEP UP COND26 ;
+LIBEQL1 := EDITION :: STEP UP COND26 ;
 
 **************************************************
 * SPH: equivalence correction
 **************************************************
-LIBEQ := SPH: LIBEQ TRKFLUXL1 TRKFILFLUXL1 ::
+LIBEQL1 := SPH: LIBEQL1 TRKFLUXL1 TRKFILFLUXL1 ::
     EDIT 1
     GRMAX 19
 ;
@@ -85,16 +85,16 @@ LIBEQ := SPH: LIBEQ TRKFLUXL1 TRKFILFLUXL1 ::
 FLUXL1 SYS EDITION := DELETE: FLUXL1 SYS EDITION ;
 
 * MIXEQ: FLUXL1 → FLUXL2
-LIBEQ := MIXEQ_FLUXL1 LIBEQ ;
+LIBEQL2 := MIXEQ_FLUXL1 LIBEQL1 ;
 
 **************************************************
 * ASM: + FLU: — second level
 **************************************************
-SYS := ASM: LIBEQ TRKFLUXL2 TRKFILFLUXL2 ::
+SYS := ASM: LIBEQL2 TRKFLUXL2 TRKFILFLUXL2 ::
     ARM EDIT 1
 ;
 
-FLUXL2 := FLU: LIBEQ SYS TRKFLUXL2 TRKFILFLUXL2 ::
+FLUXL2 := FLU: LIBEQL2 SYS TRKFLUXL2 TRKFILFLUXL2 ::
     EDIT 1 TYPE K
 ;
 GREP: FLUXL2 :: GETVAL 'K-EFFECTIVE' 1 1 1 >>keffL2<< ;
@@ -103,7 +103,7 @@ ECHO "AT10_4x4_mix_splitting L2 keff=" keffL2 ;
 **************************************************
 * EDI/COMPO sub-procedure call
 **************************************************
-EDIR FLUXL2 LIBEQ TRKFLUXL2 :: <<name_compo>> ;
+EDIR FLUXL2 LIBEQL2 TRKFLUXL2 :: <<name_compo>> ;
 
 END: ;
 QUIT .

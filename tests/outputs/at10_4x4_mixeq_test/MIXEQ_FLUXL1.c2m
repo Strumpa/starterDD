@@ -6,9 +6,9 @@
 * --------------------------------
 *    INPUT & OUTPUT PARAMETERS
 * --------------------------------
-PARAMETER LIBRARY2 LIBEQ ::
+PARAMETER LIBEQL2 LIBEQL1 ::
        EDIT 0
-           ::: LINKED_LIST LIBRARY2 LIBEQ ;
+           ::: LINKED_LIST LIBEQL2 LIBEQL1 ;
    ;
 
 * --------------------------------
@@ -71,7 +71,7 @@ MODULE LIB: END: ;
 *    MIXTURE DUPLICATION
 *    CALL TO LIB: MODULE
 * --------------------------------
-LIBEQ := LIB: LIBRARY2 ::
+LIBEQL2 := LIB: LIBEQL1 ::
   EDIT 0
   NMIX 45
   DEPL LIB: DRAGON FIL: dummy_alias

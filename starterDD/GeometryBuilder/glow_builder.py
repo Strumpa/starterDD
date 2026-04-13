@@ -3033,7 +3033,7 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
             ctrl.center, ctrl,
             unaffected_side_h=unaffected_side_h,
             unaffected_side_v=unaffected_side_v,
-            unaffected_corner=corner_bl if has_asym_gap_splits else (corner_bl if has_asym_gap_splits else box_discretization_config.corner_splits),
+            unaffected_corner=corner_bl if has_asym_gap_splits else box_discretization_config.corner_splits,
             narrow_gap_splits_h=narrow_gap_splits_h,
             narrow_gap_splits_v=narrow_gap_splits_v,
             moderator_at_cross_corner_splits=cc_splits,
