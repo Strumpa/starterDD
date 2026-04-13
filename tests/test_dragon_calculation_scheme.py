@@ -498,7 +498,7 @@ class TestBoxDiscretizationConfig:
         # BL should get mixed_corner_splits transposed ← Key difference from old implementation
         assert regions['corner_bl'] == (3, 6), "BL mixed corner should be transposed"
 
-        """Specific corner splits should override gap_*_splits."""
+        #Specific corner splits should override gap_*_splits.
         bdc = BoxDiscretizationConfig(
             enabled=True,
             gap_wide_splits=[20, 4],

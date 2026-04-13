@@ -88,6 +88,7 @@ REACTION_TO_MT_NUMBER = {
     'n,2alpha': 108,
     'absorption': 27,
     'disappearance': 101,
+    'neutron_production_from_fission': 452
 }
 
 DRAGON_REAC_TO_REACTION_NAME = {

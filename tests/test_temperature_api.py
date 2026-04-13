@@ -131,7 +131,7 @@ class TestDragonCaseTemperatureAPI:
             case = DragonCase(
                 case_name='test',
                 call_glow=False,
-                draglibs_names_to_alias={'test.lib': 'LIB'},
+                draglib_name_to_alias={'test.lib': 'LIB'},
                 config_yamls={
                     'MATS': mats_yaml,
                     'GEOM': geom_yaml,
@@ -160,7 +160,7 @@ class TestDragonCaseTemperatureAPI:
             case = DragonCase(
                 case_name='test',
                 call_glow=False,
-                draglibs_names_to_alias={'test.lib': 'LIB'},
+                draglib_name_to_alias={'test.lib': 'LIB'},
                 config_yamls={
                     'MATS': mats_yaml,
                     'GEOM': geom_yaml,
@@ -193,7 +193,7 @@ class TestDragonCaseTemperatureAPI:
             case = DragonCase(
                 case_name='test',
                 call_glow=False,
-                draglibs_names_to_alias={'test.lib': 'LIB'},
+                draglib_name_to_alias={'test.lib': 'LIB'},
                 config_yamls={
                     'MATS': mats_yaml,
                     'GEOM': geom_yaml,

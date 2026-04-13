@@ -61,7 +61,7 @@ class DragonCase:
     """
 
     def __init__(self, case_name, call_glow,
-                 draglibs_names_to_alias, config_yamls,
+                 draglib_name_to_alias, config_yamls,
                  enable_g2s=False, output_path=None,
                  tdt_path=None, tdt_base_name=None):
         """
@@ -73,7 +73,7 @@ class DragonCase:
             If ``True``, call glow to generate TDT geometry
             files.  If ``False`` the TDT files are expected
             to exist already.
-        draglibs_names_to_alias : dict
+        draglib_name_to_alias : dict
             ``{draglib_file_name: cle2000_alias}``.
         config_yamls : dict
             ``{"MATS": path, "GEOM": path,
@@ -95,7 +95,7 @@ class DragonCase:
         """
         self.case_name = case_name
         self.call_glow = call_glow
-        self.draglibs_names_to_alias = draglibs_names_to_alias
+        self.draglib_name_to_alias = draglib_name_to_alias
         self.enable_g2s = enable_g2s
         self.tdt_base_name = tdt_base_name or case_name
 
@@ -218,7 +218,7 @@ class DragonCase:
             return {
                 'TFUEL': self.assembly.default_fuel_temperature if self.assembly else 900.0,
                 'TBOX': self.assembly.default_structural_temperature if self.assembly else 600.0,
-                'TCLAD': self.assembly.default_gap_temperature if self.assembly else 600.0,
+                'TCLAD': self.assembly.default_structural_temperature if self.assembly else 600.0,
                 'TCOOL': self.assembly.default_coolant_temperature if self.assembly else 600.0,
                 'TMODE': self.assembly.default_moderator_temperature if self.assembly else 600.0,
                 'TCTRL': self.assembly.default_structural_temperature if self.assembly else 600.0,
@@ -246,7 +246,7 @@ class DragonCase:
         return {
             'TFUEL': fuels[0] if fuels else self.assembly.default_fuel_temperature,
             'TBOX': temps_by_type.get('structural', self.assembly.default_structural_temperature),
-            'TCLAD': temps_by_type.get('gap', self.assembly.default_gap_temperature),
+            'TCLAD': temps_by_type.get('structural', self.assembly.default_structural_temperature),
             'TCOOL': temps_by_type.get('coolant', self.assembly.default_coolant_temperature),
             'TMODE': temps_by_type.get('moderator', self.assembly.default_moderator_temperature),
             'TCTRL': temps_by_type.get('structural', self.assembly.default_structural_temperature),
@@ -290,7 +290,7 @@ class DragonCase:
         )
         return assembly, compositions
 
-    def _generate_mixeq_procedures(self, scheme, assembly):
+    def _generate_mixeq_procedures(self, scheme, assembly, draglib_alias):
         """
         Generate MIXEQ procedures for numbering strategy transitions.
 
@@ -304,6 +304,8 @@ class DragonCase:
             Calculation scheme with trackable steps
         assembly : CartesianAssemblyModel
             Assembly with mix state history from multiple steps
+        draglib_alias : str
+            Alias for the draglib to be used in MIXEQ procedures : used to recover depletion chain information.
 
         Returns
         -------
@@ -328,12 +330,11 @@ class DragonCase:
                 print(f"[MIXEQ] Generating MIXEQ for {current_step.name} → {next_step.name}")
 
                 try:
-                    if current_step.step_type == "self_shielding":
-                        lib_name = f"LIBRARY2"
-                    else:
-                        lib_name = f"LIBEQ"
+
+                    input_lib_name = f"LIBRARY2"  # Default input library name for MIXEQ
+                    output_lib_name = f"LIBEQ"
                     # Generate MIXEQ procedure
-                    mixeq = MIXEQ(assembly, lib_name, current_step.name, next_step.name)
+                    mixeq = MIXEQ(assembly, input_lib_name, output_lib_name, current_step.name, next_step.name, draglib_alias)
                     proc_name = f"MIXEQ_{current_step.name}_to_{next_step.name}"
 
                     # Validate procedure name (CLE-2000 limitation)
@@ -490,6 +491,10 @@ class DragonCase:
             ``{"x2m": path, "mix": path,
               "trk": path, "edir": path}``
         """
+        # Determine the first draglib alias
+        draglib_alias = list(
+            self.draglib_name_to_alias.values()
+        )[0]
         # 1. Load scheme
         scheme = DragonCalculationScheme.from_yaml(
             self.calc_scheme_yaml
@@ -528,8 +533,8 @@ class DragonCase:
             
             if step.tdt_file_id is not None:
                 tdt_file_name = (
-                f"{self.tdt_base_name}_{self.step.tdt_file_id}"
-                f"_{step.spatial_method}"
+                    f"{self.tdt_base_name}_{step.tdt_file_id}"
+                    f"_{step.spatial_method}"
             )
             else:
                 tdt_file_name = (
@@ -640,16 +645,11 @@ class DragonCase:
         try:
             # Validate prerequisites for MIXEQ generation
             self._validate_mixeq_generation(scheme, assembly)
-            mixeq_procedures = self._generate_mixeq_procedures(scheme, assembly)
+            mixeq_procedures = self._generate_mixeq_procedures(scheme, assembly, draglib_alias)
         except Exception as e:
             print(f"[ERROR] MIXEQ validation failed: {e}")
             print("[MIXEQ] Skipping MIXEQ generation - continuing with standard workflow")
             mixeq_procedures = []
-
-        # Determine the first draglib alias
-        draglib_alias = list(
-            self.draglibs_names_to_alias.values()
-        )[0]
 
         # ----- TRK.c2m -----
         trk_proc_name = f"TRK"
