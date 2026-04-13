@@ -330,9 +330,12 @@ class DragonCase:
                 print(f"[MIXEQ] Generating MIXEQ for {current_step.name} → {next_step.name}")
 
                 try:
-
-                    input_lib_name = f"LIBRARY2"  # Default input library name for MIXEQ
-                    output_lib_name = f"LIBEQ"
+                    if current_step.step_type == "self_shielding":
+                        input_lib_name = f"LIBRARY2"  # Default input library name for SSH step
+                        output_lib_name = "LIBEQL1"
+                    else:
+                        input_lib_name = f"LIBEQL1"  # Default input library name for MIXEQ
+                        output_lib_name = f"LIBEQL2"
                     # Generate MIXEQ procedure
                     mixeq = MIXEQ(assembly, input_lib_name, output_lib_name, current_step.name, next_step.name, draglib_alias)
                     proc_name = f"MIXEQ_{current_step.name}_to_{next_step.name}"
@@ -772,6 +775,7 @@ class DragonCase:
         # --- Data structures ---
         proc.add_linked_list("LIBRARY")
         proc.add_linked_list("LIBRARY2")
+        proc.add_linked_list("LIBEQ")
         for trk_ll, _ in trk.get_track_names():
             proc.add_linked_list(trk_ll)
         proc.add_linked_list("SYS")
@@ -882,11 +886,16 @@ class DragonCase:
                         f"* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"LIBRARY2 := {proc_name} LIBRARY2 ;"
+                        f"LIBEQ := {proc_name} LIBRARY2 ;"
                     )
                     proc.add_body_line(
                         wrap_cle2000_line(mixeq_call)
                     )
+                    flux_library = "LIBEQ"
+                else:
+                    flux_library = "LIBRARY2"
+        else:
+            flux_library = "LIBRARY2"
 
         asm_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
         proc.add_body_line(f"    EDIT 1 {asm_keyword}")
@@ -909,7 +918,7 @@ class DragonCase:
                 "*" * 50
             )
             asm_line = (
-                f"SYS := ASM: LIBRARY2 "
+                f"SYS := ASM: {flux_library} "
                 f"{flux_trk} {flux_trkfil} ::"
             )
             proc.add_body_line(
@@ -921,7 +930,7 @@ class DragonCase:
             proc.add_body_line("")
 
             flu_line = (
-                f"FLUX := FLU: SYS LIBRARY2 "
+                f"FLUX := FLU: SYS {flux_library} "
                 f"{flux_trk} {flux_trkfil} ::"
             )
             proc.add_body_line(
@@ -957,7 +966,7 @@ class DragonCase:
                 "*" * 50
             )
             edir_call = (
-                f"{edir_proc_name} FLUX LIBRARY2 "
+                f"{edir_proc_name} FLUX {flux_library} "
                 f"{flux_trk} :: <<name_compo>> ;"
             )
             proc.add_body_line(
@@ -1016,6 +1025,7 @@ class DragonCase:
         # --- Data structures ---
         proc.add_linked_list("LIBRARY")
         proc.add_linked_list("LIBRARY2")
+        proc.add_linked_list("LIBEQ")
         for trk_ll, _ in trk.get_track_names():
             proc.add_linked_list(trk_ll)
         proc.add_linked_list("SYS")
@@ -1312,7 +1322,7 @@ class DragonCase:
                         f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"LIBRARY2 := {proc_name} LIBRARY2 ;"
+                        f"LIBEQ := {proc_name} LIBRARY2 ;"
                     )
                     proc.add_body_line(
                         wrap_cle2000_line(
@@ -1320,6 +1330,11 @@ class DragonCase:
                         )
                     )
                     proc.add_body_line("")
+                    flux_library = "LIBEQ"
+                else:
+                    flux_library = "LIBRARY2"
+        else:
+            flux_library = "LIBRARY2"
 
         # --- ASM + FLU on flux step ---
         flux_steps = scheme.get_flux_steps()
@@ -1330,7 +1345,7 @@ class DragonCase:
                 f"{inner_indent}* ASM: + FLU:"
             )
             asm_line = (
-                f"SYS := ASM: LIBRARY2 "
+                f"SYS := ASM: {flux_library} "
                 f"{flux_trk} {flux_trkfil} ::"
             )
             proc.add_body_line(
@@ -1346,7 +1361,7 @@ class DragonCase:
             proc.add_body_line("")
 
             flu_line = (
-                f"FLUX := FLU: SYS LIBRARY2 "
+                f"FLUX := FLU: SYS {flux_library} "
                 f"{flux_trk} {flux_trkfil} ::"
             )
             proc.add_body_line(
@@ -1384,7 +1399,7 @@ class DragonCase:
                 for b in ordered_branches
             )
             edir_call = (
-                f"COMPO := {edir_proc_name} FLUX LIBRARY2 "
+                f"COMPO := {edir_proc_name} FLUX {flux_library} "
                 f"{flux_trk} COMPO :: <<name_compo>> "
                 f"{para_args} ;"
             )
@@ -1401,8 +1416,8 @@ class DragonCase:
             )
             proc.add_body_line(
                 wrap_cle2000_line(
-                    f"{inner_indent}LIBRARY LIBRARY2 := "
-                    f"DELETE: LIBRARY LIBRARY2 ;"
+                    f"{inner_indent}LIBRARY {flux_library} := "
+                    f"DELETE: LIBRARY {flux_library} ;"
                 )
             )
             proc.add_body_line(
@@ -1492,8 +1507,8 @@ class DragonCase:
 
         # Retrieve edition step for EDI/SPH helpers
         edi_step = scheme.get_edition_between_levels_steps()[0]
-        edi_cond = EDI_condensation(edi_step, lib_name="LIBEQ")
-        sph_corr = SPH_correction(edi_step, lib_name="LIBEQ")
+        edi_cond = EDI_condensation(edi_step, lib_name="LIBEQL1")
+        sph_corr = SPH_correction(edi_step, lib_name="LIBEQL1")
 
         flux_steps = scheme.get_flux_steps()
         l1_step = flux_steps[0]
@@ -1527,6 +1542,7 @@ class DragonCase:
         proc.add_linked_list("FLUXL2")
         proc.add_linked_list("EDITION")
         proc.add_linked_list(edi_cond.lib_name)
+        proc.add_linked_list("LIBEQL2")
         proc.add_linked_list("COMPO")
         for _, trkfil in trk.get_track_names():
             proc.add_seq_binary(trkfil)
@@ -1617,7 +1633,7 @@ class DragonCase:
                         f"* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"LIBRARY2 := {proc_name} LIBRARY2 ;"
+                        f"LIBEQL1 := {proc_name} LIBRARY2 ;"
                     )
                     proc.add_body_line(
                         wrap_cle2000_line(
@@ -1625,6 +1641,11 @@ class DragonCase:
                         )
                     )
                     proc.add_body_line("")
+                    flux_level1_library = "LIBEQL1"
+                else:
+                    flux_level1_library = "LIBRARY2"
+        else:
+            flux_level1_library = "LIBRARY2"
 
         # --- ASM L1 + FLU L1 ---
         l1_asm_keyword = "PIJ" if l1_step.spatial_method == "CP" else "ARM"
@@ -1633,7 +1654,7 @@ class DragonCase:
         proc.add_body_line("*" * 50)
         proc.add_body_line(
             wrap_cle2000_line(
-                f"SYS := ASM: LIBRARY2 {l1_trk} {l1_trkfil} ::"
+                f"SYS := ASM: {flux_level1_library} {l1_trk} {l1_trkfil} ::"
             )
         )
         proc.add_body_line(f"    EDIT 1 {l1_asm_keyword}")
@@ -1641,7 +1662,7 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"FLUXL1 := FLU: SYS LIBRARY2 {l1_trk} {l1_trkfil} ::"
+                f"FLUXL1 := FLU: SYS {flux_level1_library} {l1_trk} {l1_trkfil} ::"
             )
         )
         proc.add_body_line("    EDIT 1 TYPE K")
@@ -1659,7 +1680,7 @@ class DragonCase:
         proc.add_body_line("* EDI: energy condensation (L1 → coarse)")
         proc.add_body_line("*" * 50)
         proc.add_body_block(
-            edi_cond.build_edi_call("FLUXL1", "LIBRARY2", l1_trk)
+            edi_cond.build_edi_call("FLUXL1", flux_level1_library, l1_trk)
         )
         proc.add_body_block(edi_cond.build_lib_extract())
         proc.add_body_line("")
@@ -1689,7 +1710,7 @@ class DragonCase:
                         f"* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"{edi_cond.lib_name} := {proc_name} {edi_cond.lib_name} ;"
+                        f"LIBEQL2 := {proc_name} {edi_cond.lib_name} ;"
                     )
                     proc.add_body_line(
                         wrap_cle2000_line(
@@ -1697,6 +1718,11 @@ class DragonCase:
                         )
                     )
                     proc.add_body_line("")
+                    flux_level2_library = "LIBEQL2"
+                else:
+                    flux_level2_library = edi_cond.lib_name
+        else:
+            flux_level2_library = edi_cond.lib_name
 
         # --- ASM L2 + FLU L2 ---
         l2_asm_keyword = "PIJ" if l2_step.spatial_method == "CP" else "ARM"
@@ -1705,7 +1731,7 @@ class DragonCase:
         proc.add_body_line("*" * 50)
         proc.add_body_line(
             wrap_cle2000_line(
-                f"SYS := ASM: {edi_cond.lib_name} {l2_trk} {l2_trkfil} ::"
+                f"SYS := ASM: {flux_level2_library} {l2_trk} {l2_trkfil} ::"
             )
         )
         proc.add_body_line(f"    {l2_asm_keyword} EDIT 1")
@@ -1713,7 +1739,7 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"FLUXL2 := FLU: {edi_cond.lib_name} SYS "
+                f"FLUXL2 := FLU: {flux_level2_library} SYS "
                 f"{l2_trk} {l2_trkfil} ::"
             )
         )
@@ -1733,7 +1759,7 @@ class DragonCase:
         proc.add_body_line("*" * 50)
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{edir_proc_name} FLUXL2 {edi_cond.lib_name} "
+                f"{edir_proc_name} FLUXL2 {flux_level2_library} "
                 f"{l2_trk} :: <<name_compo>> ;"
             )
         )
@@ -2014,7 +2040,7 @@ class DragonCase:
                         f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"{inner_indent}LIBRARY2 := {proc_name} LIBRARY2 ;"
+                        f"{inner_indent}LIBEQL1 := {proc_name} LIBRARY2 ;"
                     )
                     proc.add_body_line(
                         wrap_cle2000_line(
@@ -2022,13 +2048,18 @@ class DragonCase:
                         )
                     )
                     proc.add_body_line("")
+                    flux_level1_library = "LIBEQL1"
+                else:
+                    flux_level1_library = "LIBRARY2"
+        else:
+            flux_level1_library = "LIBRARY2"
 
         # --- ASM L1 + FLU L1 ---
         l1_asm_keyword = "PIJ" if l1_step.spatial_method == "CP" else "ARM"
         proc.add_body_line(f"{inner_indent}* ASM: + FLU: — first level")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}SYS := ASM: LIBRARY2 "
+                f"{inner_indent}SYS := ASM: {flux_level1_library} "
                 f"{l1_trk} {l1_trkfil} ::"
             )
         )
@@ -2037,7 +2068,7 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}FLUXL1 := FLU: SYS LIBRARY2 "
+                f"{inner_indent}FLUXL1 := FLU: SYS {flux_level1_library} "
                 f"{l1_trk} {l1_trkfil} ::"
             )
         )
@@ -2106,7 +2137,7 @@ class DragonCase:
                         f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"{inner_indent}{edi_cond.lib_name} := "
+                        f"{inner_indent} LIBEQL2 := "
                         f"{proc_name} {edi_cond.lib_name} ;"
                     )
                     proc.add_body_line(
@@ -2115,13 +2146,18 @@ class DragonCase:
                         )
                     )
                     proc.add_body_line("")
+                    flux_level2_library = "LIBEQL2"
+                else:
+                    flux_level2_library = edi_cond.lib_name
+        else:
+            flux_level2_library = edi_cond.lib_name
 
         # --- ASM L2 + FLU L2 ---
         l2_asm_keyword = "PIJ" if l2_step.spatial_method == "CP" else "ARM"
         proc.add_body_line(f"{inner_indent}* ASM: + FLU: — second level")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}SYS := ASM: {edi_cond.lib_name} "
+                f"{inner_indent}SYS := ASM: {flux_level2_library} "
                 f"{l2_trk} {l2_trkfil} ::"
             )
         )
@@ -2130,7 +2166,7 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}FLUXL2 := FLU: {edi_cond.lib_name} SYS "
+                f"{inner_indent}FLUXL2 := FLU: {flux_level2_library} SYS "
                 f"{l2_trk} {l2_trkfil} ::"
             )
         )
@@ -2167,9 +2203,9 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(
                 f"{inner_indent}LIBRARY LIBRARY2 "
-                f"{edi_cond.lib_name} := "
+                f"{flux_level2_library} := "
                 f"DELETE: LIBRARY LIBRARY2 "
-                f"{edi_cond.lib_name} ;"
+                f"{flux_level2_library} ;"
             )
         )
         proc.add_body_line(

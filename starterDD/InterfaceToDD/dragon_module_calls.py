@@ -1526,7 +1526,7 @@ class SALT:
     title : str or None
         Title string for the SALT call.  Auto-generated if ``None``.
     batch : int or None
-        BATCH parameter.  Defaults to 200 for IC/CP, 2000 for MOC.
+        BATCH parameter.  Defaults to 1 if unspecified.
     """
 
     AVAILABLE_QUADRATURES = (
@@ -1727,7 +1727,6 @@ class TRK:
             else:                
                 tagTRKFIL = step.name.upper()
             result.append((f"TRK{tagTRK}", f"TRKFIL{tagTRKFIL}"))
-            print(result)
         return result
 
     def build_procedure_body(self):
@@ -1766,7 +1765,6 @@ class TRK:
         # --- PARAMETER block ---
         param_items = []
         for trk_ll, trkfil in track_names:
-            print(f"Validating track names: {trk_ll}, {trkfil}")
             validate_varname(trk_ll)
             validate_varname(trkfil)
             param_items.append(trk_ll)
@@ -2204,9 +2202,9 @@ class MIXEQ:
             "* --------------------------------\n"
             "*    INPUT & OUTPUT PARAMETERS\n"
             "* --------------------------------\n"
-            f"PARAMETER {self.input_lib_name} {self.output_lib_name} ::\n"
+            f"PARAMETER {self.output_lib_name} {self.input_lib_name} ::\n"
             "       EDIT 0\n"
-            f"           ::: LINKED_LIST {self.input_lib_name} {self.output_lib_name} ;\n"
+            f"           ::: LINKED_LIST {self.output_lib_name} {self.input_lib_name} ;\n"
             "   ;\n"
             "\n"
             "* --------------------------------\n"
