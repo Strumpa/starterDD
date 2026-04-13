@@ -198,7 +198,7 @@ def test_at10_4x4_tdt_enforcement_ssh():
     assert ssh_state["step_name"] == "SSH"
     assert ssh_state["strategy"] == "by_material"
     assert ssh_state["tdt_enforced"] is True
-    assert len(ssh_state["tdt_indices"]) == 30, "Should have 30 fuel mix indices"
+    assert len(ssh_state["tdt_indices"]) == 33, "Should have 33 total mixes (30 fuel + 3 non-fuel)"
 
     print("  -> test_at10_4x4_tdt_enforcement_ssh PASSED")
     print(f"     Enforced {len(tdt_indices_ssh)} TDT indices for SSH step")
@@ -259,7 +259,7 @@ def test_at10_4x4_tdt_enforcement_fluxl2():
     l2_state = assembly.get_step_mix_state("FLUXL2")
     assert l2_state is not None
     assert l2_state["strategy"] == "by_pin"
-    assert len(l2_state["tdt_indices"]) == 42, "Should have 42 fuel mix indices"
+    assert len(l2_state["tdt_indices"]) == 45, "Should have 45 total mixes enforced for FLUXL2"
 
     print("  -> test_at10_4x4_tdt_enforcement_fluxl2 PASSED")
     print(f"     Enforced {len(tdt_indices_l2)} TDT indices for FLUXL2 step")
@@ -518,7 +518,7 @@ def test_at10_4x4_mixeq_procedure_generation():
 
     # Generate MIXEQ procedure
     lib_name = "LIBEQ"
-    mixeq = MIXEQ(assembly, lib_name, "FLUXL1", "FLUXL2")
+    mixeq = MIXEQ(assembly, "LIBRARY2", "LIBEQ", "FLUXL1", "FLUXL2", draglib_alias="dummy_alias")
 
     # Test correspondence table access
     assert mixeq.correspondence_table is not None
@@ -528,23 +528,23 @@ def test_at10_4x4_mixeq_procedure_generation():
     lib_call = mixeq.build_lib_module_call()
 
     assert isinstance(lib_call, str)
-    assert "LIBEQ := LIB: LIBEQ ::" in lib_call
+    assert "LIBEQ := LIB: LIBRARY2 ::" in lib_call
     assert "EDIT 0" in lib_call
     assert "NMIX" in lib_call
-    assert "DEPL LIB: DRAGON FIL: LIBEQ" in lib_call
-    assert "MIXS LIB: MICROLIB FIL: LIBEQ" in lib_call
+    assert "CATL" in lib_call
+    assert "DEPL LIB: DRAGON FIL: dummy_alias" in lib_call
 
     # Verify COMB statements for zone expansion
     # Each zone-only mix should duplicate to multiple pin-based mixes
-    comb_pattern = re.compile(r'MIX\s+(\d+)\s+COMB\s+(\d+)\s+1\.0', re.MULTILINE | re.DOTALL)
+    comb_pattern = re.compile(r'MIX\s+(\d+)\s+(\d+)', re.MULTILINE)
     comb_matches = comb_pattern.findall(lib_call)
 
-    assert len(comb_matches) > 0, "Should have COMB statements for mix duplication"
+    assert len(comb_matches) > 0, "Should have MIX <new_idx> <old_idx> statements for mix duplication"
 
     # Verify specific mapping: 50UOX_zone_4 (idx 4) expands to multiple target indices
     # From reference: 4→34, 4→38, 4→42, skip index mapping to itself
     source_idx_4_targets = [int(target) for target, source in comb_matches if int(source) == 4]
-    assert 4 not in source_idx_4_targets, "Should not have COMB mapping 4→4 (no self-mapping)"
+    assert 4  in source_idx_4_targets, "Should map 4→4 (self-mapping as LIBRARY2 copied to LIBEQ)"
     assert 34 in source_idx_4_targets, "Should map 4→34"
     assert 38 in source_idx_4_targets, "Should map 4→38"
     assert 42 in source_idx_4_targets, "Should map 4→42"
@@ -560,7 +560,7 @@ def test_at10_4x4_mixeq_procedure_generation():
         content = f.read()
 
     assert "PROCEDURE MIXEQL1L2" in content
-    assert "LIBEQ := LIB: LIBEQ ::" in content
+    assert "LIBEQ := LIB: LIBRARY2 ::" in content
 
     print("  -> test_at10_4x4_mixeq_procedure_generation PASSED")
     print(f"     Generated MIXEQ procedure with {len(comb_matches)} COMB statements")
@@ -723,12 +723,12 @@ def test_at10_4x4_mixeq_verification_with_tdt():
     assembly.enforce_material_mixture_indices_from_tdt(tdt_l2, step_name="FLUXL2")
 
     # Create MIXEQ for FLUXL1 → FLUXL2 transition
-    mixeq = MIXEQ(assembly, "LIBEQ", "FLUXL1", "FLUXL2")
+    mixeq = MIXEQ(assembly, "LIBRARY2", "LIBEQ", "FLUXL1", "FLUXL2", draglib_alias="dummy_alias")
 
     # Verify correspondence table structure
     table = mixeq.correspondence_table
     print(f"Correspondence table has {len(table)} entries")
-    assert len(table) == 42, f"Should have 42 correspondences (30 fuel mixtures from L1 expanded to 42 in L2)"
+    assert len(table) == 45, f"Should have 45 correspondences (30 fuel mixtures from L1 expanded to 42 in L2 + 3 structural), got {len(table)}"
 
     # Count expansions: how many times does each source index appear?
     source_idx_counts = {}
@@ -755,10 +755,10 @@ def test_at10_4x4_mixeq_verification_with_tdt():
     # Generate and verify LIB call content
     lib_call = mixeq.build_lib_module_call()
 
-    # Count COMB statements (45 total minus 3 structural = 42 duplications)
-    # but the first 30 zones are mapped to the same index in L2, so only 12 COMB statements for the expansions 
-    comb_count = lib_call.count("COMB")
-    assert comb_count == 12, f"Expected 12 COMB statements, got {comb_count}"
+    # Count MIX statements (should match number of correspondences)
+    # Use regex to match actual MIX statements, not MIX in comments
+    mix_statements = re.findall(r'^\s+MIX\s+\d+\s+\d+', lib_call, re.MULTILINE)
+    assert len(mix_statements) == 45, f"Expected 45 MIX statements, got {len(mix_statements)}"
 
     print("  -> test_at10_4x4_mixeq_verification_with_tdt PASSED")
     print(f"     Verified {len(table)} correspondences from real TDT indices")
@@ -784,7 +784,7 @@ def test_at10_4x4_full_case_mixeq_generation():
         case_name="AT10_4x4_mix_splitting",
         call_glow=False,
         output_path=output_dir,
-        draglibs_names_to_alias={"dummy_draglib_name": "dummy_alias",},
+        draglib_name_to_alias={"dummy_draglib_name": "dummy_alias",},
         config_yamls={
             "MATS": AT10_4x4_COMPOSITIONS_YAML,
             "GEOM": AT10_4x4_GEOMETRY_YAML,
@@ -812,7 +812,7 @@ def test_at10_4x4_full_case_mixeq_generation():
         assert "PROCEDURE" in mixeq_content
         assert "LIB:" in mixeq_content
         assert "EDIT 0" in mixeq_content
-        assert "COMB" in mixeq_content
+        assert "CATL" in mixeq_content
 
     # Check main x2m file includes MIXEQ call
     x2m_path = procedure_files["x2m"]
@@ -872,7 +872,7 @@ def test_at10_4x4_mixeq_comment_block():
     assembly.enforce_material_mixture_indices_from_tdt(tdt_l2, step_name="FLUXL2")
 
     # Generate MIXEQ
-    mixeq = MIXEQ(assembly, "LIBEQ", "FLUXL1", "FLUXL2")
+    mixeq = MIXEQ(assembly, "LIBRARY2", "LIBEQ", "FLUXL1", "FLUXL2", draglib_alias="dummy_alias")
 
     # Test comment block generation
     comment_block = mixeq.build_mix_index_comment_block()
@@ -934,7 +934,7 @@ def test_at10_4x4_mixeq_max_mix_validation():
     assembly.enforce_material_mixture_indices_from_tdt(tdt_l2, step_name="FLUXL2")
 
     # Create MIXEQ and test max mix count
-    mixeq = MIXEQ(assembly, "LIBEQ", "FLUXL1", "FLUXL2")
+    mixeq = MIXEQ(assembly, "LIBRARY2", "LIBEQ", "FLUXL1", "FLUXL2", draglib_alias="dummy_alias")
     max_mix = mixeq._determine_max_mix_count()
 
     assert max_mix == 45, f"Max mix should be 45 (from FLUXL2), got {max_mix}"
@@ -1000,13 +1000,12 @@ def test_at10_4x4_structural_mix_preservation():
     print("     Structural mixes maintain 1-to-1 correspondence")
 
 
-def test_at10_4x4_mixeq_comb_statements():
+def test_at10_4x4_mixeq_mix_statements():
     """
-    Test that MIXEQ generates correct COMB statements for mix duplication.
+    Test that MIXEQ generates correct MIX statements for mix duplication.
 
-    Each COMB statement should have format:
-      MIX <target_idx>
-        COMB <source_idx> 1.0
+    Each MIX statement should have format:
+      MIX <target_idx> <source_idx>
 
     This test verifies specific examples from the reference correspondence.
     """
@@ -1048,46 +1047,40 @@ def test_at10_4x4_mixeq_comb_statements():
     assembly.enforce_material_mixture_indices_from_tdt(tdt_l2, step_name="FLUXL2")
 
     # Create MIXEQ
-    mixeq = MIXEQ(assembly, "LIBEQ", "FLUXL1", "FLUXL2")
+    mixeq = MIXEQ(assembly, "LIBRARY2", "LIBEQ", "FLUXL1", "FLUXL2", draglib_alias="dummy_alias")
     lib_call = mixeq.build_lib_module_call()
 
-    # Parse COMB statements using regex
-    # Pattern: MIX <target> ... COMB <source> 1.0
-    comb_blocks = re.finditer(
-        r'MIX\s+(\d+)\s+COMB\s+(\d+)\s+1\.0',
-        lib_call,
-        re.MULTILINE | re.DOTALL
-    )
-
-    comb_dict = {}  # {(source, target): True}
-    for match in re.finditer(r'MIX\s+(\d+)\s+COMB\s+(\d+)\s+1\.0', lib_call):
+    # Parse MIX statements using regex
+    # Pattern: MIX <target> <source>
+    mix_dict = {}  # {(source, target): True}
+    for match in re.finditer(r'MIX\s+(\d+)\s+(\d+)', lib_call):
         target_idx = int(match.group(1))
         source_idx = int(match.group(2))
-        comb_dict[(source_idx, target_idx)] = True
+        mix_dict[(source_idx, target_idx)] = True
 
-    # Verify specific COMB statements from reference TDT
+    # Verify specific MIX statements from reference TDT
     # 50UOX_zone_4 (idx 4) → 50UOX_zone_4_pin_7 (idx 4)
-    assert (4, 4) not in comb_dict, "No COMB 4 → 4, mapping index to itself should be skipped"
+    assert (4, 4) in mix_dict, "MIX 4 → 4, mapping index to itself to copy from LIBRARY2 to LIBEQ"
 
     # 50UOX_zone_4 (idx 4) → 50UOX_zone_4_pin_10 (idx 34)
-    assert (4, 34) in comb_dict, "Should have COMB 4 → 34"
+    assert (4, 34) in mix_dict, "Should have MIX 4 → 34"
 
     # 50UOX_zone_4 (idx 4) → 50UOX_zone_4_pin_9 (idx 38)
-    assert (4, 38) in comb_dict, "Should have COMB 4 → 38"
+    assert (4, 38) in mix_dict, "Should have MIX 4 → 38"
 
     # 50UOX_zone_4 (idx 4) → 50UOX_zone_4_pin_8 (idx 42)
-    assert (4, 42) in comb_dict, "Should have COMB 4 → 42"
+    assert (4, 42) in mix_dict, "Should have MIX 4 → 42"
 
     # 24UOX_zone_1 (idx 33) → 24UOX_zone_1_pin_1 (idx 33)
-    assert (33, 33) not in comb_dict, "Should not have COMB 33 → 33, mapping index to itself should be skipped"
+    assert (33, 33) in mix_dict, "Should have MIX 33 → 33, mapping index to copy from LIBRARY2 to LIBEQ"
 
-    # Structural mixes should NOT have COMB statements (they're 1-to-1, skipped)
-    assert (1, 1) not in comb_dict, "COOLANT 1→1 should be skipped (no COMB needed)"
-    assert (2, 2) not in comb_dict, "CLAD 2→2 should be skipped (no COMB needed)"
-    assert (3, 3) not in comb_dict, "GAP 3→3 should be skipped (no COMB needed)"
+    # Structural mixes should NOT have MIX statements (they're 1-to-1, skipped)
+    assert (1, 1) in mix_dict, "COOLANT 1→1"
+    assert (2, 2) in mix_dict, "CLAD 2→2"
+    assert (3, 3) in mix_dict, "GAP 3→3"
 
-    print("  -> test_at10_4x4_mixeq_comb_statements PASSED")
-    print(f"     Verified {len(comb_dict)} COMB statements")
+    print("  -> test_at10_4x4_mixeq_mix_statements PASSED")
+    print(f"     Verified {len(mix_dict)} MIX statements")
     print("     Confirmed specific reference mappings (4→34, 4→38, 4→42)")
 
 
@@ -1172,4 +1165,4 @@ if __name__ == "__main__":
     test_at10_4x4_mixeq_comment_block()
     test_at10_4x4_mixeq_max_mix_validation()
     test_at10_4x4_structural_mix_preservation()
-    test_at10_4x4_mixeq_comb_statements()
+    test_at10_4x4_mixeq_mix_statements()

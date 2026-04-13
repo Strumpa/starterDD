@@ -1983,7 +1983,7 @@ class MIXEQ:
         mixeq.write_to_c2m("./procs", "MIXEQ_SSH_to_L2")
     """
 
-    def __init__(self, assembly_model, lib_name, from_step, to_step):
+    def __init__(self, assembly_model, input_lib_name, output_lib_name, from_step, to_step, draglib_alias):
         """
         Initialize MIXEQ procedure generator.
 
@@ -1993,15 +1993,23 @@ class MIXEQ:
             Assembly with mix state history from multiple steps.
             Must have run different numbering strategies and recorded
             the state history for both from_step and to_step.
+        input_lib_name : str
+            CLE-2000 variable name for the input library (e.g., "LIBRARY2)
+        output_lib_name : str
+            CLE-2000 variable name for the output library (e.g., "LIBEQ")
         from_step : str
             Source step name (e.g., "SSH") - typically uses by_material strategy
         to_step : str
             Target step name (e.g., "FLUX_L2") - typically uses by_pin strategy
+        draglib_alias : str
+            Alias for the draglib to be used in MIXEQ procedures : used to recover depletion chain information.
         """
         self.assembly = assembly_model
-        self.lib_name = lib_name
+        self.input_lib_name = input_lib_name
+        self.output_lib_name = output_lib_name
         self.from_step = from_step
         self.to_step = to_step
+        self.draglib_alias = draglib_alias
 
         # Get correspondence table using existing method
         try:
@@ -2086,28 +2094,24 @@ class MIXEQ:
 
         # Start LIB: call in library edit mode
         call = (
-            f"{self.lib_name} := LIB: {self.lib_name} ::\n" # Library edit mode - read existing microlib
+            f"{self.output_lib_name} := LIB: {self.input_lib_name} ::\n" # Library edit mode - read existing microlib
             "  EDIT 0\n"  
             f"  NMIX {max_mix}\n"
-            f"  DEPL LIB: DRAGON FIL: {self.lib_name}\n"
-            f"  MIXS LIB: MICROLIB FIL: {self.lib_name}\n"
+            f"  DEPL LIB: DRAGON FIL: {self.draglib_alias}\n"
+            "   CATL\n"
             "\n"
         )
 
-        # Generate COMB statements for mixture duplication
+        # Generate MIX statements for mixture duplication and copying into the new library
+        # Non-fuel isotopes are now included in the correspondence table via build_mixeq_correspondence_table()
+
         # Sort by target index to ensure consistent output
         sorted_table = sorted(self.correspondence_table, key=lambda x: x[3])
 
         for from_name, to_name, from_idx, to_idx in sorted_table:
-            if from_idx == to_idx:
-                # No duplication needed, but we can still add a comment for clarity
-                call += f"  ! {from_name} → {to_name}\n"
-                continue
-            else:
-                call += f"  ! {from_name} → {to_name}\n"
-                call += f"  MIX {to_idx}\n"
-                call += f"    COMB {from_idx} 1.0\n"
-                call += "\n"
+            call += f"  ! {from_name} → {to_name}\n"
+            call += f"  MIX {to_idx} {from_idx}\n"
+            call += "\n"
 
         call += ";"
         return call
@@ -2200,9 +2204,9 @@ class MIXEQ:
             "* --------------------------------\n"
             "*    INPUT & OUTPUT PARAMETERS\n"
             "* --------------------------------\n"
-            f"PARAMETER {self.lib_name} ::\n"
+            f"PARAMETER {self.input_lib_name} {self.output_lib_name} ::\n"
             "       EDIT 0\n"
-            f"           ::: LINKED_LIST {self.lib_name} ;\n"
+            f"           ::: LINKED_LIST {self.input_lib_name} {self.output_lib_name} ;\n"
             "   ;\n"
             "\n"
             "* --------------------------------\n"

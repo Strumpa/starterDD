@@ -1138,6 +1138,7 @@ class CartesianAssemblyModel:
             "strategy": self.current_mix_numbering_strategy,
             "mix_names": list(self.fuel_material_mixture_names),  # Direct name list
             "tdt_indices": {},  # Populated after TDT enforcement
+            "non_fuel_indices": {},  # Populated after TDT enforcement (1-to-1 material mappings)
             "tdt_enforced": False,  # Flag
             "step_name": None,  # Set during TDT enforcement
             "pin_indices": {},  # (row, col) → pin_idx for by_pin
@@ -1394,7 +1395,11 @@ class CartesianAssemblyModel:
         # Record TDT indices in the current mix state snapshot for per-step tracking
         if self.mix_state_history:
             current_state = self.mix_state_history[-1]
-            current_state["tdt_indices"] = dict(self.material_mixtures_dict)  # Copy final indices
+            # Combine fuel and non-fuel indices into tdt_indices
+            all_tdt_indices = dict(self.material_mixtures_dict)
+            all_tdt_indices.update(non_fuel)
+            current_state["tdt_indices"] = all_tdt_indices
+            current_state["non_fuel_indices"] = dict(non_fuel)  # Store non-fuel indices for MIXEQ
             current_state["tdt_enforced"] = True
             if step_name:
                 current_state["step_name"] = step_name
@@ -1589,6 +1594,16 @@ class CartesianAssemblyModel:
             for from_name in from_state["mix_names"]:
                 if from_name in from_tdt and from_name in to_tdt:
                     table.append((from_name, from_name, from_tdt[from_name], to_tdt[from_name]))
+
+            # Add non-fuel material entries (1-to-1 by name, indices may differ between steps)
+            from_non_fuel = from_state.get("non_fuel_indices", {})
+            to_non_fuel = to_state.get("non_fuel_indices", {})
+
+            for non_fuel_name, from_idx in from_non_fuel.items():
+                to_idx = to_non_fuel.get(non_fuel_name)
+                if from_idx is not None and to_idx is not None:
+                    table.append((non_fuel_name, non_fuel_name, from_idx, to_idx))
+
             return table
 
         # Different strategies - use recorded correspondence
@@ -1611,6 +1626,15 @@ class CartesianAssemblyModel:
                 to_idx = to_tdt.get(to_name)
                 if to_idx is not None:
                     table.append((from_name, to_name, from_idx, to_idx))
+
+        # Add non-fuel material entries (1-to-1 by name, indices may differ between steps)
+        from_non_fuel = from_state.get("non_fuel_indices", {})
+        to_non_fuel = to_state.get("non_fuel_indices", {})
+
+        for non_fuel_name, from_idx in from_non_fuel.items():
+            to_idx = to_non_fuel.get(non_fuel_name)
+            if from_idx is not None and to_idx is not None:
+                table.append((non_fuel_name, non_fuel_name, from_idx, to_idx))
 
         if not table:
             print(f"[WARNING] No valid correspondences found between '{from_step}' and '{to_step}' "
