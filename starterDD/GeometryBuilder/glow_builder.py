@@ -2205,7 +2205,10 @@ def _build_cross_aware_discretization_rects(
     n_cols, n_rows, cross_corner, ctrl,
     unaffected_side_h,
     unaffected_side_v,
-    unaffected_corner,
+    corner_bl,
+    corner_br,
+    corner_tl,
+    corner_tr,
     narrow_gap_splits_h,
     narrow_gap_splits_v,
     moderator_at_cross_corner_splits,
@@ -2247,8 +2250,14 @@ def _build_cross_aware_discretization_rects(
         ``(nx, ny)`` for unaffected horizontal side strips.
     unaffected_side_v : tuple[int, int]
         ``(nx, ny)`` for unaffected vertical side strips.
-    unaffected_corner : tuple[int, int]
-        ``(nx, ny)`` for unaffected corner rectangles.
+    corner_bl : tuple[int, int]
+        ``(nx, ny)`` for bottom-left corner rectangle.
+    corner_br : tuple[int, int]
+        ``(nx, ny)`` for bottom-right corner rectangle.
+    corner_tl : tuple[int, int]
+        ``(nx, ny)`` for top-left corner rectangle.
+    corner_tr : tuple[int, int]
+        ``(nx, ny)`` for top-right corner rectangle.
     narrow_gap_splits_h : tuple[int, int]
         ``(nx, ny)`` for horizontal narrow gap strips.
     narrow_gap_splits_v : tuple[int, int]
@@ -2321,7 +2330,7 @@ def _build_cross_aware_discretization_rects(
         rects.append((
             Rectangle(height=y0, width=x0,
                       center=(x0 / 2.0, y0 / 2.0, 0.0)),
-            unaffected_corner,
+            corner_bl,
         ))
 
     # ---- Bottom-right corner ----
@@ -2339,7 +2348,7 @@ def _build_cross_aware_discretization_rects(
         rects.append((
             Rectangle(height=y0, width=(ap - x1),
                       center=((x1 + ap) / 2.0, y0 / 2.0, 0.0)),
-            unaffected_corner,
+            corner_br,
         ))
 
     # ---- Top-left corner ----
@@ -2357,7 +2366,7 @@ def _build_cross_aware_discretization_rects(
         rects.append((
             Rectangle(height=(ap - y1), width=x0,
                       center=(x0 / 2.0, (y1 + ap) / 2.0, 0.0)),
-            unaffected_corner,
+            corner_tl,
         ))
 
     # ---- Top-right corner ----
@@ -2375,7 +2384,7 @@ def _build_cross_aware_discretization_rects(
         rects.append((
             Rectangle(height=(ap - y1), width=(ap - x1),
                       center=((x1 + ap) / 2.0, (y1 + ap) / 2.0, 0.0)),
-            unaffected_corner,
+            corner_tr,
         ))
 
     # ==================================================================
@@ -3033,7 +3042,10 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
             ctrl.center, ctrl,
             unaffected_side_h=unaffected_side_h,
             unaffected_side_v=unaffected_side_v,
-            unaffected_corner=corner_bl if has_asym_gap_splits else box_discretization_config.corner_splits,
+            corner_bl=corner_bl,
+            corner_br=corner_br,
+            corner_tl=corner_tl,
+            corner_tr=corner_tr,
             narrow_gap_splits_h=narrow_gap_splits_h,
             narrow_gap_splits_v=narrow_gap_splits_v,
             moderator_at_cross_corner_splits=cc_splits,
@@ -3044,7 +3056,8 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
         mode_str = "asymmetric gaps" if has_asym_gap_splits else "symmetric"
         print(f"discretize_box [cross-aware, {mode_str}]: narrow_gap={narrow_gap}, "
               f"moderator_at_cross_corner={cc_splits}, stub={stub}, "
-              f"unaffected_side_h={unaffected_side_h}, unaffected_corner={corner_bl if has_asym_gap_splits else box_discretization_config.corner_splits}")
+              f"unaffected_side_h={unaffected_side_h}, "
+              f"corner_bl={corner_bl}, corner_br={corner_br}, corner_tl={corner_tl}, corner_tr={corner_tr}")
 
     splitting_faces = []
     for rect, (nx, ny) in rectangles_and_splits:

@@ -13,7 +13,7 @@ from typing import Optional, Union
 
 # 2g collapsed at 0.625 eV
 
-ene2g = [1.1E-11, 6.25E-7, 1.9640E+1]
+ene2g = [1.1E-10, 6.25E-7, 1.9640E+1]
 
 
 # 26g condensed from SHEM295 : used in 2nd level DRAGON flux calculations
@@ -400,6 +400,44 @@ def _get_pin_pitch(assembly_model) -> float:
         "Cannot determine pin pitch from the assembly model.  "
         "Ensure 'pin_pitch' is set in the geometry description YAML."
     )
+
+
+def _get_lattice_symmetry(assembly_model) -> Optional[str]:
+    """Determine lattice symmetry type from assembly model.
+
+    Returns:
+        One of: "anti-diagonal", "main-diagonal", or None if no symmetry detected.
+    """
+    if hasattr(assembly_model, 'check_diagonal_symmetry'):
+        return assembly_model.check_diagonal_symmetry()
+    return None
+
+
+def _compute_gap_layout(symmetry_type: Optional[str], gap_wide: float,
+                        gap_narrow: float) -> dict:
+    """Compute per-corner gap distribution based on lattice symmetry.
+
+    Args:
+        symmetry_type: One of "anti-diagonal", "main-diagonal", or None.
+        gap_wide: Wide gap width.
+        gap_narrow: Narrow gap width.
+
+    Returns:
+        Dictionary mapping corner names to gap widths.
+        Keys: "NW" (north-west), "NE" (north-east), "SW" (south-west), "SE" (south-east)
+    """
+    if symmetry_type == "anti-diagonal":
+        # For anti-diagonal symmetric assemblies (e.g., GE14):
+        # Wide-wide at north-west, narrow-narrow at south-east
+        return {"NW": gap_wide, "NE": gap_narrow, "SW": gap_narrow, "SE": gap_wide}
+    elif symmetry_type == "main-diagonal":
+        # For main-diagonal (transpose) symmetric assemblies (e.g., ATRIUM10):
+        # Wide-wide at south-west, narrow-narrow at north-east
+        return {"SW": gap_wide, "NW": gap_narrow, "SE": gap_narrow, "NE": gap_wide}
+    else:
+        # For non-symmetric or symmetric (gap_wide ≈ gap_narrow) cases:
+        # uniform gap on all sides
+        return {"NW": gap_wide, "NE": gap_wide, "SW": gap_wide, "SE": gap_wide}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -880,7 +918,11 @@ class S2_Lattice:
         ny = len(assembly.lattice)
         nx = len(assembly.lattice[0])
         pin_pitch = _get_pin_pitch(assembly)
-        
+
+        # Store original (unpadded) dimensions for center calculation
+        nx_orig = nx
+        ny_orig = ny
+
         # Build universe map
         universe_map = []
         for j in range(ny):
@@ -896,27 +938,81 @@ class S2_Lattice:
                     # DummyPinModel or unknown → empty (filled with coolant)
                     row.append(empty_universe_name)
             universe_map.append(row)
-        
-        # Pad the lattice with one row/column of empty universes on each
-        # side to account for the coolant strip between the outermost
-        # fuel pins and the channel box inner wall.
-        padded_nx = nx + 2
-        padded_ny = ny + 2
-        empty_row = [empty_universe_name] * padded_nx
-        padded_map = [list(empty_row)]
+
+        # ── Asymmetric lattice padding ──────────────────────────────
+        # Compute per-side padding based on gap configuration and lattice symmetry
+
+        # Extract gap information for padding computation
+        gap_wide = getattr(assembly, 'gap_wide', 0.0) or 0.0
+        gap_narrow = getattr(assembly, 'gap_narrow', 0.0) or 0.0
+        cbt = getattr(assembly, 'channel_box_thickness', 0.0) or 0.0
+        channel_box_inner_side = getattr(assembly, 'channel_box_inner_side', None)
+
+        # Compute intra-assembly coolant width
+        if channel_box_inner_side is not None:
+            intra_coolant = (channel_box_inner_side - nx * pin_pitch) / 2.0
+        else:
+            intra_coolant = 0.0
+
+        # Extract translation offsets to determine lattice positioning
+        translation_offset_x = getattr(assembly, 'translation_offset_x', None)
+        translation_offset_y = getattr(assembly, 'translation_offset_y', None)
+
+        if translation_offset_x is None:
+            translation_offset_x = gap_wide + cbt + intra_coolant
+        if translation_offset_y is None:
+            translation_offset_y = gap_narrow + cbt + intra_coolant
+
+        # Determine lattice symmetry for gap layout
+        lattice_symmetry = None
+        if hasattr(assembly, 'check_diagonal_symmetry'):
+            lattice_symmetry = assembly.check_diagonal_symmetry()
+
+        # Compute per-side padding
+        # Each padding value represents padding needed on that side (in lattice cells)
+        # For simplicity, we use 1 cell of padding on each side for now.
+        # In the future, this can be made more sophisticated based on actual gap distances.
+        pad_north = 1
+        pad_south = 1
+        pad_east = 1
+        pad_west = 1
+
+        # Build padded universe map with asymmetric padding
+        padded_nx = nx + pad_west + pad_east
+        padded_ny = ny + pad_north + pad_south
+
+        padded_map = []
+
+        # Add north padding rows
+        for _ in range(pad_north):
+            padded_map.append([empty_universe_name] * padded_nx)
+
+        # Add universe rows with west/east padding
         for row in universe_map:
-            padded_map.append([empty_universe_name] + row + [empty_universe_name])
-        padded_map.append(list(empty_row))
+            padded_row = [empty_universe_name] * pad_west + row + [empty_universe_name] * pad_east
+            padded_map.append(padded_row)
+
+        # Add south padding rows
+        for _ in range(pad_south):
+            padded_map.append([empty_universe_name] * padded_nx)
+
         universe_map = padded_map
         nx = padded_nx
         ny = padded_ny
-        
+
         # Compute lattice center: lower-left assembly corner at (0,0),
         # everything in the +x/+y quadrant.
         assembly_pitch = getattr(assembly, 'assembly_pitch', nx * pin_pitch)
-        center_x = assembly_pitch / 2.0
-        center_y = assembly_pitch / 2.0
-        
+
+        # Lattice center in lattice-local coordinates (UNPADDED dimensions)
+        # The offsets position the actual fuel lattice, not the padded container.
+        lattice_center_x_local = (nx_orig * pin_pitch) / 2.0
+        lattice_center_y_local = (ny_orig * pin_pitch) / 2.0
+
+        # Lattice center in assembly coordinates (account for off-centered positioning)
+        center_x = lattice_center_x_local + translation_offset_x
+        center_y = lattice_center_y_local + translation_offset_y
+
         return cls(
             name=lattice_name,
             center_x=center_x,
@@ -1028,12 +1124,12 @@ class S2_ChannelGeometry:
                             inner_water_material: str = "moderator",
                             outer_water_material: str = "coolant"):
         """Create channel geometry from assembly model parameters.
-        
+
         Handles:
             - Channel box inner/outer surfaces with optional corner radius
             - Assembly boundary surface
             - Water rod surface/cell overlays (circular or square)
-        
+
         Expects assembly_model to have attributes like:
             - assembly_pitch
             - channel_box_inner_side (derived: assembly_pitch - 2*channel_box_thickness - 2*gap_wide)
@@ -1044,37 +1140,68 @@ class S2_ChannelGeometry:
         """
         am = assembly_model
         pin_pitch = _get_pin_pitch(am)
-        
-        # Compute center: lower-left assembly corner at (0,0),
+
+        # Compute dimensions: lower-left assembly corner at (0,0),
         # everything in the +x/+y quadrant.
         nx = len(am.lattice[0])
         ny = len(am.lattice)
         assembly_pitch = getattr(am, 'assembly_pitch', nx * pin_pitch)
-        cx = assembly_pitch / 2.0
-        cy = assembly_pitch / 2.0
-        
+
+        # ── Extract gap information and translation offsets (BEFORE center computation) ──
+        # Extract both gap_wide and gap_narrow for asymmetric gap support
+        gap_wide = getattr(am, 'gap_wide', 0.0) or 0.0
+        gap_narrow = getattr(am, 'gap_narrow', 0.0) or 0.0
+        cbt = getattr(am, 'channel_box_thickness', 0.0) or 0.0
+        channel_box_inner_side = getattr(am, 'channel_box_inner_side', None)
+
+        # Compute intra-assembly coolant width
+        if channel_box_inner_side is not None:
+            intra_coolant = (channel_box_inner_side - nx * pin_pitch) / 2.0
+        else:
+            intra_coolant = 0.0
+
+        # Extract translation offsets (for asymmetric positioning)
+        translation_offset_x = getattr(am, 'translation_offset_x', None)
+        translation_offset_y = getattr(am, 'translation_offset_y', None)
+
+        # Fallback: compute translation offsets from gap and geometry
+        if translation_offset_x is None:
+            translation_offset_x = gap_wide + cbt + intra_coolant
+        if translation_offset_y is None:
+            translation_offset_y = gap_narrow + cbt + intra_coolant
+
+        # ── Compute channel box center accounting for asymmetric gaps ──
+        # Channel box center should match the lattice center (lattice is centered within channel box).
+        # Use unpadded lattice dimensions to compute the center.
+        channel_center_x_local = (nx * pin_pitch / 2.0)
+        channel_center_y_local = (ny * pin_pitch / 2.0)
+
+        # Channel box center in assembly coordinates (apply translation offsets)
+        # This ensures the channel box shifts with the lattice to maintain equal intra-assembly coolant on all sides
+        cx = channel_center_x_local + translation_offset_x
+        cy = channel_center_y_local + translation_offset_y
+
         # ── Channel box dimensions ──────────────────────────────
         # The DragonModel (CartesianAssemblyModel) defines:
         #   - channel_box_thickness       (from YAML)
         #   - corner_inner_radius_of_curvature  (from YAML)
         #   - channel_box_inner_side      (derived: assembly_pitch - 2*cbt - 2*gap_wide)
         # We derive the Serpent2 half-widths from these.
-        thickness = getattr(am, 'channel_box_thickness', None)
+        thickness = cbt  # Already extracted above
         cr_inner = getattr(am, 'corner_inner_radius_of_curvature', 0.0) or 0.0
-        
+
         # Inner half-width from channel_box_inner_side
-        channel_box_inner_side = getattr(am, 'channel_box_inner_side', None)
         if channel_box_inner_side is not None:
             inner_hw = channel_box_inner_side / 2.0
         else:
             inner_hw = nx * pin_pitch / 2.0 + 0.05  # small gap estimate
-        
+
         # Outer half-width = inner + thickness
         if thickness is not None:
             outer_hw = inner_hw + thickness
         else:
             outer_hw = inner_hw + 0.2  # default 2mm thickness
-        
+
         # Outer corner radius = inner corner radius + wall thickness.
         # Only apply rounding when the inner surface has rounded corners;
         # sharp inner corners (cr_inner == 0) → sharp outer corners.
@@ -1082,28 +1209,19 @@ class S2_ChannelGeometry:
             cr_outer = cr_inner + (thickness if thickness is not None else 0.0)
         else:
             cr_outer = 0.0
-        
+
         assembly_hp = getattr(am, 'assembly_pitch', None)
         if assembly_hp is None:
             assembly_hp = outer_hw + 0.5  # default gap
         else:
             assembly_hp = assembly_hp / 2.0
-        
+
+        # Determine lattice symmetry type for gap layout mapping
+        lattice_symmetry = None
+        if hasattr(am, 'check_diagonal_symmetry'):
+            lattice_symmetry = am.check_diagonal_symmetry()
+
         # ── Extract water rod geometry ──────────────────────────────
-        #
-        # Compute the translation offset (gap + cbt + intra-assembly
-        # coolant strip), mirroring glow_builder.build_full_assembly_geometry.
-        gap = getattr(am, 'gap_wide', 0.0) or 0.0
-        cbt = getattr(am, 'channel_box_thickness', 0.0) or 0.0
-        channel_box_inner_side = getattr(am, 'channel_box_inner_side', None)
-        if channel_box_inner_side is not None:
-            intra_coolant = (channel_box_inner_side - nx * pin_pitch) / 2.0
-        else:
-            intra_coolant = 0.0
-        translation = getattr(am, 'translation_offset', None)
-        if translation is None:
-            translation = gap + cbt + intra_coolant
-        
         # Map Dragon-convention material names (set by
         # water_rod_model.set_materials) to the Serpent2 names chosen
         # by the caller.
@@ -1112,21 +1230,19 @@ class S2_ChannelGeometry:
             "CLAD": channel_box_material,
             "COOLANT": outer_water_material,
         }
-        
+
         wr_list = []
         for wr in getattr(am, 'water_rods', []):
             wr_info = {"rod_id": getattr(wr, 'rod_ID', 'WR')}
-            # Water rod centers in the YAML are already in cm in the
-            # lattice-local coordinate system.  Apply the same
-            # translation used in glow_builder to place them in the
-            # assembly coordinate system (lower-left corner at 0,0).
+            # Water rod centers in the YAML are already in assembly coordinates.
+            # Use them directly without any translation offset (translation offset
+            # is only for lattice positioning, not water rod positioning).
             center = getattr(wr, 'center', None)
             if center is not None:
-                wr_info["center"] = (center[0] + translation,
-                                     center[1] + translation)
+                wr_info["center"] = (center[0], center[1])
             else:
                 wr_info["center"] = (cx, cy)
-            
+
             # Circular water rod
             inner_r = getattr(wr, 'inner_radius', None)
             outer_r = getattr(wr, 'outer_radius', None)
@@ -1134,7 +1250,7 @@ class S2_ChannelGeometry:
                 wr_info["type"] = "circular"
                 wr_info["inner_radius"] = inner_r
                 wr_info["outer_radius"] = outer_r
-            
+
             # Square water rod (moderator box)
             inner_side = getattr(wr, 'moderator_box_inner_side', None)
             outer_side = getattr(wr, 'moderator_box_outer_side', None)
@@ -1142,7 +1258,7 @@ class S2_ChannelGeometry:
                 wr_info["type"] = "square"
                 wr_info["inner_half_side"] = inner_side / 2.0
                 wr_info["outer_half_side"] = outer_side / 2.0
-            
+
             # Materials — map Dragon names to Serpent2 names
             raw_mod = getattr(wr, 'moderator_material_name', None)
             raw_wall = getattr(wr, 'cladding_material_name', None)
@@ -1150,10 +1266,10 @@ class S2_ChannelGeometry:
                 raw_mod, raw_mod if raw_mod else inner_water_material)
             wr_info["wall_material"] = dragon_to_s2.get(
                 raw_wall, raw_wall if raw_wall else channel_box_material)
-            
+
             if "type" in wr_info:
                 wr_list.append(wr_info)
-        
+
         return cls(
             center_x=cx,
             center_y=cy,
@@ -1205,8 +1321,12 @@ class S2_ChannelGeometry:
             lines.append(f"surf {s_outer}  sqc  {self.cx:.6f}  {self.cy:.6f}  "
                         f"{self.outer_hw:.6f}")
         
-        # Assembly boundary
-        lines.append(f"surf {s_bndry}  sqc  {self.cx:.6f}  {self.cy:.6f}  "
+        # Assembly boundary - ALWAYS centered at assembly center, NOT offset
+        # The boundary surface defines the fixed assembly pitch, while internal
+        # geometry (channel box, lattice) is offset to account for asymmetric gaps.
+        assembly_center_x = self.assembly_hp  # assembly_pitch / 2.0
+        assembly_center_y = self.assembly_hp  # assembly_pitch / 2.0
+        lines.append(f"surf {s_bndry}  sqc  {assembly_center_x:.6f}  {assembly_center_y:.6f}  "
                     f"{self.assembly_hp:.6f}")
         
         # ── Water rod surfaces ──────────────────────────────────
@@ -3588,61 +3708,34 @@ class Serpent2Model:
         pass
     
     def _build_lattice(self, lattice_name: str, empty_universe_name: str):
-        """Build the lattice card from the assembly lattice grid.
-        
-        DummyPinModel positions (water rod placeholders or vanished rods)
-        are all filled with the empty/coolant universe.  Actual water rod
-        geometry is handled by surface/cell overlays in the channel
-        geometry section (AT10/GE14 convention).
+        """Build the lattice card by delegating to S2_Lattice.from_assembly_model().
+
+        This ensures that the lattice is positioned correctly with offsets
+        accounting for asymmetric gaps. DummyPinModel positions (water rod
+        placeholders or vanished rods) are filled with the empty/coolant universe.
+        Actual water rod geometry is handled by surface/cell overlays in the
+        channel geometry section (AT10/GE14 convention).
         """
-        pin_pitch = _get_pin_pitch(self.assembly)
-        
-        universe_map = []
+        # Build pin_universe_lookup: maps pin objects to universe_name strings.
+        # This is required by S2_Lattice.from_assembly_model() to use the
+        # pre-built pin universes rather than generating default names.
+        pin_universe_lookup = {}
         for row in self.assembly.lattice:
-            univ_row = []
             for pin in row:
-                if hasattr(pin, 'fuel_material_mixtures') and hasattr(pin, 'pin_idx'):
+                if hasattr(pin, 'pin_idx'):
                     pin_idx = pin.pin_idx
                     if pin_idx in self._pin_universe_map:
-                        univ_row.append(self._pin_universe_map[pin_idx].universe_name)
-                    else:
-                        univ_row.append(empty_universe_name)
-                else:
-                    # DummyPinModel or other non-fuel position → coolant
-                    univ_row.append(empty_universe_name)
-            universe_map.append(univ_row)
-        
-        ny = len(universe_map)
-        nx = len(universe_map[0]) if ny > 0 else 0
-        
-        # Pad the lattice with one row/column of empty universes on each
-        # side to account for the coolant strip between the outermost
-        # fuel pins and the channel box inner wall.
-        padded_nx = nx + 2
-        padded_ny = ny + 2
-        empty_row = [empty_universe_name] * padded_nx
-        padded_map = [list(empty_row)]
-        for row in universe_map:
-            padded_map.append([empty_universe_name] + row + [empty_universe_name])
-        padded_map.append(list(empty_row))
-        universe_map = padded_map
-        nx = padded_nx
-        ny = padded_ny
-        
-        # Compute lattice center: lower-left assembly corner at (0,0),
-        # everything in the +x/+y quadrant.
-        assembly_pitch = getattr(self.assembly, 'assembly_pitch', nx * pin_pitch)
-        center_x = assembly_pitch / 2.0
-        center_y = assembly_pitch / 2.0
-        
-        self.lattice = S2_Lattice(
-            name=lattice_name,
-            center_x=center_x,
-            center_y=center_y,
-            nx=nx,
-            ny=ny,
-            pitch=pin_pitch,
-            universe_map=universe_map,
+                        pin_universe_lookup[pin] = self._pin_universe_map[pin_idx].universe_name
+
+        # Delegate to S2_Lattice.from_assembly_model() which handles:
+        # - Correct lattice centering with translation offsets
+        # - Universe map construction and padding
+        # - Asymmetric gap geometry positioning
+        self.lattice = S2_Lattice.from_assembly_model(
+            self.assembly,
+            lattice_name=lattice_name,
+            pin_universe_lookup=pin_universe_lookup,
+            empty_universe_name=empty_universe_name,
         )
     
     def _build_channel_geometry(self, lattice_name: str,

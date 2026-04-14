@@ -36,7 +36,7 @@ WATER_ROD_GEOMETRY:
   type: "circular"
   inner_radius : 1.170
   outer_radius : 1.245
-  centers: [[5.2, 5.2], [7.8, 7.8]]
+  centers: [[6.32, 6.32], [8.92, 8.92]]
 
 CONTROL_CROSS_GEOMETRY:
   center: "north-west"

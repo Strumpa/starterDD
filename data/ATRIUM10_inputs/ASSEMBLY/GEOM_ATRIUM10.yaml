@@ -36,4 +36,4 @@ WATER_ROD_GEOMETRY:
   type: "square"
   inner_side : 3.34
   outer_side : 3.5
-  centers: [[7.1225, 7.1225]]
+  centers: [[8.2675, 8.2675]]
