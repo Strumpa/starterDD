@@ -1,6 +1,7 @@
 ## Some helpful functions to deal with GLOW geometry building
 # Author : R. Guasch
 # Date : 04/02/2026
+# Updated on 14/04/2026 to support part-length (vanished) rods.
 # ----------------------------------------------------------------------------
 
 
@@ -530,6 +531,73 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
         # water_rod_model.center is in assembly coordinates (from YAML).
         # No translation applied - centers are already positioned within the assembly frame [0, assembly_pitch].
         cx, cy = water_rod_model.center
+        lattice.add_cell(
+            tmp_cell,
+            (cx, cy, 0.0),
+        )
+
+    return lattice
+
+def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, translation_y=0.0, calculation_step=None):
+    """
+    Create vanished rod cells from the assembly model and add them to the lattice at their centers.
+
+    Parameters:
+    -----------
+    lattice : Lattice
+        The lattice to which vanished rod cells will be added
+    assembly_model : CartesianAssemblyModel
+        The assembly model containing the vanished rod geometry parameters
+        (vanished_rods list with center, side_length, material, etc.)
+    translation_x : float
+        Unused. Vanished rod centers are already in assembly coordinates (from YAML).
+        Kept for function signature consistency with pin positioning.
+    translation_y : float
+        Unused. Vanished rod centers are already in assembly coordinates (from YAML).
+        Kept for function signature consistency with pin positioning.
+    calculation_step : CalculationStep or None
+        CalculationStep object to retrieve vanished rod sectorization options from.
+
+    """
+    from ..DDModel.DragonModel import VanishedRodModel
+
+    lattice_pin_pitch = assembly_model.pin_geometry_dict["pin_pitch"]
+
+    for rod_model in assembly_model.vanished_rods:
+        if not isinstance(rod_model, VanishedRodModel):
+            raise ValueError(
+                f"Expected VanishedRodModel in assembly_model.vanished_rods, "
+                f"but got {type(rod_model)}"
+            )
+
+        tmp_cell = RectCell(
+            name=rod_model.rod_ID,
+            height_x_width=(lattice_pin_pitch, lattice_pin_pitch),
+            center=(0.0, 0.0, 0.0),
+        )
+
+        if calculation_step is not None:
+            vr_sector_cfg = calculation_step.get_vanished_rod_sectorization()
+            if vr_sector_cfg is not None:
+                if vr_sector_cfg.base_radius is not None:
+                    vr_sector_cfg.resolve_radii_and_sectors()
+                else:
+                    # If no base_radius provided, use the default sectorization radius from the rod model (set to be equal to the cladding radius)
+                    vr_sector_cfg.resolve_radii_and_sectors(rod_model.default_sectorization_radius)
+                radii = vr_sector_cfg.radial_split_points
+                for radius in radii:
+                    tmp_cell.add_circle(radius)
+                if vr_sector_cfg.sector_config:
+                    tmp_cell.sectorize(vr_sector_cfg.sector_config.sectors, vr_sector_cfg.sector_config.angles, windmill=vr_sector_cfg.windmill)
+                n_regions = len(radii) + 1 # number of regions is number of circles + 1 (the central region inside the innermost circle)
+            else: 
+                n_regions = 1
+        tmp_cell.set_properties({
+            PropertyType.MATERIAL: ["COOLANT"]*n_regions,
+            PropertyType.MACRO: [f"MACRO_{rod_model.rod_ID}"]*n_regions,
+        })
+
+        cx, cy = rod_model.center
         lattice.add_cell(
             tmp_cell,
             (cx, cy, 0.0),
@@ -3222,7 +3290,14 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
             translation_x=translation_x, translation_y=translation_y,
             calculation_step=calculation_step,
         )
-    
+    # Build optional vanished rods : apply sectorization to vanished rods if present and add to lattice
+    if hasattr(assembly_model, "vanished_rods") and assembly_model.vanished_rods:
+        lattice = add_vanished_rods_to_lattice(
+            lattice, assembly_model,
+            translation_x=translation_x, translation_y=translation_y,
+            calculation_step=calculation_step,
+        )
+
     if assembly_box_cell is not None:
         lattice.lattice_box = assembly_box_cell
 

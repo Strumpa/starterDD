@@ -72,6 +72,8 @@ class SectorConfig:
         regions (moderator, clad, coolant).
     """
 
+    VALID_SECTOR_NO_TO_ANGLE = {1: [0], 4: [0, 45], 8: [0, 22.5], 16: [0]}
+
     def __init__(self, sectors=None, angles=None, windmill=False,
                  splits=None, additional_radial_splits_in_moderator=None,
                  subdivisions_coolant_corners=None):
@@ -83,6 +85,28 @@ class SectorConfig:
             additional_radial_splits_in_moderator
         )
         self.subdivisions_coolant_corners = subdivisions_coolant_corners
+        if sectors is not None and angles is not None:
+            self._validate_sector_to_angles()
+
+    def _validate_sector_to_angles(self):
+        """
+        Validate that the number of sectors matches the number of angles
+        or is in the predefined mapping for angle defaults.
+
+        Raises
+        ------
+        ValueError
+            If the number of sectors does not match the number of angles
+            and is not in the predefined mapping.
+        """
+        if len(self.sectors) != len(self.angles):
+            for n in self.sectors:
+                if n not in self.VALID_SECTOR_NO_TO_ANGLE:
+                    raise ValueError(
+                        f"Number of sectors {n} does not match number of angles "
+                        f"{len(self.angles)} supported by GLOW."
+                        f"The valid sector to angles mapping is: {self.VALID_SECTOR_NO_TO_ANGLE}"
+                    )
 
     # ------------------------------------------------------------------
     # Radial-split helpers (circular water rods)
@@ -763,6 +787,71 @@ class BoxDiscretizationConfig:
                 f"control_cross_submesh={self.control_cross_submesh}, "
                 f"reassign_materials={self.reassign_materials})")
 
+# -------------------------------------------------------------------------------
+# VanishedRodDiscretizationConfig – sub-meshing options for vanished rod regions
+# -------------------------------------------------------------------------------
+
+
+class VanishedRodDiscretizationConfig:
+    """
+    Sub-meshing options for the vanished rod regions in the lattice
+    
+    When a vanished rod is present, the region originally occupied by the rod is filled with coolant,
+    proper discretization of this region is required to capture thermalization effects and ensure an accurate flux distribution is obtained.
+
+    Attributes
+    ----------
+    base_radius : float (optional)
+        Base radius, used to determine the extent of the sub-meshing region, if None, defaults to outer clad radius from PIN_GEOMETRY.
+    radial_splits : int
+        Number of radial splits to apply within the vanished rod region, default is 1.
+    sector : int
+        Number of azimuthal sector splits to apply within the vanished rod region, default is 1.
+    angles : list[float] or None
+        Optional list of angles for sector splits, in degrees.  If None, sectors are evenly spaced.
+    """
+
+    def __init__(self, base_radius=None, radial_splits=1, sectors=None, angles=None, windmill=False):
+        self.base_radius = base_radius
+        self.radial_splits = radial_splits
+        self.sector_config = SectorConfig(sectors=sectors, angles=angles, windmill=windmill)
+        self.windmill = windmill
+
+    def __repr__(self):
+        return (f"VanishedRodDiscretizationConfig(base_radius={self.base_radius}, "
+                f"radial_splits={self.radial_splits}, sector_config={self.sector_config.__repr__()})")
+
+    def resolve_radii_and_sectors(self, radius=None):
+        """
+        Return the resolved list of radial splits for the vanished rod region, auto-computing from base_radius if needed.
+        If base_radius is provided (set from the calculation scheme yaml), radial splits are computed as equally spaced radii between 0. and base_radius.
+        If base_radius is None, and radius is provided, radial splits are computed as equally spaced radii between 0. and radius.
+        If both base_radius and radius are None, radial splits are set to 0. This is 
+        """
+        print(f"Resolving vanished rod discretization with base_radius={self.base_radius} and input radius={radius}")
+
+        if radius is not None:
+            # override the user input sectorization to ensure consistency with the number of radial splits
+            self.base_radius = radius
+        
+        self.radial_split_points = [round(self.base_radius * (i + 1) / self.radial_splits, 6) for i in range(self.radial_splits)]
+        # extend the sector config to match the number of radial splits if needed
+        total_number_of_regions = self.radial_splits + 1  # radial splits create radial_splits + 1 region
+        if self.sector_config and self.sector_config.sectors:
+            sectors = [self.sector_config.sectors[0]] * self.radial_splits
+            if self.sector_config.angles:
+                angles = [self.sector_config.angles[0]] * self.radial_splits
+                angles.extend([self.sector_config.angles[-1]] * (total_number_of_regions - len(angles))) # radial splits are within r<radius, last entry is the outermost region with r>radius
+            else:
+                angles = None
+            # same logic for sectors
+            sectors.extend([self.sector_config.sectors[-1]] * (total_number_of_regions - len(sectors)))
+            if len(self.sector_config.sectors) != self.radial_splits + 1 and len(self.sector_config.angles) != self.radial_splits + 1:
+                # over ride the user input sectorization to ensure consistency with the number of radial splits
+                self.sector_config = SectorConfig(sectors=sectors, angles=angles, windmill=self.windmill)
+
+
+
 
 # ---------------------------------------------------------------------------
 # CalculationStep – one step inside a calculation scheme
@@ -836,6 +925,8 @@ class CalculationStep:
         Sectorization config for gadolinium-bearing fuel pins.
     water_rod_sectors : SectorConfig or None
         Sectorization config for water rods.
+    vanished_rods_sectors : VanishedRodDiscretizationConfig or None
+        Optional sub-meshing config for the vanished rod regions.
     export_macros : bool
         Whether to export MACRO properties in the geometry.
     box_discretization : BoxDiscretizationConfig or None
@@ -865,6 +956,7 @@ class CalculationStep:
         fuel_sectors=None,
         gd_sectors=None,
         water_rod_sectors=None,
+        vanished_rods_sectors=None,
         export_macros=False,
         box_discretization=None,
         num_angles_2d=8,
@@ -993,6 +1085,7 @@ class CalculationStep:
         self.fuel_sectors = fuel_sectors
         self.gd_sectors = gd_sectors
         self.water_rod_sectors = water_rod_sectors
+        self.vanished_rods_sectors = vanished_rods_sectors
         self.export_macros = export_macros
         self.box_discretization = box_discretization
         self.num_angles_2d = num_angles_2d
@@ -1123,6 +1216,15 @@ class CalculationStep:
         if not self.sectorization_enabled:
             return None
         return self.water_rod_sectors
+
+    def get_vanished_rod_sectorization(self):
+        """
+        Return the ``VanishedRodDiscretizationConfig`` for vanished rods, or ``None`` if
+        sectorization is disabled.
+        """
+        if not self.sectorization_enabled:
+            return None
+        return self.vanished_rods_sectors
 
     # ------------------------------------------------------------------
     # Representation
@@ -1658,6 +1760,11 @@ class DragonCalculationScheme:
                       allows for the submeshing of regions with r>outer_radius, but within the water rod cell.
                       # For square water rods (Cartesian grid sub-meshing):
                       splits: [nx, ny]  # grid subdivisions applied to the whole bounding box; material is reassigned by geometric containment
+                    vanished_rods:
+                      base_radius: <float> (optional)  # base radius for sectorization : if not provided use the default_sectorization_radius from the vanished rod model.
+                      radial_splits : int (optional) # number of radial splits used to sundivide the 0<r<base_radius or 0<r<default_sectorization_radius region of the vanished rod cell; default 1 (no subdivision))
+                      sectors: [(list of sector counts per ring for vanished rods, e.g. [1, 1, 8] for 2 inner rings with 1 sector each and subdivided outer region)]
+                      angles: [(list of angles for vanished rods, e.g. [0, 0, 22.5] for 22.5° offset on outer region only)]
                 
                   box_discretization: 
                     enabled: boolean flag to enable sub-meshing of the assembly box peripheral regions into a grid of sub-faces (for MOC tracking)
@@ -1677,7 +1784,7 @@ class DragonCalculationScheme:
                     #     extend_splits_at_tube_boundaries: true
                     #     split_tubes_in_half: false
         
-        Note : the sectorization config matches sectorization options in glow's ``Cell.sectorize()`` method.
+        Note : the sectorization config matches sectorization options in glow's ``RectCell.sectorize()`` method.
                       
         Parameters
         ----------
@@ -1762,6 +1869,7 @@ class DragonCalculationScheme:
         fuel_sectors = None
         gd_sectors = None
         water_rod_sectors = None
+        vanished_rods_sectors = None
 
         if sect_enabled:
             fp = sect.get("fuel_pins", {})
@@ -1809,6 +1917,15 @@ class DragonCalculationScheme:
                     splits=wr_splits,
                     additional_radial_splits_in_moderator=wr_additional,
                     subdivisions_coolant_corners=wr_corners,
+                )
+            van_rod = sect.get("vanished_rods", {})
+            if van_rod:
+                vanished_rods_sectors = VanishedRodDiscretizationConfig(
+                    base_radius=van_rod.get("base_radius", None),
+                    radial_splits=van_rod.get("radial_splits", 1),
+                    sectors=van_rod.get("sectors", []),
+                    angles=van_rod.get("angles", []),
+                    windmill=sect.get("windmill", False),
                 )
 
         # --- Radial overrides ---
@@ -1907,6 +2024,7 @@ class DragonCalculationScheme:
             fuel_sectors=fuel_sectors,
             gd_sectors=gd_sectors,
             water_rod_sectors=water_rod_sectors,
+            vanished_rods_sectors=vanished_rods_sectors,
             export_macros=d.get("export_macros", False),
             box_discretization=box_disc,
             mix_numbering_strategy=d.get("mix_numbering_strategy", "by_material"),

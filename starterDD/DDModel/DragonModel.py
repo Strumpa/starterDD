@@ -397,10 +397,12 @@ class CartesianAssemblyModel:
         print("Analyzing lattice description and building lattice data structure with pin models based on the geometry description ...")
         self.lattice = []
         number_of_water_rod_placeholders = 0
+        number_of_vanished_rods = 0
         pin_pitch = self.pin_geometry_dict.get("pin_pitch", 0) if self.pin_geometry_dict else 0
         material_descriptors_used = [] # store descriptors that have already been analysed
         self.generating_fuel_cells = []
         self.non_generating_fuel_cells = []
+        self.vanished_rods = []
         for y_index, row in enumerate(self.lattice_description):
             lattice_row = []
             for x_index, descriptor in enumerate(row):
@@ -468,15 +470,27 @@ class CartesianAssemblyModel:
                                 self.non_generating_fuel_cells.append(pin_model)
                             lattice_row.append(pin_model)
                         elif descriptor in self.non_fuel_rod_ids:
-                            number_of_water_rod_placeholders += 1
-                            dummy_pin_model = DummyPinModel(descriptor)
-                            dummy_pin_model.set_position_in_lattice(x_index, y_index)
-                            # compute and set the center of the dummy pin in the assembly coordinate system
-                            if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
-                                center_x = self.translation_offset_x + x_index * pin_pitch + pin_pitch / 2.0
-                                center_y = self.translation_offset_y + y_index * pin_pitch + pin_pitch / 2.0
-                                dummy_pin_model.set_center(center_x, center_y)
-                            lattice_row.append(dummy_pin_model)
+                            center_x = self.translation_offset_x + x_index * pin_pitch + pin_pitch / 2.0
+                            center_y = self.translation_offset_y + y_index * pin_pitch + pin_pitch / 2.0
+                            if descriptor == "WROD": # count the numver of water rod placholders
+                                number_of_water_rod_placeholders += 1
+                                dummy_pin_model = DummyPinModel(descriptor)
+                                dummy_pin_model.set_position_in_lattice(x_index, y_index)
+                                # compute and set the center of the dummy pin in the assembly coordinate system
+                                if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
+                                    
+                                    dummy_pin_model.set_center(center_x, center_y)
+                                lattice_row.append(dummy_pin_model)
+                            elif descriptor == "VANR": # count the number of VANished Rods
+                                number_of_vanished_rods += 1
+                                vanished_rod_model = VanishedRodModel(f"{descriptor}_{number_of_vanished_rods}")
+                                vanished_rod_model.set_position_in_lattice(x_index, y_index)
+                                # set the center of the vanished rod in the assembly coordinate system (even if it won't be used for geometry generation, it can be useful to have it set for consistency and potential future use in case_generator for example)
+                                if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
+                                    vanished_rod_model.set_center(center_x, center_y)
+                                vanished_rod_model.set_default_sectorization_radius(clad_radius) # set the default sectorization radius for the vanished rod model to the clad radius defined for the pins in the geometry description yaml file, this is an arbitrary choice but it can be updated later if needed based on the expected size of the vanished rods in the assembly and the desired default discretization for them.
+                                self.vanished_rods.append(vanished_rod_model)
+                                lattice_row.append(vanished_rod_model)
                     else:
                         lattice_row.append(descriptor) # if not building the pin models, just store the descriptor in the lattice data structure for now
                 else:
@@ -506,6 +520,9 @@ class CartesianAssemblyModel:
                     raise ValueError(f"Unsupported water rod geometry type: {self.water_rod_type}. Supported types are 'circular' and 'square'.")
                 water_rod_model.set_materials("MODERATOR", "CLAD", "COOLANT")
                 self.water_rods.append(water_rod_model)
+
+        # set number of vanished rods in the lattice :
+        self.number_of_vanished_rods = number_of_vanished_rods
 
     def add_pin_to_lattice(self, pin_model):
         """
@@ -2232,7 +2249,7 @@ class SquareWaterRodModel:
         
 class DummyPinModel:
     """
-    Class representing a dummy pin in a cartesian assembly for DRAGON calculations.
+    Class representing a dummy pin placeholder or vanished rod in a cartesian assembly for DRAGON calculations.
 
     This class can be used to represent regions in the lattice that are not fuel pins,
     such as guide tubes, instrumentation tubes, or other structural components that do
@@ -2241,7 +2258,8 @@ class DummyPinModel:
     Minimal attributes:
 
     - descriptor: descriptor of the region in the lattice description
-      (e.g. GT for guide tube, IT for instrumentation tube)
+      (e.g. WROD for Water Rod placeholders, VANR for vanished rods
+      would be desirable to extend to IT for instrumentation tubes and GT for guide tubes for example).
 
     Methods:
 
@@ -2382,3 +2400,32 @@ class ControlCrossModel:
                 f"tubes_per_wing={self.number_tubes_per_wing}, "
                 f"absorber='{self.absorber_material}', "
                 f"sheath='{self.sheath_material}')")
+    
+class VanishedRodModel:
+    """
+    Class representing a vanished rod in a cartesian assembly for DRAGON calculations.
+    """
+    def __init__(self, rod_ID="VANR"):
+        self.rod_ID = rod_ID
+
+    def set_position_in_lattice(self, x_index, y_index):
+        """
+        set vanished rod position in the lattice based on x and y indices in the lattice description of the assembly model. 
+        """
+        self.x_index = x_index
+        self.y_index = y_index
+
+    def set_center(self, center_x, center_y):
+        """
+        Set the center coordinates (x, y) of the vanished rod in the assembly coordinate system.
+        This is useful for lattice analysis and spatial queries.
+        """
+        self.center_x = center_x
+        self.center_y = center_y
+        self.center = (center_x, center_y)
+
+    def set_default_sectorization_radius(self, default_radius):
+        """
+        Set a default sectorization radius for the vanished rod, which can be used for self-shielding treatment in Dragon if needed.
+        """
+        self.default_sectorization_radius = default_radius
