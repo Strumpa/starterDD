@@ -48,3 +48,9 @@ AT10_4x4_COMPOSITIONS_YAML = str(AT10_4x4_INPUTS_DIR / "material_compositions.ya
 AT10_4x4_CALC_SCHEME_2L_SPLIT_YAML = str(AT10_4x4_INPUTS_DIR / "CALC_SCHEME_2L_split.yaml")
 AT10_4x4_CALC_SCHEME_2L_BY_PIN_YAML = str(AT10_4x4_INPUTS_DIR / "CALC_SCHEME_2L_by_pin.yaml")
 AT10_4x4_CALC_SCHEME_1L_YAML = str(AT10_4x4_INPUTS_DIR / "CALC_SCHEME_1L.yaml")
+
+# ── PB2 (BWR Progression Problem Type 6) inputs ──────────────────────────────
+PB2_INPUTS_DIR = DATA_DIR / "BWRProgressionProblems" / "PB2_inputs"
+PB2_UNCONTROLLED_GEOMETRY_YAML = str(PB2_INPUTS_DIR / "PB2_Type6" / "GEOM.yaml")
+PB2_CONTROLLED_GEOMETRY_YAML = str(PB2_INPUTS_DIR / "PB2_Type6-C" / "GEOM.yaml")
+PB2_INPUTS_DIR_STR = str(PB2_INPUTS_DIR)

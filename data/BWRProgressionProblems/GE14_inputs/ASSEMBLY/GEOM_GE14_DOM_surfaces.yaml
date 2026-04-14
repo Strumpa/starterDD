@@ -1,0 +1,77 @@
+# Geometry description for the GE14 BWR progression problem.
+# This file describes the geometry of the pincell, including the fuel radius, gap radius, clad radius, and the number of fuel zones. 
+# This information is used to build the pincell geometry.
+
+PIN_GEOMETRY:
+  fuel_radius: 0.438
+  gap_radius: 0.447
+  clad_radius: 0.515
+  pin_pitch: 1.3
+  self_shielding_option: "Santamarina"
+
+ASSEMBLY_GEOMETRY:
+  lattice_type: "cartesian"
+  reactor_type: "BWR"
+  lattice_description:
+    - ["ROD2", "ROD5", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD7", "ROD3"]
+    - ["ROD5", "ROD5", "ROD6H", "ROD7", "ROD7", "ROD7G", "ROD7", "ROD7G", "ROD7", "ROD7"]
+    - ["ROD5", "ROD6H", "ROD6", "ROD7", "ROD7", "ROD7", "ROD7G", "ROD7", "ROD7G", "ROD7"]
+    - ["ROD5", "ROD5", "ROD6H", "WROD", "WROD", "ROD7", "ROD7", "ROD7G", "ROD7", "ROD7"]
+    - ["ROD5", "ROD5G", "ROD6", "WROD", "WROD", "ROD7", "ROD7", "ROD7", "ROD7G", "ROD7"]
+    - ["ROD5", "ROD4", "ROD7H", "ROD5", "ROD7", "WROD", "WROD", "ROD7", "ROD7", "ROD7"]
+    - ["ROD5", "ROD5", "ROD6", "ROD7G", "ROD5", "WROD", "WROD", "ROD7", "ROD7", "ROD7"]
+    - ["ROD3", "ROD3", "ROD6K", "ROD6", "ROD7H", "ROD6", "ROD6H", "ROD6", "ROD6H", "ROD7"]
+    - ["ROD2", "ROD2", "ROD3", "ROD5", "ROD4", "ROD5G", "ROD5", "ROD6H", "ROD5", "ROD5"]
+    - ["ROD1", "ROD2", "ROD3", "ROD5", "ROD5", "ROD5", "ROD5", "ROD5", "ROD5", "ROD2"]
+
+  Gd_rod_ids: ["ROD5G", "ROD6H", "ROD6K", "ROD7G", "ROD7H"]
+  non_fuel_rod_ids: ["WROD"]
+
+  assembly_box_description:
+    surfaces:
+      - name: "problem_boundaries"
+        surface_id: 0
+        type: "square"
+        parameters:
+          center: [7.62, 7.62]
+          side_length: 15.24
+        fill_material: "moderator"
+      - name: "outer_channel_box"
+        type: "square"
+        surface_id: 1
+        parameters:
+          center: [7.62, 7.62]
+          side_length: 13.7302 # assembly_pitch - gap_wide*2 (since in GE14 gap wide = gap_narrow)
+          radius_of_curvature: 1.301 # channel_box_thickness + corner_inner_radius_of_curvature
+        fill_material: "channel_box"
+      - name: "inner_channel_box"
+        surface_id: 2
+        type: "square"
+        parameters:
+          center: [7.62, 7.62]
+          side_length: 13.4 # given data in BWR Progression Problem description, corresponds to assembly_pitch - 2*gap_wide - 2*channel_box_thickness
+          radius_of_curvature: 0.965 # corner_inner_radius_of_curvature
+        fill_material: "coolant"
+      - name: "lattice_bounding_box"
+        surface_id: -1
+        type: "square"
+        parameters:
+          center: [7.62, 7.62]
+          side_length: 13.0 # 10 * pin_pitch, corresponds to the bounding box of the lattice of pins
+        fill: "lattice"
+
+  # The following paranteres can be replaced by the surfaces defined above.   
+  # if either gap or gap_wide or gap_narrow is specified : 
+  # it is will be assumed that the gap is the same on all sides of the fuel channel ie the lattice is centered
+  # at 
+   
+  #assembly_pitch: 15.24
+  #gap_wide: 0.7549 
+  #channel_box_thickness: 0.1651
+  #corner_inner_radius_of_curvature: 0.965
+
+WATER_ROD_GEOMETRY:
+  type: "circular"
+  inner_radius : 1.170
+  outer_radius : 1.245
+  centers: [[6.32, 6.32], [8.92, 8.92]] # coordinates relative to the bottom-left corner of the assembly bounding box

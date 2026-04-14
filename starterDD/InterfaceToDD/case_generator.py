@@ -61,7 +61,7 @@ class DragonCase:
     """
 
     def __init__(self, case_name, call_glow,
-                 draglibs_names_to_alias, config_yamls,
+                 draglib_name_to_alias, config_yamls,
                  enable_g2s=False, output_path=None,
                  tdt_path=None, tdt_base_name=None):
         """
@@ -73,7 +73,7 @@ class DragonCase:
             If ``True``, call glow to generate TDT geometry
             files.  If ``False`` the TDT files are expected
             to exist already.
-        draglibs_names_to_alias : dict
+        draglib_name_to_alias : dict
             ``{draglib_file_name: cle2000_alias}``.
         config_yamls : dict
             ``{"MATS": path, "GEOM": path,
@@ -95,9 +95,13 @@ class DragonCase:
         """
         self.case_name = case_name
         self.call_glow = call_glow
-        self.draglibs_names_to_alias = draglibs_names_to_alias
+        self.draglib_name_to_alias = draglib_name_to_alias
         self.enable_g2s = enable_g2s
         self.tdt_base_name = tdt_base_name or case_name
+
+        # Temperature dictionaries for material-specific temperatures
+        self._fuel_material_temperatures = {}  # {material_name: temperature_K}
+        self._non_fuel_temperatures = {}  # {material_type: temperature_K}
 
         # ----------------------------------------------------------
         # Resolve all paths to absolute so the case is
@@ -155,9 +159,98 @@ class DragonCase:
             "CALC_SCHEME"
         ]
 
+    def set_fuel_material_temperatures(self, material_temps: dict):
+        """
+        Register fuel material temperatures by name.
+
+        Parameters
+        ----------
+        material_temps : dict
+            Mapping of fuel material name → temperature in K.
+            Example: {'UOX_4.5': 900.0, 'MOX_8.0': 1100.0}
+        """
+        self._fuel_material_temperatures.update(material_temps)
+
+    def set_non_fuel_temperatures(self, structural_temperature: float = 600.0,
+                                   gap_temperature: float = 600.0,
+                                   coolant_temperature: float = 600.0,
+                                   moderator_temperature: float = 600.0):
+        """
+        Register non-fuel material temperatures (single value per type).
+
+        These apply to all non-fuel materials of their type across the assembly.
+
+        Parameters
+        ----------
+        structural_temperature : float
+            Temperature for cladding/absorber tubes in K
+        gap_temperature : float
+            Temperature for gas gaps (helium, void) in K
+        coolant_temperature : float
+            Temperature for coolant (single temperature across assembly)
+        moderator_temperature : float
+            Temperature for moderator (single temperature across assembly)
+        """
+        self._non_fuel_temperatures.update({
+            'structural': structural_temperature,
+            'gap': gap_temperature,
+            'coolant': coolant_temperature,
+            'moderator': moderator_temperature,
+        })
+
     # -----------------------------------------------------------
     # Assembly model construction
     # -----------------------------------------------------------
+
+    def _extract_cle2000_temperatures(self):
+        """
+        Extract representative temperatures for CLE2000 MIX procedure call.
+
+        Returns dict: {'TFUEL': float, 'TBOX': float, 'TCLAD': float, ...}
+
+        Logic:
+        - For fuel: collect temperatures from fuel mixtures
+          (all UOX_4.5 instances share one temp, all MOX_8.0 share another, etc.)
+        - For non-fuel: all instances of a type share one temp, so take first instance of each type
+        """
+        if self.assembly is None or self.assembly.compositions is None or len(self.assembly.compositions) == 0:
+            # Fallback: use assembly defaults
+            return {
+                'TFUEL': self.assembly.default_fuel_temperature if self.assembly else 900.0,
+                'TBOX': self.assembly.default_structural_temperature if self.assembly else 600.0,
+                'TCLAD': self.assembly.default_structural_temperature if self.assembly else 600.0,
+                'TCOOL': self.assembly.default_coolant_temperature if self.assembly else 600.0,
+                'TMODE': self.assembly.default_moderator_temperature if self.assembly else 600.0,
+                'TCTRL': self.assembly.default_structural_temperature if self.assembly else 600.0,
+            }
+
+        # Group mixtures by material type
+        temps_by_type = {}  # {material_type: temp}
+        fuels = []  # Collect fuel temps to extract representative value
+
+        # Collect fuel material mixture temps
+        if hasattr(self.assembly, 'fuel_material_mixtures') and self.assembly.fuel_material_mixtures:
+            for mix in self.assembly.fuel_material_mixtures:
+                if hasattr(mix, 'temperature') and mix.temperature is not None:
+                    fuels.append(mix.temperature)
+
+        # Collect non-fuel material mixture temps (first instance of each type)
+        if hasattr(self.assembly, 'non_fuel_material_mixtures') and self.assembly.non_fuel_material_mixtures:
+            for mix in self.assembly.non_fuel_material_mixtures:
+                material_type = getattr(mix, 'material_type_key', None)
+                if material_type and material_type not in temps_by_type:
+                    if hasattr(mix, 'temperature') and mix.temperature is not None:
+                        temps_by_type[material_type] = mix.temperature
+
+        # Map to CLE2000 variables with fallback to assembly defaults
+        return {
+            'TFUEL': fuels[0] if fuels else self.assembly.default_fuel_temperature,
+            'TBOX': temps_by_type.get('structural', self.assembly.default_structural_temperature),
+            'TCLAD': temps_by_type.get('structural', self.assembly.default_structural_temperature),
+            'TCOOL': temps_by_type.get('coolant', self.assembly.default_coolant_temperature),
+            'TMODE': temps_by_type.get('moderator', self.assembly.default_moderator_temperature),
+            'TCTRL': temps_by_type.get('structural', self.assembly.default_structural_temperature),
+        }
 
     def _build_assembly_model(self):
         """Build and return a ``CartesianAssemblyModel``."""
@@ -176,6 +269,8 @@ class DragonCase:
             geometry_description_yaml=self.geom_yaml,
         )
         assembly.set_rod_ID_to_material_mapping(rod_to_mat)
+
+        # Set assembly-level defaults (used as fallback if temperatures not registered via API)
         assembly.set_uniform_temperatures(
             fuel_temperature=900.0,
             gap_temperature=600.0,
@@ -184,10 +279,18 @@ class DragonCase:
             structural_temperature=600.0,
         )
         assembly.analyze_lattice_description(build_pins=True)
-        assembly.set_material_compositions(compositions)
+
+        # Pass temperature dicts to set_material_compositions
+        fuel_temps = self._fuel_material_temperatures
+        non_fuel_temps = self._non_fuel_temperatures
+        assembly.set_material_compositions(
+            compositions,
+            fuel_temps=fuel_temps,
+            non_fuel_temps=non_fuel_temps
+        )
         return assembly, compositions
 
-    def _generate_mixeq_procedures(self, scheme, assembly):
+    def _generate_mixeq_procedures(self, scheme, assembly, draglib_alias):
         """
         Generate MIXEQ procedures for numbering strategy transitions.
 
@@ -201,6 +304,8 @@ class DragonCase:
             Calculation scheme with trackable steps
         assembly : CartesianAssemblyModel
             Assembly with mix state history from multiple steps
+        draglib_alias : str
+            Alias for the draglib to be used in MIXEQ procedures : used to recover depletion chain information.
 
         Returns
         -------
@@ -226,11 +331,13 @@ class DragonCase:
 
                 try:
                     if current_step.step_type == "self_shielding":
-                        lib_name = f"LIBRARY2"
+                        input_lib_name = f"LIBRARY2"  # Default input library name for SSH step
+                        output_lib_name = "LIBEQL1"
                     else:
-                        lib_name = f"LIBEQ"
+                        input_lib_name = f"LIBEQL1"  # Default input library name for MIXEQ
+                        output_lib_name = f"LIBEQL2"
                     # Generate MIXEQ procedure
-                    mixeq = MIXEQ(assembly, lib_name, current_step.name, next_step.name)
+                    mixeq = MIXEQ(assembly, input_lib_name, output_lib_name, current_step.name, next_step.name, draglib_alias)
                     proc_name = f"MIXEQ_{current_step.name}_to_{next_step.name}"
 
                     # Validate procedure name (CLE-2000 limitation)
@@ -387,6 +494,10 @@ class DragonCase:
             ``{"x2m": path, "mix": path,
               "trk": path, "edir": path}``
         """
+        # Determine the first draglib alias
+        draglib_alias = list(
+            self.draglib_name_to_alias.values()
+        )[0]
         # 1. Load scheme
         scheme = DragonCalculationScheme.from_yaml(
             self.calc_scheme_yaml
@@ -423,11 +534,16 @@ class DragonCase:
             # generating geometry for this particular calculation step.
             assembly.apply_mix_numbering_strategy(step.mix_numbering_strategy)
             
-
-            tdt_file_name = (
-                f"{self.tdt_base_name}_{step.name}"
-                f"_{step.spatial_method}"
+            if step.tdt_file_id is not None:
+                tdt_file_name = (
+                    f"{self.tdt_base_name}_{step.tdt_file_id}"
+                    f"_{step.spatial_method}"
             )
+            else:
+                tdt_file_name = (
+                    f"{self.tdt_base_name}_{step.name}"
+                    f"_{step.spatial_method}"
+                )
 
             # 4a. Optionally build geometry with glow
             if self.call_glow:
@@ -452,6 +568,10 @@ class DragonCase:
                     lattice.show(
                         geometry_type_to_show=GeometryType.SECTORIZED,
                         property_type_to_show=PropertyType.MACRO,
+                    )
+                    lattice.show(
+                        geometry_type_to_show=GeometryType.SECTORIZED,
+                        property_type_to_show=PropertyType.MATERIAL,
                     )
 
             # 4b. Read TDT and enforce material indices for THIS step
@@ -505,7 +625,7 @@ class DragonCase:
                     scheme.has_branches()
                     and scheme.get_branch("coolant_density") is not None
                 )
-                lib = LIB(assembly, density_branch=has_density)
+                lib = LIB(assembly, density_branch=has_density, ssh_calculation_step=ssh_step)
                 mix_path = lib.write_to_c2m(
                     self.output_path, mix_proc_name,
                 )
@@ -528,16 +648,11 @@ class DragonCase:
         try:
             # Validate prerequisites for MIXEQ generation
             self._validate_mixeq_generation(scheme, assembly)
-            mixeq_procedures = self._generate_mixeq_procedures(scheme, assembly)
+            mixeq_procedures = self._generate_mixeq_procedures(scheme, assembly, draglib_alias)
         except Exception as e:
             print(f"[ERROR] MIXEQ validation failed: {e}")
             print("[MIXEQ] Skipping MIXEQ generation - continuing with standard workflow")
             mixeq_procedures = []
-
-        # Determine the first draglib alias
-        draglib_alias = list(
-            self.draglibs_names_to_alias.values()
-        )[0]
 
         # ----- TRK.c2m -----
         trk_proc_name = f"TRK"
@@ -660,6 +775,7 @@ class DragonCase:
         # --- Data structures ---
         proc.add_linked_list("LIBRARY")
         proc.add_linked_list("LIBRARY2")
+        proc.add_linked_list("LIBEQ")
         for trk_ll, _ in trk.get_track_names():
             proc.add_linked_list(trk_ll)
         proc.add_linked_list("SYS")
@@ -681,18 +797,8 @@ class DragonCase:
         )
 
         # Temperature variables
-        temp_mapping = {
-            "TFUEL": "fuel_temperature",
-            "TBOX": "structural_temperature",
-            "TCLAD": "gap_temperature",
-            "TCOOL": "coolant_temperature",
-            "TMODE": "moderator_temperature",
-            "TCTRL": "structural_temperature",
-        }
-        for tname, attr in temp_mapping.items():
-            temp_val = getattr(
-                self.assembly, attr, 600.0
-            )
+        temps = self._extract_cle2000_temperatures()
+        for tname, temp_val in temps.items():
             proc.add_variable(tname, "REAL", temp_val)
 
         # --- TDT file SEQ_ASCII imports ---
@@ -716,7 +822,7 @@ class DragonCase:
 
         trk_call = wrap_cle2000_line(
             f"{lhs} := {trk_proc_name} "
-            f"{rhs_tdts} :: <<o_anis>> ;"
+            f"{rhs_tdts} ;"
         )
         proc.add_body_line(
             "*" * 50
@@ -771,6 +877,9 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(uss_line)
         )
+        proc.add_body_line("   PASS 3")
+        proc.add_body_line(";")
+        proc.add_body_line("")
 
         if mixeq_procedures:
             for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
@@ -779,11 +888,16 @@ class DragonCase:
                         f"* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"LIBRARY2 := {proc_name} LIBRARY2 ;"
+                        f"LIBEQ := {proc_name} LIBRARY2 ;"
                     )
                     proc.add_body_line(
                         wrap_cle2000_line(mixeq_call)
                     )
+                    flux_library = "LIBEQ"
+                else:
+                    flux_library = "LIBRARY2"
+        else:
+            flux_library = "LIBRARY2"
 
         asm_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
         proc.add_body_line(f"    EDIT 1 {asm_keyword}")
@@ -806,7 +920,7 @@ class DragonCase:
                 "*" * 50
             )
             asm_line = (
-                f"SYS := ASM: LIBRARY2 "
+                f"SYS := ASM: {flux_library} "
                 f"{flux_trk} {flux_trkfil} ::"
             )
             proc.add_body_line(
@@ -818,7 +932,7 @@ class DragonCase:
             proc.add_body_line("")
 
             flu_line = (
-                f"FLUX := FLU: SYS LIBRARY2 "
+                f"FLUX := FLU: SYS {flux_library} "
                 f"{flux_trk} {flux_trkfil} ::"
             )
             proc.add_body_line(
@@ -854,7 +968,7 @@ class DragonCase:
                 "*" * 50
             )
             edir_call = (
-                f"{edir_proc_name} FLUX LIBRARY2 "
+                f"{edir_proc_name} FLUX {flux_library} "
                 f"{flux_trk} :: <<name_compo>> ;"
             )
             proc.add_body_line(
@@ -913,6 +1027,7 @@ class DragonCase:
         # --- Data structures ---
         proc.add_linked_list("LIBRARY")
         proc.add_linked_list("LIBRARY2")
+        proc.add_linked_list("LIBEQ")
         for trk_ll, _ in trk.get_track_names():
             proc.add_linked_list(trk_ll)
         proc.add_linked_list("SYS")
@@ -989,7 +1104,7 @@ class DragonCase:
 
         trk_call = wrap_cle2000_line(
             f"{lhs} := {trk_proc_name} "
-            f"{rhs_tdts} :: <<o_anis>> ;"
+            f"{rhs_tdts} ;"
         )
         proc.add_body_line("*" * 50)
         proc.add_body_line("* Tracking sub-procedure call")
@@ -1198,8 +1313,9 @@ class DragonCase:
         proc.add_body_line(
             f"{inner_indent}    EDIT 1 {ssh_asm_keyword}"
         )
+        proc.add_body_line("    PASS 3")
         proc.add_body_line(f"{inner_indent};")
-        proc.add_body_line("")
+        proc.add_body_line("\n")
 
         if mixeq_procedures:
             for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
@@ -1208,7 +1324,7 @@ class DragonCase:
                         f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"LIBRARY2 := {proc_name} LIBRARY2 ;"
+                        f"LIBEQ := {proc_name} LIBRARY2 ;"
                     )
                     proc.add_body_line(
                         wrap_cle2000_line(
@@ -1216,6 +1332,11 @@ class DragonCase:
                         )
                     )
                     proc.add_body_line("")
+                    flux_library = "LIBEQ"
+                else:
+                    flux_library = "LIBRARY2"
+        else:
+            flux_library = "LIBRARY2"
 
         # --- ASM + FLU on flux step ---
         flux_steps = scheme.get_flux_steps()
@@ -1226,7 +1347,7 @@ class DragonCase:
                 f"{inner_indent}* ASM: + FLU:"
             )
             asm_line = (
-                f"SYS := ASM: LIBRARY2 "
+                f"SYS := ASM: {flux_library} "
                 f"{flux_trk} {flux_trkfil} ::"
             )
             proc.add_body_line(
@@ -1242,7 +1363,7 @@ class DragonCase:
             proc.add_body_line("")
 
             flu_line = (
-                f"FLUX := FLU: SYS LIBRARY2 "
+                f"FLUX := FLU: SYS {flux_library} "
                 f"{flux_trk} {flux_trkfil} ::"
             )
             proc.add_body_line(
@@ -1280,7 +1401,7 @@ class DragonCase:
                 for b in ordered_branches
             )
             edir_call = (
-                f"COMPO := {edir_proc_name} FLUX LIBRARY2 "
+                f"COMPO := {edir_proc_name} FLUX {flux_library} "
                 f"{flux_trk} COMPO :: <<name_compo>> "
                 f"{para_args} ;"
             )
@@ -1297,8 +1418,8 @@ class DragonCase:
             )
             proc.add_body_line(
                 wrap_cle2000_line(
-                    f"{inner_indent}LIBRARY LIBRARY2 := "
-                    f"DELETE: LIBRARY LIBRARY2 ;"
+                    f"{inner_indent}LIBRARY {flux_library} := "
+                    f"DELETE: LIBRARY {flux_library} ;"
                 )
             )
             proc.add_body_line(
@@ -1334,15 +1455,12 @@ class DragonCase:
         proc.add_body_line("*" * 50)
         proc.add_body_line("_COMPO := COMPO ;")
 
+        # Extract temperatures for non-fuel materials
+        temps = self._extract_cle2000_temperatures()
+
         # Map temperature branch values to assembly temps
         # for the non-loop temperature variables (structural etc.)
-        temp_mapping = {
-            "TBOX": "structural_temperature",
-            "TCLAD": "gap_temperature",
-            "TCTRL": "structural_temperature",
-        }
-        # For branch-driven temps, use default values as fallback
-        # (they will be overridden in the loop via GREP)
+        # For branch-driven temps, use branch values as override
         fuel_temp_branch = scheme.get_branch(
             "fuel_temperature"
         )
@@ -1352,23 +1470,22 @@ class DragonCase:
         proc.add_variable(
             "TFUEL", "REAL",
             fuel_temp_branch.values[0]
-            if fuel_temp_branch else 900.0,
+            if fuel_temp_branch else temps.get('TFUEL', 900.0),
         )
         proc.add_variable(
             "TCOOL", "REAL",
             cool_temp_branch.values[0]
-            if cool_temp_branch else 600.0,
+            if cool_temp_branch else temps.get('TCOOL', 600.0),
         )
         proc.add_variable(
             "TMODE", "REAL",
             cool_temp_branch.values[0]
-            if cool_temp_branch else 600.0,
+            if cool_temp_branch else temps.get('TMODE', 600.0),
         )
-        for tname, attr in temp_mapping.items():
-            temp_val = getattr(
-                self.assembly, attr, 600.0
-            )
-            proc.add_variable(tname, "REAL", temp_val)
+        # Non-fuel temperatures from extracted values
+        proc.add_variable("TBOX", "REAL", temps.get('TBOX', 600.0))
+        proc.add_variable("TCLAD", "REAL", temps.get('TCLAD', 600.0))
+        proc.add_variable("TCTRL", "REAL", temps.get('TCTRL', 600.0))
 
         return proc.write_to_x2m(self.output_path)
 
@@ -1392,8 +1509,8 @@ class DragonCase:
 
         # Retrieve edition step for EDI/SPH helpers
         edi_step = scheme.get_edition_between_levels_steps()[0]
-        edi_cond = EDI_condensation(edi_step, lib_name="LIBEQ")
-        sph_corr = SPH_correction(edi_step, lib_name="LIBEQ")
+        edi_cond = EDI_condensation(edi_step, lib_name="LIBEQL1")
+        sph_corr = SPH_correction(edi_step, lib_name="LIBEQL1")
 
         flux_steps = scheme.get_flux_steps()
         l1_step = flux_steps[0]
@@ -1427,6 +1544,7 @@ class DragonCase:
         proc.add_linked_list("FLUXL2")
         proc.add_linked_list("EDITION")
         proc.add_linked_list(edi_cond.lib_name)
+        proc.add_linked_list("LIBEQL2")
         proc.add_linked_list("COMPO")
         for _, trkfil in trk.get_track_names():
             proc.add_seq_binary(trkfil)
@@ -1440,17 +1558,10 @@ class DragonCase:
         proc.add_variable("keffL1", "REAL")
         proc.add_variable("keffL2", "REAL")
 
-        temp_mapping = {
-            "TFUEL": "fuel_temperature",
-            "TBOX": "structural_temperature",
-            "TCLAD": "gap_temperature",
-            "TCOOL": "coolant_temperature",
-            "TMODE": "moderator_temperature",
-            "TCTRL": "structural_temperature",
-        }
-        for tname, attr in temp_mapping.items():
-            proc.add_variable(tname, "REAL",
-                              getattr(self.assembly, attr, 600.0))
+        # Temperature variables
+        temps = self._extract_cle2000_temperatures()
+        for tname, temp_val in temps.items():
+            proc.add_variable(tname, "REAL", temp_val)
 
         # --- TDT SEQ_ASCII imports ---
         tdt_map = trk.get_tdt_file_mapping()
@@ -1513,6 +1624,7 @@ class DragonCase:
             )
         )
         proc.add_body_line(f"    EDIT 1 {uss_keyword}")
+        proc.add_body_line("    PASS 3")
         proc.add_body_line(";")
         proc.add_body_line("")
 
@@ -1523,7 +1635,7 @@ class DragonCase:
                         f"* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"LIBRARY2 := {proc_name} LIBRARY2 ;"
+                        f"LIBEQL1 := {proc_name} LIBRARY2 ;"
                     )
                     proc.add_body_line(
                         wrap_cle2000_line(
@@ -1531,6 +1643,11 @@ class DragonCase:
                         )
                     )
                     proc.add_body_line("")
+                    flux_level1_library = "LIBEQL1"
+                else:
+                    flux_level1_library = "LIBRARY2"
+        else:
+            flux_level1_library = "LIBRARY2"
 
         # --- ASM L1 + FLU L1 ---
         l1_asm_keyword = "PIJ" if l1_step.spatial_method == "CP" else "ARM"
@@ -1539,7 +1656,7 @@ class DragonCase:
         proc.add_body_line("*" * 50)
         proc.add_body_line(
             wrap_cle2000_line(
-                f"SYS := ASM: LIBRARY2 {l1_trk} {l1_trkfil} ::"
+                f"SYS := ASM: {flux_level1_library} {l1_trk} {l1_trkfil} ::"
             )
         )
         proc.add_body_line(f"    EDIT 1 {l1_asm_keyword}")
@@ -1547,7 +1664,7 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"FLUXL1 := FLU: SYS LIBRARY2 {l1_trk} {l1_trkfil} ::"
+                f"FLUXL1 := FLU: SYS {flux_level1_library} {l1_trk} {l1_trkfil} ::"
             )
         )
         proc.add_body_line("    EDIT 1 TYPE K")
@@ -1565,7 +1682,7 @@ class DragonCase:
         proc.add_body_line("* EDI: energy condensation (L1 → coarse)")
         proc.add_body_line("*" * 50)
         proc.add_body_block(
-            edi_cond.build_edi_call("FLUXL1", "LIBRARY2", l1_trk)
+            edi_cond.build_edi_call("FLUXL1", flux_level1_library, l1_trk)
         )
         proc.add_body_block(edi_cond.build_lib_extract())
         proc.add_body_line("")
@@ -1595,7 +1712,7 @@ class DragonCase:
                         f"* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"{edi_cond.lib_name} := {proc_name} {edi_cond.lib_name} ;"
+                        f"LIBEQL2 := {proc_name} {edi_cond.lib_name} ;"
                     )
                     proc.add_body_line(
                         wrap_cle2000_line(
@@ -1603,6 +1720,11 @@ class DragonCase:
                         )
                     )
                     proc.add_body_line("")
+                    flux_level2_library = "LIBEQL2"
+                else:
+                    flux_level2_library = edi_cond.lib_name
+        else:
+            flux_level2_library = edi_cond.lib_name
 
         # --- ASM L2 + FLU L2 ---
         l2_asm_keyword = "PIJ" if l2_step.spatial_method == "CP" else "ARM"
@@ -1611,7 +1733,7 @@ class DragonCase:
         proc.add_body_line("*" * 50)
         proc.add_body_line(
             wrap_cle2000_line(
-                f"SYS := ASM: {edi_cond.lib_name} {l2_trk} {l2_trkfil} ::"
+                f"SYS := ASM: {flux_level2_library} {l2_trk} {l2_trkfil} ::"
             )
         )
         proc.add_body_line(f"    {l2_asm_keyword} EDIT 1")
@@ -1619,7 +1741,7 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"FLUXL2 := FLU: {edi_cond.lib_name} SYS "
+                f"FLUXL2 := FLU: {flux_level2_library} SYS "
                 f"{l2_trk} {l2_trkfil} ::"
             )
         )
@@ -1639,7 +1761,7 @@ class DragonCase:
         proc.add_body_line("*" * 50)
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{edir_proc_name} FLUXL2 {edi_cond.lib_name} "
+                f"{edir_proc_name} FLUXL2 {flux_level2_library} "
                 f"{l2_trk} :: <<name_compo>> ;"
             )
         )
@@ -1909,6 +2031,7 @@ class DragonCase:
             )
         )
         proc.add_body_line(f"{inner_indent}    EDIT 1 {uss_keyword}")
+        proc.add_body_line(f"{inner_indent}    PASS 3")
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line("")
 
@@ -1919,7 +2042,7 @@ class DragonCase:
                         f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"{inner_indent}LIBRARY2 := {proc_name} LIBRARY2 ;"
+                        f"{inner_indent}LIBEQL1 := {proc_name} LIBRARY2 ;"
                     )
                     proc.add_body_line(
                         wrap_cle2000_line(
@@ -1927,13 +2050,18 @@ class DragonCase:
                         )
                     )
                     proc.add_body_line("")
+                    flux_level1_library = "LIBEQL1"
+                else:
+                    flux_level1_library = "LIBRARY2"
+        else:
+            flux_level1_library = "LIBRARY2"
 
         # --- ASM L1 + FLU L1 ---
         l1_asm_keyword = "PIJ" if l1_step.spatial_method == "CP" else "ARM"
         proc.add_body_line(f"{inner_indent}* ASM: + FLU: — first level")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}SYS := ASM: LIBRARY2 "
+                f"{inner_indent}SYS := ASM: {flux_level1_library} "
                 f"{l1_trk} {l1_trkfil} ::"
             )
         )
@@ -1942,7 +2070,7 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}FLUXL1 := FLU: SYS LIBRARY2 "
+                f"{inner_indent}FLUXL1 := FLU: SYS {flux_level1_library} "
                 f"{l1_trk} {l1_trkfil} ::"
             )
         )
@@ -2011,7 +2139,7 @@ class DragonCase:
                         f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
                     )
                     mixeq_call = (
-                        f"{inner_indent}{edi_cond.lib_name} := "
+                        f"{inner_indent} LIBEQL2 := "
                         f"{proc_name} {edi_cond.lib_name} ;"
                     )
                     proc.add_body_line(
@@ -2020,13 +2148,18 @@ class DragonCase:
                         )
                     )
                     proc.add_body_line("")
+                    flux_level2_library = "LIBEQL2"
+                else:
+                    flux_level2_library = edi_cond.lib_name
+        else:
+            flux_level2_library = edi_cond.lib_name
 
         # --- ASM L2 + FLU L2 ---
         l2_asm_keyword = "PIJ" if l2_step.spatial_method == "CP" else "ARM"
         proc.add_body_line(f"{inner_indent}* ASM: + FLU: — second level")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}SYS := ASM: {edi_cond.lib_name} "
+                f"{inner_indent}SYS := ASM: {flux_level2_library} "
                 f"{l2_trk} {l2_trkfil} ::"
             )
         )
@@ -2035,7 +2168,7 @@ class DragonCase:
         proc.add_body_line("")
         proc.add_body_line(
             wrap_cle2000_line(
-                f"{inner_indent}FLUXL2 := FLU: {edi_cond.lib_name} SYS "
+                f"{inner_indent}FLUXL2 := FLU: {flux_level2_library} SYS "
                 f"{l2_trk} {l2_trkfil} ::"
             )
         )
@@ -2072,9 +2205,9 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(
                 f"{inner_indent}LIBRARY LIBRARY2 "
-                f"{edi_cond.lib_name} := "
+                f"{flux_level2_library} := "
                 f"DELETE: LIBRARY LIBRARY2 "
-                f"{edi_cond.lib_name} ;"
+                f"{flux_level2_library} ;"
             )
         )
         proc.add_body_line(
@@ -2102,18 +2235,11 @@ class DragonCase:
         proc.add_body_line("*" * 50)
         proc.add_body_line("_COMPO := COMPO ;")
 
-        # Temperature variables (structural etc.)
-        temp_mapping = {
-            "TFUEL": "fuel_temperature",
-            "TBOX": "structural_temperature",
-            "TCLAD": "gap_temperature",
-            "TCOOL": "coolant_temperature",
-            "TMODE": "moderator_temperature",
-            "TCTRL": "structural_temperature",
-        }
-        for tname, attr in temp_mapping.items():
+        # Temperature variables (from MaterialMixture objects)
+        temps = self._extract_cle2000_temperatures()
+        for tname, temp_val in temps.items():
             proc.add_variable(
-                tname, "REAL", getattr(self.assembly, attr, 600.0)
+                tname, "REAL", temp_val
             )
 
         return proc.write_to_x2m(self.output_path)

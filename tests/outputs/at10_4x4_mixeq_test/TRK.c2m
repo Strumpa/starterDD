@@ -4,7 +4,7 @@
 * --------------------------------
 *    INPUT & OUTPUT PARAMETERS
 * --------------------------------
-PARAMETER TRKSSH TRKFILSSH TRKFLUXL1 TRKFILFLUXL1 TRKFLUXL2 TRKFILFLUXL2 tdt_ssh tdt_fluxl1 tdt_fluxl2 ::
+PARAMETER TRKSSH TRKFILSSH TRKFLUXL1 TRKFILFLUXL1 TRKFLUXL2 TRKFILFLUXL2 tdtssh tdtfluxl1 tdtfluxl2 ::
 ::: LINKED_LIST TRKSSH ;
 ::: SEQ_BINARY TRKFILSSH ;
 ::: LINKED_LIST TRKFLUXL1 ;
@@ -13,46 +13,40 @@ PARAMETER TRKSSH TRKFILSSH TRKFLUXL1 TRKFILFLUXL1 TRKFLUXL2 TRKFILFLUXL2 tdt_ssh
 ::: SEQ_BINARY TRKFILFLUXL2 ;
 ;
 
-INTEGER o_anis ;
-:: >>o_anis<< ;
-
 MODULE SALT: MCCGT: END: ;
 
 * Tracking for step SSH
-TRKSSH TRKFILSSH := SALT: tdt_ssh ::
-    EDIT 1
+TRKSSH TRKFILSSH := SALT: tdtssh ::
+    EDIT 2
     TITLE 'SSH - IC'
-    BATCH 200
-    TISO EQW 8 25.0
+    ANIS 2
+    TISO 8 25.0
     IC EPSJ 1.0E-5
 ;
 
 * Tracking for step FLUXL1
-TRKFLUXL1 TRKFILFLUXL1 := SALT: tdt_fluxl1 ::
-    EDIT 1
+TRKFLUXL1 TRKFILFLUXL1 := SALT: tdtfluxl1 ::
+    EDIT 2
     TITLE 'FLUXL1 - IC'
-    BATCH 200
-    TISO EQW 8 25.0
+    ANIS 2
+    TISO 8 25.0
     IC EPSJ 1.0E-5
 ;
 
 * Tracking for step FLUXL2
-TRKFLUXL2 TRKFILFLUXL2 := SALT: tdt_fluxl2 ::
-    EDIT 1
+TRKFLUXL2 TRKFILFLUXL2 := SALT: tdtfluxl2 ::
+    EDIT 2
     TITLE 'FLUXL2 - MOC'
-    ALLG LONG
-    BATCH 2000
-    GAUS
-    ANIS <<o_anis>>
-    TSPC EQW2 24 40.0 REND
+    ANIS 2
+    ALLG
+    TSPC 12 20.0 REND
     NOIC
 ;
 
 * MOC tracking for step FLUXL2
 TRKFLUXL2 := MCCGT: TRKFLUXL2 TRKFILFLUXL2 ::
     EDIT 1
-    GAUS <<o_anis>> AAC 100 ILU0
-    HDD 0.0 SC KRYL 10
+    GAUS 4 AAC 80 TMT EPSI 1E-5
 ;
 
 END: ;

@@ -201,6 +201,8 @@ class DragonRunner:
     @staticmethod
     def _resolve_executable(explicit_path):
         """Resolve the Dragon executable path.
+        
+        Dragon executable is located in Dragon/bin/<platform>/Dragon
 
         Resolution order:
         1. Explicit argument (if given and exists).
@@ -222,7 +224,8 @@ class DragonRunner:
             "Cannot find Dragon executable. "
             "Provide dragon_executable= argument, or set "
             "$dragon_exec or $DRAGON_EXEC environment variable. "
-            f"Searched: {searched}"
+            f"Searched: {searched} \n"
+            "Dragon executable is located in Dragon/bin/<platform>/Dragon"
         )
 
     def _resolve_draglib_paths(self, explicit_paths):
@@ -241,7 +244,7 @@ class DragonRunner:
         explicit_paths = explicit_paths or {}
         resolved = {}
 
-        for draglib_name in self.case.draglibs_names_to_alias:
+        for draglib_name in self.case.draglib_name_to_alias:
             # 1. Explicit path
             if draglib_name in explicit_paths:
                 p = explicit_paths[draglib_name]
@@ -249,9 +252,9 @@ class DragonRunner:
                     resolved[draglib_name] = os.path.abspath(p)
                     continue
                 # Also check .gz
-                if os.path.isfile(p + ".gz"):
+                if os.path.isfile(str(p) + ".gz"):
                     resolved[draglib_name] = os.path.abspath(
-                        p + ".gz"
+                        str(p) + ".gz"
                     )
                     continue
 
@@ -490,7 +493,7 @@ class DragonRunner:
             )
             unzipped_path = self._ensure_decompressed(draglib_path)
 
-            alias = self.case.draglibs_names_to_alias[draglib_name]
+            alias = self.case.draglib_name_to_alias[draglib_name]
             dst = os.path.join(staging_dir, alias)
 
             if not os.path.exists(dst):
@@ -546,7 +549,7 @@ class DragonRunner:
             "assembly_id": self.case.case_name,
             "dragon_executable": self.dragon_executable,
             "draglibs": dict(
-                self.case.draglibs_names_to_alias
+                self.case.draglib_name_to_alias
             ),
             "draglib_paths": {
                 k: str(v)

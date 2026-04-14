@@ -931,6 +931,119 @@ class TestSolidCrossGeneratingDaughterMixes:
 
 
 # ---------------------------------------------------------------------------
+# Tests: Control cross center auto-correction based on symmetry
+# ---------------------------------------------------------------------------
+class TestControlCrossCenterAutoCorrection:
+    """Tests for auto-correction of control cross center placement based on symmetry."""
+
+    def test_ge14_anti_diagonal_symmetry_nw_correct(self, ge14_ctrl_assembly):
+        """GE14 has anti-diagonal symmetry; center should remain north-west."""
+        # GE14 has anti-diagonal symmetry and cross at NW (correct)
+        assert ge14_ctrl_assembly.check_diagonal_symmetry() == "anti-diagonal"
+        assert ge14_ctrl_assembly.control_cross.center == "north-west"
+
+    def test_at10_main_diagonal_symmetry_sw_correct(self, at10_ctrl_assembly):
+        """AT10 has main-diagonal symmetry; center should remain south-west."""
+        # AT10 has main-diagonal symmetry and cross at SW (correct)
+        assert at10_ctrl_assembly.check_diagonal_symmetry() == "main-diagonal"
+        assert at10_ctrl_assembly.control_cross.center == "south-west"
+
+    def test_anti_diagonal_wide_wide_corner_is_nw(self, ge14_ctrl_assembly):
+        """For anti-diagonal, wide-wide gap corner is north-west."""
+        # GE14 has gap_wide and gap_narrow; should be defined as anti-diagonal
+        assert ge14_ctrl_assembly.gap_wide is not None
+        assert ge14_ctrl_assembly.gap_narrow is not None
+        assert ge14_ctrl_assembly.gap_wide >= ge14_ctrl_assembly.gap_narrow
+        assert ge14_ctrl_assembly.check_diagonal_symmetry() == "anti-diagonal"
+
+    def test_main_diagonal_wide_wide_corner_is_sw(self, at10_ctrl_assembly):
+        """For main-diagonal, wide-wide gap corner is south-west."""
+        # AT10 has gap_wide and gap_narrow; should be defined as main-diagonal
+        assert at10_ctrl_assembly.gap_wide is not None
+        assert at10_ctrl_assembly.gap_narrow is not None
+        assert at10_ctrl_assembly.gap_wide >= at10_ctrl_assembly.gap_narrow
+        assert at10_ctrl_assembly.check_diagonal_symmetry() == "main-diagonal"
+
+    def test_auto_correction_anti_diagonal_from_ne_to_nw(self):
+        """Auto-correction should move control cross from NE to NW for anti-diagonal."""
+        import tempfile
+        import warnings
+        from conftest import GE14_COMPOSITIONS_YAML
+        from starterDD.DDModel.helpers import associate_material_to_rod_ID
+
+        # Create temp YAML with cross at wrong corner (NE instead of NW)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            temp_yaml = f.name
+            with open(GE14_DOM_C_GEOMETRY_YAML, 'r') as geom_file:
+                data = yaml.safe_load(geom_file)
+            # Change cross center to NE (incorrect for anti-diagonal)
+            data['CONTROL_CROSS_GEOMETRY']['center'] = 'north-east'
+            yaml.dump(data, f)
+            f.flush()
+
+            try:
+                # Load assembly with incorrect cross placement
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter("always")
+                    ROD_to_material = associate_material_to_rod_ID(
+                        GE14_COMPOSITIONS_YAML, temp_yaml
+                    )
+                    assembly = CartesianAssemblyModel(
+                        name="GE14_ctrl_corrected",
+                        tdt_file="dummy.tdt",
+                        geometry_description_yaml=temp_yaml,
+                    )
+                    # Check that auto-correction happened
+                    assert assembly.control_cross.center == "north-west"
+                    # Check that a warning was issued
+                    assert len(w) >= 1
+                    assert any("control cross placement" in str(warning.message).lower()
+                              for warning in w)
+            finally:
+                import os
+                os.unlink(temp_yaml)
+
+    def test_auto_correction_main_diagonal_from_ne_to_sw(self):
+        """Auto-correction should move control cross from NE to SW for main-diagonal."""
+        import tempfile
+        import warnings
+        from conftest import AT10_COMPOSITIONS_YAML
+        from starterDD.DDModel.helpers import associate_material_to_rod_ID
+
+        # Create temp YAML with cross at wrong corner (NE instead of SW)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            temp_yaml = f.name
+            with open(AT10_GEOMETRY_CTRL_YAML, 'r') as geom_file:
+                data = yaml.safe_load(geom_file)
+            # Change cross center to NE (incorrect for main-diagonal)
+            data['CONTROL_CROSS_GEOMETRY']['center'] = 'north-east'
+            yaml.dump(data, f)
+            f.flush()
+
+            try:
+                # Load assembly with incorrect cross placement
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter("always")
+                    ROD_to_material = associate_material_to_rod_ID(
+                        AT10_COMPOSITIONS_YAML, temp_yaml
+                    )
+                    assembly = CartesianAssemblyModel(
+                        name="AT10_ctrl_corrected",
+                        tdt_file="dummy.tdt",
+                        geometry_description_yaml=temp_yaml,
+                    )
+                    # Check that auto-correction happened
+                    assert assembly.control_cross.center == "south-west"
+                    # Check that a warning was issued
+                    assert len(w) >= 1
+                    assert any("control cross placement" in str(warning.message).lower()
+                              for warning in w)
+            finally:
+                import os
+                os.unlink(temp_yaml)
+
+
+# ---------------------------------------------------------------------------
 # Tests: Cross type comparison (sheathed vs solid)
 # ---------------------------------------------------------------------------
 class TestCrossTypeComparison:

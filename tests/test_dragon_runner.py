@@ -279,7 +279,7 @@ class TestDraglibResolution:
         case = DragonCase(
             case_name="test",
             call_glow=False,
-            draglibs_names_to_alias={
+            draglib_name_to_alias={
                 "draglibendfb8r1SHEM295": "endfb8r1_295",
             },
             config_yamls={
@@ -316,7 +316,7 @@ class TestDraglibResolution:
         case = DragonCase(
             case_name="test",
             call_glow=False,
-            draglibs_names_to_alias={
+            draglib_name_to_alias={
                 "draglibendfb8r1SHEM295_v5p1": "endfb8r1_295",
             },
             config_yamls={
@@ -344,7 +344,7 @@ class TestDraglibResolution:
         case = DragonCase(
             case_name="test",
             call_glow=False,
-            draglibs_names_to_alias={
+            draglib_name_to_alias={
                 "draglibendfb8r1SHEM295_v5p1": "endfb8r1_295",
             },
             config_yamls={
@@ -367,12 +367,15 @@ class TestDraglibResolution:
         libs_dir.mkdir()
         draglib_gz = libs_dir / "draglibendfb8r1SHEM295_v5p1.gz"
         draglib_gz.write_text("fake compressed")
+        # Clear higher-priority env vars so DRAGLIBS is checked
+        monkeypatch.delenv("DRAGLIBS_DIR", raising=False)
+        monkeypatch.delenv("DRAGLIB_DIR", raising=False)
         monkeypatch.setenv("DRAGLIBS", str(libs_dir))
 
         case = DragonCase(
             case_name="test",
             call_glow=False,
-            draglibs_names_to_alias={
+            draglib_name_to_alias={
                 "draglibendfb8r1SHEM295_v5p1": "endfb8r1_295",
             },
             config_yamls={
@@ -410,7 +413,7 @@ class TestRunDirectory:
         case = DragonCase(
             case_name="GE14_DOM",
             call_glow=False,
-            draglibs_names_to_alias={
+            draglib_name_to_alias={
                 "draglibendfb8r1SHEM295_v5p1": "endfb8r1_295",
             },
             config_yamls={
@@ -521,7 +524,7 @@ class TestManifest:
         case = DragonCase(
             case_name="GE14_DOM",
             call_glow=False,
-            draglibs_names_to_alias={
+            draglib_name_to_alias={
                 "draglibendfb8r1SHEM295": "endfb8r1_295",
             },
             config_yamls={
@@ -646,7 +649,7 @@ class TestInputStaging:
         case = DragonCase(
             case_name="GE14_DOM",
             call_glow=False,
-            draglibs_names_to_alias={
+            draglib_name_to_alias={
                 "draglibendfb8r1SHEM295": "endfb8r1_295",
             },
             config_yamls={
@@ -772,7 +775,7 @@ class TestDryRun:
         case = DragonCase(
             case_name="GE14_DOM",
             call_glow=False,
-            draglibs_names_to_alias={
+            draglib_name_to_alias={
                 "draglibendfb8r1SHEM295": "endfb8r1_295",
             },
             config_yamls={
@@ -840,7 +843,7 @@ class TestDragonCaseRun:
         case = DragonCase(
             case_name="GE14_DOM",
             call_glow=False,
-            draglibs_names_to_alias={
+            draglib_name_to_alias={
                 "draglibendfb8r1SHEM295": "endfb8r1_295",
             },
             config_yamls={

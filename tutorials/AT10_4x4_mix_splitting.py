@@ -1,5 +1,5 @@
 # Example of a simple DRAGON 2-levels flux calculation scheme with starterDD
-# Generate a glow geometry with a single AT10 3x3 sub-assembly with 9 pins,
+# Generate a glow geometry with a single AT10 4x4 sub-assembly with 16 pins,
 # Run dragon with a RSE+IC self shielding step + first level IC on 295g + second level 26g MOC flux calculation.
 # At self shielding step and 1st level flux calculation, each pin is divided in Santamarina radial zones, 
 # Material Mixes are numbered by material ie enrichment / fuel type. 
@@ -44,13 +44,14 @@ DRAGLIBS_PATH = Path(os.environ.get('DRAGLIB_DIR', "/path/to/draglibs"))
 # glow_data sits next to the starterDD project root
 GLOW_DATA = PROJECT_ROOT.parent / "glow_data"
 AT10_OUTPUT = GLOW_DATA / "starterDD_outputs" / "AT10_4x4" / "2L_scheme"
-run_dragon=False  # Set to False for a dry run (no Dragon execution)
+run_dragon=True  # Set to False for a dry run (no Dragon execution)
+run_glow = False  # Set to True to call glow for geometry processing (if needed)
 
 AT10_4x4_test_case = DragonCase(
         case_name="AT10_4x4_mix_splitting",
-        call_glow=False, # Set to True to call glow for geometry processing.
-        draglibs_names_to_alias={
-            "draglibJeff3p1p1SHEM295_v5p1": "J311_295",
+        call_glow=run_glow,
+        draglib_name_to_alias={
+            "draglibendfb8r1SHEM295_v5p1": "endfb8r1_295",
         },
         config_yamls={
             "MATS": str(AT10_INPUTS / "material_compositions.yaml"),
@@ -60,6 +61,18 @@ AT10_4x4_test_case = DragonCase(
         output_path=str(AT10_OUTPUT),
         tdt_path=str(AT10_OUTPUT),
     )
+
+AT10_4x4_test_case.set_fuel_material_temperatures({
+    "24UOX": 900.0,
+    "32UOX": 900.0,
+    "42UOX": 900.0,
+    "45UOX": 900.0,
+    "48UOX": 900.0,
+    "50UOX": 900.0,
+    "45Gd" : 900.0,
+})
+AT10_4x4_test_case.set_non_fuel_temperatures(structural_temperature=600.0, coolant_temperature=600.0, moderator_temperature=600.0, gap_temperature=600.0)
+
 
 # Step 1: Generate CLE2000 procedures (x2m + c2m files)
 result = AT10_4x4_test_case.generate_cle2000_procedures()
@@ -84,7 +97,7 @@ if not run_dragon:
     #
     dry_result = AT10_4x4_test_case.run(
          draglib_paths={
-             "draglibJeff3p1p1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
+             "draglibendfb8r1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibendfb8r1SHEM295_v5p1"),
          },
          results_root=str(PROJECT_ROOT / "tutorials" / "results"),
          dry_run=True,
@@ -100,12 +113,12 @@ if run_dragon:
     run_result = AT10_4x4_test_case.run(
         dragon_executable=DRAGON_EXEC,  # or None to use $dragon_exec
         draglib_paths={
-            "draglibJeff3p1p1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibJeff3p1p1SHEM295_v5p1"),
+            "draglibendfb8r1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibendfb8r1SHEM295_v5p1"),
         },
         results_root=str(PROJECT_ROOT / "tutorials" / "results"),
         num_threads=1,
     )
-    print(f"Draglibs path used: {DRAGLIBS_PATH / 'draglibJeff3p1p1SHEM295_v5p1'}")
+    print(f"Draglibs path used: {DRAGLIBS_PATH / 'draglibendfb8r1SHEM295_v5p1'}")
     print("Dragon run completed.")
     print(f"Success: {run_result.success}")
     print(f"keff:    {run_result.keff}")

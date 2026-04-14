@@ -158,10 +158,12 @@ class TestPinGeometryAndCenters:
     def test_translation_offset_computed(self, ge14_assembly_base):
         """Verify translation_offset is computed correctly."""
         assembly = ge14_assembly_base
-        assert assembly.translation_offset is not None
+        assert assembly.translation_offset_x is not None
+        assert assembly.translation_offset_y is not None
         # translation_offset = gap_wide + channel_box_thickness + intra_assembly_coolant_width
         expected = assembly.gap_wide + assembly.channel_box_thickness + assembly.intra_assembly_coolant_width
-        assert assembly.translation_offset == pytest.approx(expected)
+        assert assembly.translation_offset_x == pytest.approx(expected)
+        assert assembly.translation_offset_y == pytest.approx(expected)
 
     def test_fuel_pins_have_center_attribute(self, ge14_assembly_base):
         """Verify all FuelPinModel objects have center coordinates set."""
@@ -192,7 +194,9 @@ class TestPinGeometryAndCenters:
         """Verify pin center coordinates follow the expected formula."""
         assembly = ge14_assembly_base
         pin_pitch = assembly.pin_geometry_dict.get("pin_pitch", 0)
-        translation = assembly.translation_offset
+        translation_x = assembly.translation_offset_x
+        translation_y = assembly.translation_offset_y
+
 
         for row in assembly.lattice:
             for pin in row:
@@ -200,8 +204,8 @@ class TestPinGeometryAndCenters:
                     x_index = pin.x_index
                     y_index = pin.y_index
                     # Expected: center_x = translation_offset + x_index * pin_pitch + pin_pitch / 2.0
-                    expected_x = translation + x_index * pin_pitch + pin_pitch / 2.0
-                    expected_y = translation + y_index * pin_pitch + pin_pitch / 2.0
+                    expected_x = translation_x + x_index * pin_pitch + pin_pitch / 2.0
+                    expected_y = translation_y + y_index * pin_pitch + pin_pitch / 2.0
                     assert pin.center_x == pytest.approx(expected_x), \
                         f"Pin at ({x_index}, {y_index}) has wrong center_x: {pin.center_x} != {expected_x}"
                     assert pin.center_y == pytest.approx(expected_y), \
@@ -211,13 +215,16 @@ class TestPinGeometryAndCenters:
         """Verify corner pin centers are within assembly bounds."""
         assembly = ge14_assembly_base
         pin_pitch = assembly.pin_geometry_dict.get("pin_pitch", 0)
-        
+        translation_x = assembly.translation_offset_x
+        translation_y = assembly.translation_offset_y
+
         # Check pin at (0, 0) - should be near the translation offset
         pin_00 = assembly.lattice[0][0]
         if isinstance(pin_00, FuelPinModel):
-            expected_center = assembly.translation_offset + pin_pitch / 2.0
-            assert pin_00.center_x == pytest.approx(expected_center)
-            assert pin_00.center_y == pytest.approx(expected_center)
+            expected_center_x = translation_x + pin_pitch / 2.0
+            expected_center_y = translation_y + pin_pitch / 2.0
+            assert pin_00.center_x == pytest.approx(expected_center_x)
+            assert pin_00.center_y == pytest.approx(expected_center_y)
             # Center should be positive and within assembly pitch
             assert pin_00.center_x > 0
             assert pin_00.center_y > 0

@@ -1,0 +1,38 @@
+# Geometry description for the uncontrolled PB2 Type 6 : BWR progression problem.
+# This file describes the geometry of the pincell, including the fuel radius, gap radius, clad radius, and the number of fuel zones. 
+# This information is used to build the pincell geometry.
+
+PIN_GEOMETRY:
+  fuel_radius: 0.52070
+  gap_radius: 0.53213
+  clad_radius: 0.61341
+  pin_pitch: 1.6256
+  self_shielding_option: "Santamarina"
+
+ASSEMBLY_GEOMETRY:
+  lattice_type: "Cartesian"
+  reactor_type: "BWR"
+  lattice_description:
+    - ["ROD3", "ROD2", "ROD1", "ROD1", "ROD1", "ROD1", "ROD1", "ROD2"]
+    - ["ROD2", "ROD1", "ROD5", "ROD1", "ROD1", "ROD1", "ROD5", "ROD1"]
+    - ["ROD2", "ROD1", "ROD1", "ROD1", "ROD1", "ROD1", "ROD1", "ROD1"]
+    - ["ROD2", "ROD1", "ROD1", "WROD", "ROD1", "ROD1", "ROD1", "ROD1"]
+    - ["ROD2", "ROD5", "ROD1", "ROD1", "WROD", "ROD1", "ROD1", "ROD1"]
+    - ["ROD2", "ROD1", "ROD1", "ROD1", "ROD1", "ROD1", "ROD5", "ROD1"]
+    - ["ROD3", "ROD2", "ROD1", "ROD5", "ROD1", "ROD1", "ROD1", "ROD2"]
+    - ["ROD4", "ROD3", "ROD2", "ROD2", "ROD2", "ROD2", "ROD2", "ROD3"]
+
+  assembly_pitch: 15.24
+  gap_wide: 0.9017 # Issue with this : need to center box taking into account gap_wide and gap_narrow : in BWR Progression Problems the Type 6 benchmark is not centered.
+  gap_narrow: 0.42418
+  channel_box_thickness: 0.254
+  corner_inner_radius_of_curvature: 0.9652
+
+  Gd_rod_ids: ["ROD5"]
+  non_fuel_rod_ids: ["WROD"]
+
+WATER_ROD_GEOMETRY:
+  type: "circular"
+  inner_radius : 0.67437
+  outer_radius : 0.75057
+  centers: [[7.04596, 6.56844], [8.67156, 8.19404]]

@@ -41,6 +41,8 @@ class LIB:
         lib.write_to_c2m("./procs", "MIX_LIB")
     """
 
+    SUPPORTED_SELF_SHIELDING_METHODS = ("PT", "RSE", "SUBG")
+
     # Heavy-metal + Gd isotopes that receive self-shielding treatment (INRS)
     DEFAULT_SELF_SHIELDED_FUEL_ISOTOPES = [
         "U234", "U235", "U236", "U238",
@@ -66,7 +68,7 @@ class LIB:
         "SHEATH":      "TCTRL",
     }
 
-    def __init__(self, assembly_model, density_branch=False):
+    def __init__(self, assembly_model, density_branch=False, ssh_calculation_step = None):
         """
         Initialize LIB procedure generator.
 
@@ -88,6 +90,7 @@ class LIB:
         """
         self.assembly = assembly_model
         self.density_branch = density_branch
+        self.ssh_calculation_step = ssh_calculation_step
 
         # Fuel self-shielding configuration
         self.self_shielded_fuel_isotopes = list(self.DEFAULT_SELF_SHIELDED_FUEL_ISOTOPES)
@@ -115,12 +118,23 @@ class LIB:
         # --- Register control cross material temperature variables --------
         self._register_control_cross_temp_vars()
 
+        if ssh_calculation_step is not None:
+            # Override self-shielding configuration based on the provided calculation step
+            if ssh_calculation_step.fuel_self_shielded_isotopes is not None:
+                self.set_self_shielded_fuel_isotopes(ssh_calculation_step.fuel_self_shielded_isotopes)
+            if ssh_calculation_step.clad_self_shielded_isotopes is not None:
+                self.set_non_fuel_self_shielding(
+                    "CLAD",
+                    {iso: 2 for iso in ssh_calculation_step.clad_self_shielded_isotopes}
+                )
+
     # ------------------------------------------------------------------
     #  Configuration helpers
     # ------------------------------------------------------------------
 
     def set_self_shielded_fuel_isotopes(self, isotopes):
         """Override the list of self-shielded fuel isotopes (default: HM + Gd)."""
+        print(f"[LIB] Setting self-shielded fuel isotopes to: {isotopes}")
         self.self_shielded_fuel_isotopes = list(isotopes)
 
     def set_non_fuel_self_shielding(self, material_name, isotope_inrs_dict):
@@ -261,9 +275,9 @@ class LIB:
                 lib_name = self.isotope_aliases.get(
                     (mix.material_name, isotope), isotope
                 )
-                line = f"    {isotope} = {lib_name} {density:.5E}"
+                line = f"    {isotope} = {lib_name} {density:.6E}"
                 if isotope in self.correlation_isotopes:
-                    line += " CORR 1"
+                    line += f" CORR {self.fuel_inrs}"
                 elif isotope in self.self_shielded_fuel_isotopes:
                     line += f" {self.fuel_inrs}"
                 lines += line + "\n"
@@ -346,7 +360,7 @@ class LIB:
                     var_name = _WATER_ISO_MAPPING[isotope]
                     line = f"    {isotope} = {lib_name} <<{var_name}>>"
                 else:
-                    line = f"    {isotope} = {lib_name} {density:.5E}"
+                    line = f"    {isotope} = {lib_name} {density:.6E}"
                 if isotope in inrs_map:
                     line += f" {inrs_map[isotope]}"
                 lines += line + "\n"
@@ -385,7 +399,7 @@ class LIB:
                 lib_name = self.isotope_aliases.get(
                     (mix.material_name, isotope), isotope
                 )
-                line = f"    {isotope} = {lib_name} {density:.5E}"
+                line = f"    {isotope} = {lib_name} {density:.6E}"
                 if isotope in inrs_map:
                     line += f" {inrs_map[isotope]}"
                 lines += line + "\n"
@@ -474,13 +488,31 @@ class LIB:
         ctrl_daughters = self.build_control_cross_daughter_mix_lines()
         non_fuel = self.build_non_fuel_mix_lines()
 
+        if hasattr(self, 'ssh_calculation_step') and self.ssh_calculation_step is not None:
+            ssh_method = self.ssh_calculation_step.self_shielding_method
+            if ssh_method not in self.SUPPORTED_SELF_SHIELDING_METHODS:
+                raise ValueError(
+                    f"Unsupported self-shielding method '{ssh_method}' in "
+                    f"SSH calculation step '{self.ssh_calculation_step.name}'. "
+                    f"Supported methods: {self.SUPPORTED_SELF_SHIELDING_METHODS}"
+                )
+            if ssh_method == "PT":
+                ssh_method_str = "PT CALENDF 4"
+            elif ssh_method == "RSE":
+                ssh_method_str = "RSE"
+            elif ssh_method == "SUBG":
+                ssh_method_str = "SUBG"
+        else:
+            ssh_method_str = "<<ssh_method>>"  # receive as input parameter when not fixed
+
         call = (
             "LIBRARY := LIB: ::\n"
             "EDIT 0\n"
             f"NMIX {max_mix}  ! MAXIMUM OF MATERIAL MIXTURES\n"
-            "<<ssh_method>>\n"
+            f"{ssh_method_str}\n"
             "ANIS <<anis_level>>\n"
             "CTRA <<tran_correc>>\n"
+            "ADED 4 NELAS N2N N3N N4N\n"
             "DEPL LIB: DRAGON FIL: <<Library>>\n"
             "MIXS LIB: DRAGON FIL: <<Library>>\n"
             f"{generating}"
@@ -1493,8 +1525,6 @@ class SALT:
         ``step.name`` when ``None``.
     title : str or None
         Title string for the SALT call.  Auto-generated if ``None``.
-    batch : int or None
-        BATCH parameter.  Defaults to 200 for IC/CP, 2000 for MOC.
     """
 
     AVAILABLE_QUADRATURES = (
@@ -1503,7 +1533,7 @@ class SALT:
     AVAILABLE_TSPC_ANGLES = (2, 6, 8, 12, 14, 18, 20, 24, 30)
 
     def __init__(self, calculation_step, tdt_var_name,
-                 track_name=None, title=None, batch=None):
+                 track_name=None, title=None):
         self.step = calculation_step
         self.tdt_var_name = tdt_var_name
 
@@ -1513,13 +1543,7 @@ class SALT:
         self.title = title or (
             f"{step_tag} - {self.step.spatial_method}"
         )
-        if batch is not None:
-            self.batch = batch
-        else:
-            self.batch = (
-                2000 if self.step.spatial_method == "MOC"
-                else 200
-            )
+        self.batch = calculation_step.batch_size
 
         if self.step.tracking == "TSPC" and self.step.num_angles_2d not in self.AVAILABLE_TSPC_ANGLES:
             raise ValueError(
@@ -1535,26 +1559,23 @@ class SALT:
             f"{self.track_name} {self.trkfil_name} "
             f":= SALT: {self.tdt_var_name} ::"
         )
-        lines.append("    EDIT 1")
+        lines.append("    EDIT 2")
         lines.append(f"    TITLE '{self.title}'")
-
-        if s.spatial_method == "MOC":
-            lines.append("    ALLG LONG")
-
-        lines.append(f"    BATCH {self.batch}")
-
-        if s.spatial_method == "MOC":
-            lines.append(f"    {s.polar_angles_quadrature}")
-            lines.append(f"    ANIS <<o_anis>>")
+        if self.batch:
+            lines.append(f"    BATCH {self.batch}")
+        lines.append(f"    ANIS {s.anisotropy_level}")
+        
+        if s.spatial_method == "MOC":  
+            lines.append("    ALLG")
             lines.append(
-                f"    {s.tracking} EQW2 "
+                f"    {s.tracking} "
                 f"{s.num_angles_2d} "
                 f"{s.line_density:.1f} REND"
             )
             lines.append("    NOIC")
         elif s.spatial_method == "IC":
             lines.append(
-                f"    {s.tracking} EQW "
+                f"    {s.tracking} "
                 f"{s.num_angles_2d} "
                 f"{s.line_density:.1f}"
             )
@@ -1562,10 +1583,11 @@ class SALT:
         else:
             # CP
             lines.append(
-                f"    {s.tracking} EQW "
+                f"    {s.tracking} "
                 f"{s.num_angles_2d} "
                 f"{s.line_density:.1f}"
             )
+            lines.append("    NOIC")
 
         lines.append(";")
         return "\n".join(lines) + "\n"
@@ -1601,7 +1623,9 @@ class MCCGT:
         self.track_name = track_name or f"TRK{step_tag}"
         self.trkfil_name = f"TRKFIL{step_tag}"
         self.max_inner_iterations = max_inner_iterations
-        self.krylov_dim = krylov_dim
+        self.nmu = 4  # default number of polar angles for quadrature
+        if self.step.anisotropy_level > 4:
+            self.nmu = 6
 
     def build_mccgt_call(self):
         """Return the full ``MCCGT:`` call block as a string."""
@@ -1613,11 +1637,8 @@ class MCCGT:
         )
         lines.append("    EDIT 1")
         lines.append(
-            f"    {s.polar_angles_quadrature} <<o_anis>> "
-            f"AAC {self.max_inner_iterations} ILU0"
-        )
-        lines.append(
-            f"    HDD 0.0 SC KRYL {self.krylov_dim}"
+            f"    {s.polar_angles_quadrature} {self.nmu} "
+            f"AAC 80 TMT EPSI 1E-5"
         )
         lines.append(";")
         return "\n".join(lines) + "\n"
@@ -1650,6 +1671,10 @@ class TRK:
     def _build_tracking_objects(self):
         """Create SALT (and MCCGT) objects for each trackable step."""
         for step in self.scheme.get_trackable_steps():
+            if step.step_type == "self_shielding":
+                self.problem_anisotropy_level = step.anisotropy_level
+            else:
+                step.anisotropy_level = getattr(self, "problem_anisotropy_level", 1)
             tdt_var = self._tdt_var_name(step)
             salt = SALT(step, tdt_var)
             self._salt_objects.append(salt)
@@ -1659,8 +1684,11 @@ class TRK:
 
     def _tdt_var_name(self, step):
         """CLE-2000 variable name for the TDT file import."""
-        tag = step.name.lower()
-        return f"tdt_{tag}"
+        if len(step.name) > 9:
+            tag = step.name[:9].lower()
+        else:
+            tag = step.name.lower()
+        return f"tdt{tag}"
 
     def _tdt_file_name(self, step):
         """Physical TDT file name as produced by glow."""
@@ -1687,8 +1715,15 @@ class TRK:
         """
         result = []
         for step in self.scheme.get_trackable_steps():
-            tag = step.name[:12].upper()
-            result.append((f"TRK{tag}", f"TRKFIL{tag}"))
+            if len(step.name) > 9:
+                tagTRK = step.name[:9].upper()
+            else:
+                tagTRK = step.name.upper()
+            if len(step.name) > 6:
+                tagTRKFIL = step.name[:6].upper()
+            else:                
+                tagTRKFIL = step.name.upper()
+            result.append((f"TRK{tagTRK}", f"TRKFIL{tagTRKFIL}"))
         return result
 
     def build_procedure_body(self):
@@ -1758,12 +1793,6 @@ class TRK:
         # TDT vars are SEQ_ASCII (no linked-list decl)
         param_block += ";\n"
 
-        # Variable input: anisotropy level
-        var_block = (
-            "INTEGER o_anis ;\n"
-            ":: >>o_anis<< ;\n"
-        )
-
         # MODULE declaration
         mod_block = "MODULE SALT: MCCGT: END: ;\n"
 
@@ -1772,7 +1801,7 @@ class TRK:
         footer = "END: ;\nQUIT .\n"
 
         content = (
-            f"{header}{param_block}\n{var_block}\n"
+            f"{header}{param_block}\n"
             f"{mod_block}\n{body}{footer}"
         )
 
@@ -1949,7 +1978,7 @@ class MIXEQ:
         mixeq.write_to_c2m("./procs", "MIXEQ_SSH_to_L2")
     """
 
-    def __init__(self, assembly_model, lib_name, from_step, to_step):
+    def __init__(self, assembly_model, input_lib_name, output_lib_name, from_step, to_step, draglib_alias):
         """
         Initialize MIXEQ procedure generator.
 
@@ -1959,15 +1988,23 @@ class MIXEQ:
             Assembly with mix state history from multiple steps.
             Must have run different numbering strategies and recorded
             the state history for both from_step and to_step.
+        input_lib_name : str
+            CLE-2000 variable name for the input library (e.g., "LIBRARY2)
+        output_lib_name : str
+            CLE-2000 variable name for the output library (e.g., "LIBEQ")
         from_step : str
             Source step name (e.g., "SSH") - typically uses by_material strategy
         to_step : str
             Target step name (e.g., "FLUX_L2") - typically uses by_pin strategy
+        draglib_alias : str
+            Alias for the draglib to be used in MIXEQ procedures : used to recover depletion chain information.
         """
         self.assembly = assembly_model
-        self.lib_name = lib_name
+        self.input_lib_name = input_lib_name
+        self.output_lib_name = output_lib_name
         self.from_step = from_step
         self.to_step = to_step
+        self.draglib_alias = draglib_alias
 
         # Get correspondence table using existing method
         try:
@@ -2050,30 +2087,26 @@ class MIXEQ:
 
         max_mix = self._determine_max_mix_count()
 
-        # Start LIB: call in library edit mode (EDIT 0)
+        # Start LIB: call in library edit mode
         call = (
-            f"{self.lib_name} := LIB: {self.lib_name} ::\n"
-            "  EDIT 0\n"  # Library edit mode - read existing microlib
+            f"{self.output_lib_name} := LIB: {self.input_lib_name} ::\n" # Library edit mode - read existing microlib
+            "  EDIT 0\n"  
             f"  NMIX {max_mix}\n"
-            f"  DEPL LIB: DRAGON FIL: {self.lib_name}\n"
-            f"  MIXS LIB: MICROLIB FIL: {self.lib_name}\n"
+            f"  DEPL LIB: DRAGON FIL: {self.draglib_alias}\n"
+            "   CATL\n"
             "\n"
         )
 
-        # Generate COMB statements for mixture duplication
+        # Generate MIX statements for mixture duplication and copying into the new library
+        # Non-fuel isotopes are now included in the correspondence table via build_mixeq_correspondence_table()
+
         # Sort by target index to ensure consistent output
         sorted_table = sorted(self.correspondence_table, key=lambda x: x[3])
 
         for from_name, to_name, from_idx, to_idx in sorted_table:
-            if from_idx == to_idx:
-                # No duplication needed, but we can still add a comment for clarity
-                call += f"  ! {from_name} → {to_name}\n"
-                continue
-            else:
-                call += f"  ! {from_name} → {to_name}\n"
-                call += f"  MIX {to_idx}\n"
-                call += f"    COMB {from_idx} 1.0\n"
-                call += "\n"
+            call += f"  ! {from_name} → {to_name}\n"
+            call += f"  MIX {to_idx} {from_idx}\n"
+            call += "\n"
 
         call += ";"
         return call
@@ -2166,9 +2199,9 @@ class MIXEQ:
             "* --------------------------------\n"
             "*    INPUT & OUTPUT PARAMETERS\n"
             "* --------------------------------\n"
-            f"PARAMETER {self.lib_name} ::\n"
+            f"PARAMETER {self.output_lib_name} {self.input_lib_name} ::\n"
             "       EDIT 0\n"
-            f"           ::: LINKED_LIST {self.lib_name} ;\n"
+            f"           ::: LINKED_LIST {self.output_lib_name} {self.input_lib_name} ;\n"
             "   ;\n"
             "\n"
             "* --------------------------------\n"

@@ -27,6 +27,7 @@ class CartesianAssemblyModel:
         self.tdt_file = tdt_file
         self.parse_geometry_description(geometry_description_yaml)
         self.rod_ID_to_material_dict = None # this will be set later based on the material composition definition selected for the assembly, which can be based on rod IDs in the lattice description for example, in which case this dictionary will map rod IDs to material names for the fuel in the assembly.
+        self.material_to_temperature = None # this will be set later based on the material composition definition selected for the assembly, which can be based on rod IDs in the lattice description for example, in which case this dictionary will map material names to temperatures for the fuel in the assembly.
         self.lattice = None # this will be a data structure representing the lattice of the assembly, which can be a 2D list of pin models corresponding to the lattice description, for example.
         self.set_uniform_temperatures(fuel_temperature=900.0, gap_temperature=600.0, coolant_temperature=600.0, moderator_temperature=600.0, structural_temperature=600.0) # default uniform temperatures for the assembly, which can be updated later based on the core description or other information provided for the assembly.
 
@@ -39,6 +40,12 @@ class CartesianAssemblyModel:
         """
         Parse the geometry description YAML file for the assembly.
 
+        All coordinates are relative to the origin set at the bottom-left corner of the assembly.
+        In Cartesian geometries : this is the xmin, ymin corner of the assembly, this can be specified as : 
+            - A "problem_boundaries" if present in the assembly_box_description of the input yaml file.
+            - Implicitly as xmin=0, ymin=0 of in a [0, assembly_pitch] x [0, assembly_pitch] square if the "assembly_box_description" is not provided in the input yaml file.
+            In this case the assembly_pitch parameter must be set in the ASSEMBLY_GEOMETRY section of the geometry description yaml file to define the size of the assembly.
+
         Expected YAML structure::
 
             ASSEMBLY_GEOMETRY:
@@ -46,19 +53,77 @@ class CartesianAssemblyModel:
                 lattice_description: n by m grid describing the material composition of each pin
                 (e.g. for a 10x10 BWR assembly, entries like ``"ROD1"``, ``"ROD5G"``, etc.)
 
-            Convention is x-increasing, y-increasing:
+                    Convention is x-increasing, y-increasing:
 
-                - the first row is the bottom of the lattice, ordered in x-increasing direction
-                - the last row is the top of the lattice
-                - the first column is the left, ordered in y-increasing direction
-                - the last column is the right
+                    - the first row is the bottom of the lattice, ordered in x-increasing direction
+                    - the last row is the top of the lattice
+                    - the first column is the left, ordered in y-increasing direction
+                    - the last column is the right
 
-                assembly_pitch: pitch of the assembly lattice
-                gap_wide: width of the gap between fuel pins
-                channel_box_thickness: thickness of the channel box (if any)
-                corner_inner_radius_of_curvature: inner radius of curvature for corners (if any)
                 Gd_rod_ids: material descriptors for Gd-bearing fuel pins
                 non_fuel_rod_ids: material descriptors for water rods, guide tubes, etc.
+
+                The following parameters are optional and make starterDD retrocompatible with early versions of the geometry description YAML file.
+                For a more flexible and explicit geometry definition 
+                assembly_pitch [optional]: pitch of the assembly lattice
+                channel_box_thickness [optional]: thickness of the channel box (if any)
+                corner_inner_radius_of_curvature [optional]: inner radius of curvature for corners (if any)
+
+                gap [optional]: width of the moderator gap between the outer channel box and outer boundaries
+                gap_wide [optional]: width of the moderator gap between the outer channel box and outer boundaries (wide side)
+                gap_narrow [optional]: width of the moderator gap between the outer channel box and outer boundaries (narrow side)
+
+                Note : if either "gap", "gap_wide" or "gap_narrow" is provided, the other missing gap parameters will be set to the same value as the provided one to ensure consistency. If none of the gap parameters are provided, the gap width will be set to 0.
+                if both "gap_wide" and "gap_narrow" are provided, their consistency will be checked to ensure that gap_wide is greater than or equal to gap_narrow, otherwise an error will be raised.
+
+                **Wide-Wide Corner Mapping (Critical for Control Cross Placement):**
+
+                For anti-diagonally symmetric assemblies:
+                - Wide-wide gap corner: **north-west** (top-left)
+                - Narrow-narrow gap corner: **south-east** (bottom-right)
+                - Mixed-gap corners: **north-east** (top-right) and **south-west** (bottom-left)
+
+                For main-diagonally (transpose) symmetric assemblies:
+                - Wide-wide gap corner: **south-west** (bottom-left)
+                - Narrow-narrow gap corner: **north-east** (top-right)
+                - Mixed-gap corners: **north-west** (top-left) and **south-east** (bottom-right)
+
+                For non-symmetric assemblies:
+                - Wide-wide corner is defined by the explicit gap_wide and gap_narrow values
+
+                **Control Cross Placement Rules:**
+
+                The control cross can ONLY be placed at the wide-wide corner of the assembly.
+                If the GEOM.yaml specifies a control cross at an incorrect corner:
+                - A warning is printed
+                - The control cross center is automatically reassigned to the wide-wide corner
+                - Geometry generation proceeds with the corrected placement
+
+                To avoid auto-correction, ensure GEOM.yaml CONTROL_CROSS_GEOMETRY.center matches:
+                - "north-west" for anti-diagonal symmetric assemblies
+                - "south-west" for main-diagonal symmetric assemblies
+
+                If you wish to define a control cross in a different corner, use the
+                assembly_box_description to explicitly define custom geometry bounds.
+
+
+                assembly_box_description [optional, replaces implicit definition through assembly_pitch, gap, channel_box_thickness, etc.]: 
+                description of the assembly box geometry, which can be used to define more complex assembly box geometries with different gap widths on different sides of the assembly for example, and to explicitly set the origin of the coordinate system for the assembly geometry:
+                    user provided list of surfaces : 
+                    supported surfaces types are Square and Rectangle for now. See GeometryBuilder/surfaces.py for the definition of the surface classes and their parameters.
+                    - surfaces: 
+                        name: user friendly name for the surface
+                        surface_id: unique integer to identify the surface in the geometry building process.
+                            special names / id pairs : 
+                                ("problem_boundaries", 0) for the outer boundaries inscribing the problem.
+                                ("lattice_bounding_box", -1) for the surface bounding the pin lattice: this is the only type that can be filled with the "lattice" structure.
+                        type: "square" or "rectangle" for now, but this can be extended later to support more complex surface types if needed.
+                        parameters: parameters defining the surface geometry, which depend on the surface type. For example, for a square :
+                            center: (x, y) coordinates of the center of the square
+                            side_length: side length of the square
+                        fill_material: (for non-lattice_bounding_box surfaces) material to fill the region defined by the inside surface.
+
+
 
             PIN_GEOMETRY:
                 fuel_radius: radius of the fuel region
@@ -67,6 +132,7 @@ class CartesianAssemblyModel:
                 height: height of the pin
                 self_shielding_option: ``"Santamarina"``, ``"user_defined"``, or ``"automatic"``
                 options_dict: additional options (user-defined radii, number of radial zones, etc.)
+                Note : It is recommended to provide discretization options through the CalculationScheme definition in the corresponding yaml format.
 
             WATER_ROD_GEOMETRY:
                 type: "circular" or "square"
@@ -75,7 +141,7 @@ class CartesianAssemblyModel:
                 inner_side : <value> (for square water rods)
                 outer_side : <value> (for square water rods)
                 corner_radius : <value> (optional, for square water rods with rounded corners)
-                centers: [(x, y) coordinates for the centers of the water rods in the lattice, e.g. [(0.5, 0.5), (2.5, 0.5)] for two water rods centered in the middle of the first and third cells of the first row of the lattice)]
+                centers: [(x, y) coordinates for the centers of the water rods in the assembly, relative to the origin defined for the assembly geometry]
         """
         with open(geometry_description_yaml, 'r') as file:
             yaml_data = yaml.safe_load(file)
@@ -86,6 +152,8 @@ class CartesianAssemblyModel:
         self.lattice_description = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("lattice_description", [])
         self.assembly_pitch = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("assembly_pitch", None)
         self.gap_wide = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("gap_wide", None)
+        self.gap_narrow = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("gap_narrow", None)
+        self.gap = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("gap", None)
         self.channel_box_thickness = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("channel_box_thickness", None)
         self.corner_inner_radius_of_curvature = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("corner_inner_radius_of_curvature", 0.0)
         self.Gd_rod_ids = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("Gd_rod_ids", [])
@@ -93,6 +161,19 @@ class CartesianAssemblyModel:
         self.geometry_type = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("lattice_type", "cartesian") # by default, assume cartesian geometry for the assembly
         self.reactor_type = yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("reactor_type", "BWR") # by default, assume BWR type for the assembly, which can be used to define default self-shielding treatment strategies for the pins in the assembly based on the reactor type if no specific self-shielding option is provided for the pins in the geometry description.
 
+        # check gap_wide and gap_narrow consistency if both are provided
+        if self.gap_wide is not None and self.gap_narrow is not None:
+            if self.gap_wide < self.gap_narrow:
+                raise ValueError(f"Inconsistent gap widths: 'gap_wide' ({self.gap_wide}) must be greater than or equal to 'gap_narrow' ({self.gap_narrow}).")
+        if self.gap_wide is not None and self.gap_narrow is None:
+            self.gap_narrow = self.gap_wide
+        if self.gap_narrow is not None and self.gap_wide is None:
+            self.gap_wide = self.gap_narrow
+        if self.gap_narrow is None and self.gap_wide is None:
+            if self.gap is not None:
+                self.gap_wide = self.gap_narrow = self.gap
+            else:
+                self.gap_wide = self.gap_narrow = self.gap = 0.0
         # Pincell information
         self.pin_geometry_dict = yaml_data.get("PIN_GEOMETRY", {})
         
@@ -109,11 +190,19 @@ class CartesianAssemblyModel:
             self.water_box_corner_radius = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("corner_radius", None)
         self.water_rod_centers = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("centers", [])
         self.number_of_water_rods = len(self.water_rod_centers)
-        self.channel_box_inner_side = self.assembly_pitch - 2 * self.channel_box_thickness - 2 * self.gap_wide if self.channel_box_thickness is not None and self.gap_wide is not None else None
+        self.channel_box_inner_side = self.assembly_pitch - 2 * self.channel_box_thickness - self.gap_wide - self.gap_narrow if self.channel_box_thickness is not None and self.gap_wide is not None and self.gap_narrow is not None else None
         n_cols = len(self.lattice_description[0]) if self.lattice_description else 0
         pin_pitch = self.pin_geometry_dict.get("pin_pitch", 0)
         self.intra_assembly_coolant_width = (self.channel_box_inner_side - n_cols * pin_pitch) / 2.0 if self.channel_box_inner_side is not None else None
-        self.translation_offset = self.gap_wide + self.channel_box_thickness + self.intra_assembly_coolant_width if self.gap_wide is not None and self.channel_box_thickness is not None and self.intra_assembly_coolant_width is not None else None
+
+        # Initialize asymmetric translation offsets
+        self.translation_offset_x = None
+        self.translation_offset_y = None
+
+        # Compute translation offsets based on detected lattice symmetry
+        self._compute_translation_offsets()
+
+
 
         # Control cross information (optional)
         ctrl_data = yaml_data.get("CONTROL_CROSS_GEOMETRY", None)
@@ -149,6 +238,7 @@ class CartesianAssemblyModel:
         "lattice_description": True,
         "assembly_pitch": True,
         "gap_wide": False,
+        "gap_narrow": False,
         "channel_box_thickness": False,
         "corner_inner_radius_of_curvature": False,
         "Gd_rod_ids": False,
@@ -274,6 +364,14 @@ class CartesianAssemblyModel:
                     f"[YAML validation] Missing required key(s) in "
                     f"'{section_name}' of '{source_path}': {missing_required}."
                 )
+            
+    def set_material_to_temperature_mapping(self, material_to_temperature):
+        """
+        Import temperatures defined in the materials composition yaml in the assembly model.
+        """
+        print("Setting material to temperature mapping in assembly model...")
+        print(f"[assembly_model] Provided material to temperature mapping: {material_to_temperature}")
+        self.material_to_temperature = material_to_temperature
 
     def analyze_lattice_description(self, build_pins=True, apply_self_shielding=None):
         """
@@ -344,15 +442,22 @@ class CartesianAssemblyModel:
                             # set the position of the pin in the lattice based on its indices in the lattice description
                             pin_model.set_position_in_lattice(x_index, y_index)
                             # compute and set the center of the pin in the assembly coordinate system
-                            if self.translation_offset is not None and pin_pitch > 0:
-                                center_x = self.translation_offset + x_index * pin_pitch + pin_pitch / 2.0
-                                center_y = self.translation_offset + y_index * pin_pitch + pin_pitch / 2.0
+                            if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
+                                center_x = self.translation_offset_x + x_index * pin_pitch + pin_pitch / 2.0
+                                center_y = self.translation_offset_y + y_index * pin_pitch + pin_pitch / 2.0
                                 pin_model.set_center(center_x, center_y)
                             # set the temperatures for the pin based on the uniform temperatures defined for the assembly
-                            pin_model.set_fuel_temperature(self.fuel_temperature)
-                            pin_model.set_clad_temperature(self.structural_temperature)
-                            pin_model.set_gap_temperature(self.gap_temperature)
-                            pin_model.set_coolant_temperature(self.coolant_temperature)
+                            if self.material_to_temperature:
+                                material_temp = self.material_to_temperature.get(material_name, None)
+                                print(f"[lattice analysis] Setting temperatures for pin with material '{material_name}': {material_temp}")
+                                if material_temp is not None:
+                                    pin_model.set_fuel_temperature(material_temp)
+                            else:
+                                # if no specific temperature defined for the material, use the default uniform temperatures defined for the assembly       
+                                pin_model.set_fuel_temperature(self.default_fuel_temperature)
+                            pin_model.set_clad_temperature(self.default_structural_temperature)
+                            pin_model.set_gap_temperature(self.default_gap_temperature)
+                            pin_model.set_coolant_temperature(self.default_coolant_temperature)
                             # Set the generating cell status for self-shielding treatment and order of mix creation in glow
                             if material_name not in material_descriptors_used:
                                 pin_model.set_generating_cell_status(True)
@@ -367,9 +472,9 @@ class CartesianAssemblyModel:
                             dummy_pin_model = DummyPinModel(descriptor)
                             dummy_pin_model.set_position_in_lattice(x_index, y_index)
                             # compute and set the center of the dummy pin in the assembly coordinate system
-                            if self.translation_offset is not None and pin_pitch > 0:
-                                center_x = self.translation_offset + x_index * pin_pitch + pin_pitch / 2.0
-                                center_y = self.translation_offset + y_index * pin_pitch + pin_pitch / 2.0
+                            if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
+                                center_x = self.translation_offset_x + x_index * pin_pitch + pin_pitch / 2.0
+                                center_y = self.translation_offset_y + y_index * pin_pitch + pin_pitch / 2.0
                                 dummy_pin_model.set_center(center_x, center_y)
                             lattice_row.append(dummy_pin_model)
                     else:
@@ -411,17 +516,46 @@ class CartesianAssemblyModel:
         # add the pin model to the lattice at the corresponding position
         self.lattice[x_index][y_index] = pin_model
 
-    def set_material_compositions(self, compositions):
+    def set_material_compositions(self, compositions, fuel_temps=None, non_fuel_temps=None):
         """
         Set the list of Composition objects for the assembly, typically parsed from a material compositions YAML file
         using parse_all_compositions_from_yaml. This must be called before number_fuel_material_mixtures so that
         each created MaterialMixture can be associated with the correct isotopic composition.
 
         :param compositions (list[Composition]): List of Composition objects for the materials in the assembly.
+        :param fuel_temps (dict): Optional mapping of fuel material names to temperatures in K
+        :param non_fuel_temps (dict): Optional mapping of non-fuel material types to temperatures in K
+                                      (e.g., {'structural': 625, 'gap': 600, 'coolant': 560, 'moderator': 600})
         """
         self.compositions = compositions
+        self._fuel_temps = fuel_temps or {}
+        self._non_fuel_temps = non_fuel_temps or {}
+
         # Build a lookup dict: material_name -> Composition
         self.composition_lookup = {comp.material_name: comp for comp in compositions}
+
+        # Create MaterialMixture objects for non-fuel materials once to store temperatures
+        # These will be accessed during temperature extraction in case_generator
+        self.non_fuel_material_mixtures = []
+        mix_index = 5001  # Start non-fuel indices at a high offset to avoid collision with fuel indices
+
+        for comp in compositions:
+            material_type_key = getattr(comp, 'material_type_key', None)
+            if material_type_key and material_type_key != 'fuel':
+                # This is a non-fuel material, create a MaterialMixture for it
+                temp = self._non_fuel_temps.get(material_type_key, 600.0)
+                depletable = getattr(comp, 'depletable', False)
+
+                mix = MaterialMixture(
+                    material_name=comp.material_name,
+                    material_mixture_index=mix_index,
+                    composition=comp,
+                    temperature=temp,
+                    isdepletable=depletable,
+                    material_type_key=material_type_key,
+                )
+                self.non_fuel_material_mixtures.append(mix)
+                mix_index += 1
 
     def number_fuel_material_mixtures_by_material(self):
         """
@@ -499,16 +633,22 @@ class CartesianAssemblyModel:
                     f"Ensure the material compositions YAML contains an entry with name='{base_material_name}'."
                 )
 
-            # Get fuel temperature from any pin with this material
-            temperature = self._get_fuel_temperature_for_material(base_material_name)
+            # Get fuel temperature from registered temperatures or fallback to pin temperature
+            material_temp = self._fuel_temps.get(base_material_name)
+            if material_temp is None:
+                # Fallback: get temperature from any pin with this material
+                material_temp = self._get_fuel_temperature_for_material(base_material_name)
+
             depletable = getattr(composition, 'depletable', False)
+            material_type_key = getattr(composition, 'material_type_key', 'fuel')
 
             mix = MaterialMixture(
                 material_name=base_material_name,
                 material_mixture_index=mix_index,
                 composition=composition,
-                temperature=temperature,
+                temperature=material_temp,
                 isdepletable=depletable,
+                material_type_key=material_type_key,
             )
             mix.set_unique_material_mixture_name(unique_name)
             self.fuel_material_mixtures.append(mix)
@@ -546,19 +686,22 @@ class CartesianAssemblyModel:
 
     def validate_control_cross_symmetry(self):
         """
-        Check whether the control cross corner is compatible with the
-        lattice's diagonal symmetry and emit a warning if it breaks it.
+        Validate and auto-correct the control cross corner placement based on
+        lattice symmetry and gap configuration (wide-wide corner).
 
-        Compatibility rules:
+        **Gap Configuration & Wide-Wide Corner Mapping:**
 
-        - **Anti-diagonal** lattice symmetry (axis from top-left to
-          bottom-right): preserved by control crosses at ``"north-west"``
-          or ``"south-east"`` corners (the cross sits on the symmetry
-          axis).  ``"north-east"`` or ``"south-west"`` would break it.
-        - **Main-diagonal** (transpose) lattice symmetry: preserved by
-          ``"south-west"`` or ``"north-east"`` corners.
-          ``"north-west"`` or ``"south-east"`` would break it.
-        - **No diagonal symmetry**: all corners are acceptable.
+        - **Anti-diagonal symmetry** (axis top-left to bottom-right):
+          Wide-wide corner is **north-west** (top-left).
+          Narrow-narrow corner is **south-east** (bottom-right).
+        - **Main-diagonal symmetry** (transpose):
+          Wide-wide corner is **south-west** (bottom-left).
+          Narrow-narrow corner is **north-east** (top-right).
+        - **No symmetry**: Wide-wide corner determined by `gap_wide` vs `gap_narrow`.
+
+        **Auto-Correction:**
+        If the control cross is not placed at the wide-wide corner,
+        it is automatically reassigned with a warning message.
 
         This method is called automatically at the end of
         ``parse_geometry_description`` when a control cross is present.
@@ -569,25 +712,34 @@ class CartesianAssemblyModel:
             return
 
         sym = self.check_diagonal_symmetry()
-        if sym is None:
-            return  # no symmetry to break
-
         corner = self.control_cross.center
 
-        compatible = {
-            "anti-diagonal": {"north-west", "south-east"},
-            "main-diagonal": {"south-west", "north-east"},
-        }
+        # Determine the wide-wide corner based on symmetry and gap config
+        if sym == "anti-diagonal":
+            # Anti-diagonal: wide-wide at north-west, narrow-narrow at south-east
+            wide_wide_corner = "north-west"
+            wide_wide_description = "north-west (top-left, wide-wide gap corner)"
+        elif sym == "main-diagonal":
+            # Main-diagonal: wide-wide at south-west, narrow-narrow at north-east
+            wide_wide_corner = "south-west"
+            wide_wide_description = "south-west (bottom-left, wide-wide gap corner)"
+        else:
+            # No symmetry: both corners are acceptable (no auto-correction needed)
+            return
 
-        if corner not in compatible.get(sym, set()):
+        # Auto-correction: if cross is not at wide-wide corner, reassign it
+        if corner != wide_wide_corner:
             warnings.warn(
-                f"[control cross symmetry] The lattice has "
-                f"{sym} symmetry, but the control cross is placed at "
-                f"'{corner}'. Compatible corners for {sym} symmetry "
-                f"are {sorted(compatible[sym])}. The control cross "
-                f"placement will break the lattice symmetry.",
+                f"[control cross placement] The lattice has {sym} symmetry. "
+                f"The wide-wide gap corner (where both gaps are wide) is at "
+                f"{wide_wide_description}. The control cross was specified at "
+                f"'{corner}', which is incompatible. "
+                f"Auto-correcting: control cross center reassigned from "
+                f"'{corner}' to '{wide_wide_corner}'.",
+                UserWarning,
                 stacklevel=2,
             )
+            self.control_cross.center = wide_wide_corner
 
     def check_diagonal_symmetry(self):
         """
@@ -653,6 +805,53 @@ class CartesianAssemblyModel:
                 if self.lattice_description[i][j] != self.lattice_description[j][i]:
                     return False
         return True
+
+    def _compute_translation_offsets(self):
+        """
+        Compute asymmetric translation offsets based on detected lattice symmetry and gap configuration.
+
+        For symmetric lattice or when gap_wide == gap_narrow:
+            translation_offset_x = translation_offset_y = gap_wide + cbt + intra_assembly_coolant_width
+
+        For anti-diagonal symmetry (axis from top-left to bottom-right):
+            translation_offset_x = gap_wide + cbt + intra_assembly_coolant_width  (wide on left)
+            translation_offset_y = gap_narrow + cbt + intra_assembly_coolant_width  (narrow on bottom)
+
+        For main-diagonal symmetry (transpose symmetry):
+            translation_offset_x = gap_wide + cbt + intra_assembly_coolant_width
+            translation_offset_y = gap_wide + cbt + intra_assembly_coolant_width  (both use wide)
+        """
+        # Check prerequisites
+        if (self.gap_wide is None or self.channel_box_thickness is None
+                or self.intra_assembly_coolant_width is None):
+            self.translation_offset_x = None
+            self.translation_offset_y = None
+            return
+
+        # Base offset using gap_wide (applies to wide-gap configuration)
+        offset_wide = self.gap_wide + self.channel_box_thickness + self.intra_assembly_coolant_width
+
+        # Narrow offset for asymmetric side (only used in anti-diagonal for y-axis)
+        offset_narrow = self.gap_narrow + self.channel_box_thickness + self.intra_assembly_coolant_width
+
+        # Detect lattice symmetry
+        sym_type = self.check_diagonal_symmetry()
+
+        if sym_type == "anti-diagonal":
+            # Top-left corner is wide-wide, bottom-right is narrow-narrow
+            # X-axis (left-right): wide on left (low x), narrow on right (high x)
+            # Y-axis (bottom-top): narrow on bottom (low y), wide on top (high y)
+            self.translation_offset_x = offset_wide
+            self.translation_offset_y = offset_narrow
+        elif sym_type == "main-diagonal":
+            # Both bottom-left and top-right are wide-wide corners
+            # Equal distribution needed on both axes
+            self.translation_offset_x = offset_wide
+            self.translation_offset_y = offset_wide
+        else:
+            # No symmetry or symmetric (quarter/eighth) - treat as isotropic
+            self.translation_offset_x = offset_wide
+            self.translation_offset_y = offset_wide
 
     def number_fuel_material_mixtures_by_pin(self):
         """
@@ -769,14 +968,20 @@ class CartesianAssemblyModel:
                 )
 
             temperature = self._get_fuel_temperature_for_material(base_material_name)
+            material_temp = self._fuel_temps.get(base_material_name)
+            if material_temp is None:
+                material_temp = temperature
+
             depletable = getattr(composition, 'depletable', False)
+            material_type_key = getattr(composition, 'material_type_key', 'fuel')
 
             mix = MaterialMixture(
                 material_name=base_material_name,
                 material_mixture_index=mix_index,
                 composition=composition,
-                temperature=temperature,
+                temperature=material_temp,
                 isdepletable=depletable,
+                material_type_key=material_type_key,
             )
             mix.set_unique_material_mixture_name(unique_name)
             self.fuel_material_mixtures.append(mix)
@@ -933,6 +1138,7 @@ class CartesianAssemblyModel:
             "strategy": self.current_mix_numbering_strategy,
             "mix_names": list(self.fuel_material_mixture_names),  # Direct name list
             "tdt_indices": {},  # Populated after TDT enforcement
+            "non_fuel_indices": {},  # Populated after TDT enforcement (1-to-1 material mappings)
             "tdt_enforced": False,  # Flag
             "step_name": None,  # Set during TDT enforcement
             "pin_indices": {},  # (row, col) → pin_idx for by_pin
@@ -1189,7 +1395,11 @@ class CartesianAssemblyModel:
         # Record TDT indices in the current mix state snapshot for per-step tracking
         if self.mix_state_history:
             current_state = self.mix_state_history[-1]
-            current_state["tdt_indices"] = dict(self.material_mixtures_dict)  # Copy final indices
+            # Combine fuel and non-fuel indices into tdt_indices
+            all_tdt_indices = dict(self.material_mixtures_dict)
+            all_tdt_indices.update(non_fuel)
+            current_state["tdt_indices"] = all_tdt_indices
+            current_state["non_fuel_indices"] = dict(non_fuel)  # Store non-fuel indices for MIXEQ
             current_state["tdt_enforced"] = True
             if step_name:
                 current_state["step_name"] = step_name
@@ -1384,6 +1594,16 @@ class CartesianAssemblyModel:
             for from_name in from_state["mix_names"]:
                 if from_name in from_tdt and from_name in to_tdt:
                     table.append((from_name, from_name, from_tdt[from_name], to_tdt[from_name]))
+
+            # Add non-fuel material entries (1-to-1 by name, indices may differ between steps)
+            from_non_fuel = from_state.get("non_fuel_indices", {})
+            to_non_fuel = to_state.get("non_fuel_indices", {})
+
+            for non_fuel_name, from_idx in from_non_fuel.items():
+                to_idx = to_non_fuel.get(non_fuel_name)
+                if from_idx is not None and to_idx is not None:
+                    table.append((non_fuel_name, non_fuel_name, from_idx, to_idx))
+
             return table
 
         # Different strategies - use recorded correspondence
@@ -1406,6 +1626,15 @@ class CartesianAssemblyModel:
                 to_idx = to_tdt.get(to_name)
                 if to_idx is not None:
                     table.append((from_name, to_name, from_idx, to_idx))
+
+        # Add non-fuel material entries (1-to-1 by name, indices may differ between steps)
+        from_non_fuel = from_state.get("non_fuel_indices", {})
+        to_non_fuel = to_state.get("non_fuel_indices", {})
+
+        for non_fuel_name, from_idx in from_non_fuel.items():
+            to_idx = to_non_fuel.get(non_fuel_name)
+            if from_idx is not None and to_idx is not None:
+                table.append((non_fuel_name, non_fuel_name, from_idx, to_idx))
 
         if not table:
             print(f"[WARNING] No valid correspondences found between '{from_step}' and '{to_step}' "
@@ -1553,11 +1782,15 @@ class CartesianAssemblyModel:
         """
         set uniform temperatures for the different materials in the assembly, which can be used for temperature-dependent self-shielding treatment in Dragon.
         """
-        self.fuel_temperature = fuel_temperature
-        self.gap_temperature = gap_temperature
-        self.coolant_temperature = coolant_temperature
-        self.moderator_temperature = moderator_temperature
-        self.structural_temperature = structural_temperature
+        print(f"[set_uniform_temperatures] Setting uniform temperatures: "
+              f"fuel={fuel_temperature} K, gap={gap_temperature} K, "
+              f"coolant={coolant_temperature} K, moderator={moderator_temperature} K, "
+              f"structural={structural_temperature} K.")
+        self.default_fuel_temperature = fuel_temperature
+        self.default_gap_temperature = gap_temperature
+        self.default_coolant_temperature = coolant_temperature
+        self.default_moderator_temperature = moderator_temperature
+        self.default_structural_temperature = structural_temperature
         return
 
     def update_lattice_description(self, new_lattice_description):
@@ -1670,6 +1903,7 @@ class CartesianAssemblyModel:
                 composition=composition,
                 temperature=temperature,
                 isdepletable=depletable,
+                material_type_key=getattr(composition, 'material_type_key', 'structural'),
             )
             mix.set_unique_material_mixture_name(unique_name)
             self.control_cross_absorber_mixtures.append(mix)

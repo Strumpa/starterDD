@@ -170,9 +170,9 @@ class TestAT10AssemblyCreation:
         """Verify the water rod center coordinates are stored."""
         wr = at10_assembly_base.water_rods[0]
         assert wr.center is not None
-        # From YAML: centers: [[7.1225, 7.1225]]
-        assert wr.center[0] == pytest.approx(7.1225)
-        assert wr.center[1] == pytest.approx(7.1225)
+        # From YAML: centers: [[8.2675, 8.2675]]
+        assert wr.center[0] == pytest.approx(8.2675)
+        assert wr.center[1] == pytest.approx(8.2675)
 
     def test_water_rod_materials(self, at10_assembly_base):
         """Verify water rod material assignments."""

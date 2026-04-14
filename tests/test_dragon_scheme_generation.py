@@ -794,7 +794,7 @@ def test_generate_cle2000_procedures(tmp_path):
     GE14_DOM_test_case = DragonCase(
         case_name="GE14_DOM",
         call_glow=False,
-        draglibs_names_to_alias={
+        draglib_name_to_alias={
             "draglibendfb8r1SHEM295": "endfb8r1_295",
         },
         config_yamls={
@@ -830,7 +830,7 @@ def test_x2m_with_branches_has_while_loops(tmp_path):
     case = DragonCase(
         case_name="GE14_BR",
         call_glow=False,
-        draglibs_names_to_alias={
+        draglib_name_to_alias={
             "draglibendfb8r1SHEM295": "endfb8r1_295",
         },
         config_yamls={
@@ -879,7 +879,7 @@ def test_edir_with_branches_has_compo_parameter(tmp_path):
     case = DragonCase(
         case_name="GE14_BR",
         call_glow=False,
-        draglibs_names_to_alias={
+        draglib_name_to_alias={
             "draglibendfb8r1SHEM295": "endfb8r1_295",
         },
         config_yamls={
@@ -918,7 +918,7 @@ def test_edir_with_branches_has_correct_editions(tmp_path):
     case = DragonCase(
         case_name="GE14_ED",
         call_glow=False,
-        draglibs_names_to_alias={
+        draglib_name_to_alias={
             "draglibendfb8r1SHEM295": "endfb8r1_295",
         },
         config_yamls={
@@ -958,7 +958,7 @@ def test_mix_with_density_branch_has_nh_no_parameters(tmp_path):
     case = DragonCase(
         case_name="GE14_MX",
         call_glow=False,
-        draglibs_names_to_alias={
+        draglib_name_to_alias={
             "draglibendfb8r1SHEM295": "endfb8r1_295",
         },
         config_yamls={
@@ -985,7 +985,7 @@ def test_line_length_constraint_all_files(tmp_path):
     case = DragonCase(
         case_name="GE14_LL",
         call_glow=False,
-        draglibs_names_to_alias={
+        draglib_name_to_alias={
             "draglibendfb8r1SHEM295": "endfb8r1_295",
         },
         config_yamls={

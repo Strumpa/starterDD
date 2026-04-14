@@ -20,12 +20,16 @@ except NameError:
 GE14_INPUTS = PROJECT_ROOT / "data" / "BWRProgressionProblems" / "GE14_inputs" / "ASSEMBLY"
 TDT_FILES = PROJECT_ROOT / "tests" / "reference_tdt_files" / "GE14"
 DRAGON_EXEC = os.environ.get('dragon_exec', None)
+DRAGLIBS_PATH = Path(os.environ.get('DRAGLIB_DIR', "/path/to/draglibs"))
+
+run_dragon=True  # Set to False for a dry run (no Dragon execution)
+run_glow = False  # Set to True to call glow for geometry processing (if needed)
 
 GE14_DOM_test_case = DragonCase(
         case_name="GE14_DOM",
-        call_glow=False,
-        draglibs_names_to_alias={
-            "draglibendfb8r1SHEM295": "endfb8r1_295",
+        call_glow=run_glow,
+        draglib_name_to_alias={
+            "draglibendfb8r1SHEM295_v5p1": "endfb8r1_295",
         },
         config_yamls={
             "MATS": str(GE14_INPUTS / "material_compositions.yaml"),
@@ -57,32 +61,31 @@ print("Generated procedures:", result)
 
 # --- Option A: dry run (no Dragon execution) -----------------------
 # Useful for verifying the setup before running.
-#
-# dry_result = GE14_DOM_test_case.run(
-#     draglib_paths={
-#         "draglibendfb8r1SHEM295": "/path/to/draglibendfb8r1SHEM295",
-#     },
-#     results_root="./results",
-#     dry_run=True,
-# )
-# print(f"Dry run directory: {dry_result.run_directory}")
-
+if not run_dragon:
+    dry_result = GE14_DOM_test_case.run(
+         draglib_paths={
+             "draglibendfb8r1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibendfb8r1SHEM295_v5p1"),
+         },
+         results_root=str(PROJECT_ROOT / "tutorials" / "results"),
+         dry_run=True,
+    )
+    print(f"Dry run directory: {dry_result.run_directory}")
 # --- Option B: full execution --------------------------------------
 # Requires $dragon_exec and draglib files to be available.
-#
-# run_result = GE14_DOM_test_case.run(
-#     dragon_executable=DRAGON_EXEC,  # or None to use $dragon_exec
-#     draglib_paths={
-#         "draglibendfb8r1SHEM295": "/path/to/draglibendfb8r1SHEM295",
-#     },
-#     results_root="./results",
-#     num_threads=1,
-# )
-# print(f"Success: {run_result.success}")
-# print(f"keff:    {run_result.keff}")
-# print(f"Time:    {run_result.wall_time_seconds:.1f}s")
-# print(f"Results: {run_result.run_directory}")
-#
+if run_dragon:
+     run_result = GE14_DOM_test_case.run(
+         dragon_executable=DRAGON_EXEC,  # or None to use $dragon_exec
+         draglib_paths={
+             "draglibendfb8r1SHEM295_v5p1": (DRAGLIBS_PATH / "draglibendfb8r1SHEM295_v5p1"),
+         },
+         results_root=str(PROJECT_ROOT / "tutorials" / "results"),
+         num_threads=1,
+     )
+     print(f"Success: {run_result.success}")
+     print(f"keff:    {run_result.keff}")
+     print(f"Time:    {run_result.wall_time_seconds:.1f}s")
+     print(f"Results: {run_result.run_directory}")
+
 # Results directory structure:
 #   results/
 #   └── GE14_DOM/

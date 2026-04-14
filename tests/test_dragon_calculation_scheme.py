@@ -304,6 +304,218 @@ class TestBoxDiscretizationConfig:
         assert bdc.gap_splits == (10, 1)
         assert any(issubclass(warning.category, DeprecationWarning) for warning in w)
 
+    # ===== Tests for gap_wide/narrow and corner-specific splits =====
+
+    def test_gap_wide_narrow_splits_defaults(self):
+        """New gap_wide/narrow splits should default to None."""
+        bdc = BoxDiscretizationConfig()
+        assert bdc.gap_wide_splits is None
+        assert bdc.gap_narrow_splits is None
+        assert bdc.wide_wide_corner_splits is None
+        assert bdc.narrow_narrow_corner_splits is None
+        assert bdc.mixed_corner_splits is None
+
+    def test_gap_wide_narrow_splits_custom(self):
+        """Custom gap_wide/narrow splits should be stored as tuples."""
+        bdc = BoxDiscretizationConfig(
+            enabled=True,
+            gap_wide_splits=[20, 4],
+            gap_narrow_splits=[10, 2],
+            wide_wide_corner_splits=[8, 8],
+            narrow_narrow_corner_splits=[4, 4],
+            mixed_corner_splits=[6, 6],
+        )
+        assert bdc.gap_wide_splits == (20, 4)
+        assert bdc.gap_narrow_splits == (10, 2)
+        assert bdc.wide_wide_corner_splits == (8, 8)
+        assert bdc.narrow_narrow_corner_splits == (4, 4)
+        assert bdc.mixed_corner_splits == (6, 6)
+
+    def test_resolve_splits_with_symmetry_no_symmetry(self):
+        """With no symmetry, all regions should use uniform splits."""
+        from starterDD.DDModel.DragonModel import CartesianAssemblyModel
+
+        # Create a simple symmetric assembly (no detected symmetry)
+        bdc = BoxDiscretizationConfig(
+            enabled=True,
+            gap_splits=[10, 2],
+        )
+
+        # Mock assembly model with no symmetry
+        class MockAssemblyModel:
+            def check_diagonal_symmetry(self):
+                return None
+
+        assembly_model = MockAssemblyModel()
+        regions = bdc.resolve_splits_with_symmetry(n_cols=8, n_rows=8, assembly_model=assembly_model)
+
+        # All corners should be uniform (default corner_splits)
+        assert regions['corner_bl'] == bdc.corner_splits
+        assert regions['corner_br'] == bdc.corner_splits
+        assert regions['corner_tl'] == bdc.corner_splits
+        assert regions['corner_tr'] == bdc.corner_splits
+
+    def test_resolve_splits_with_symmetry_anti_diagonal(self):
+        """Anti-diagonal: TL=wide-wide, BR=narrow-narrow, with mixed corner transposition."""
+        bdc = BoxDiscretizationConfig(
+            enabled=True,
+            gap_wide_splits=[20, 4],
+            gap_narrow_splits=[10, 2],
+            wide_wide_corner_splits=[8, 8],
+            narrow_narrow_corner_splits=[4, 4],
+            mixed_corner_splits=[6, 3],  # Asymmetric to verify transposition
+        )
+
+        # Mock assembly model with anti-diagonal symmetry
+        class MockAssemblyModel:
+            def check_diagonal_symmetry(self):
+                return "anti-diagonal"
+
+        assembly_model = MockAssemblyModel()
+        regions = bdc.resolve_splits_with_symmetry(n_cols=8, n_rows=8, assembly_model=assembly_model)
+
+        # TL should be wide-wide (no transpose)
+        assert regions['corner_tl'] == (8, 8)
+        # BR should be narrow-narrow (no transpose)
+        assert regions['corner_br'] == (4, 4)
+        # TR should get mixed_corner_splits directly
+        assert regions['corner_tr'] == (6, 3)
+        # BL should get mixed_corner_splits transposed ← Key difference from old implementation
+        assert regions['corner_bl'] == (3, 6), "BL mixed corner should be transposed"
+
+        #Specific corner splits should override gap_*_splits.
+        bdc = BoxDiscretizationConfig(
+            enabled=True,
+            gap_wide_splits=[20, 4],
+            gap_narrow_splits=[10, 2],
+            wide_wide_corner_splits=[8, 8],  # Explicit override
+        )
+
+        # Mock assembly model with anti-diagonal symmetry
+        class MockAssemblyModel:
+            def check_diagonal_symmetry(self):
+                return "anti-diagonal"
+
+        assembly_model = MockAssemblyModel()
+        regions = bdc.resolve_splits_with_symmetry(n_cols=8, n_rows=8, assembly_model=assembly_model)
+
+        # TL should use wide_wide_corner_splits, not gap_wide_splits
+        assert regions['corner_tl'] == (8, 8)
+        assert regions['corner_tl'] != (20, 4)
+
+    def test_resolve_splits_with_symmetry_main_diagonal(self):
+        """Main-diagonal: BL=wide-wide, TR=narrow-narrow, with mixed corner transposition."""
+        bdc = BoxDiscretizationConfig(
+            enabled=True,
+            gap_wide_splits=[20, 4],
+            gap_narrow_splits=[10, 2],
+            wide_wide_corner_splits=[8, 8],
+            narrow_narrow_corner_splits=[4, 4],
+            mixed_corner_splits=[5, 2],  # Asymmetric to verify transposition
+        )
+
+        # Mock assembly model with main-diagonal symmetry
+        class MockAssemblyModel:
+            def check_diagonal_symmetry(self):
+                return "main-diagonal"
+
+        assembly_model = MockAssemblyModel()
+        regions = bdc.resolve_splits_with_symmetry(n_cols=8, n_rows=8, assembly_model=assembly_model)
+
+        # BL should be wide-wide (no transpose)
+        assert regions['corner_bl'] == (8, 8)
+        # TR should be narrow-narrow (no transpose)
+        assert regions['corner_tr'] == (4, 4)
+        # BR should get mixed_corner_splits directly
+        assert regions['corner_br'] == (5, 2)
+        # TL should get mixed_corner_splits transposed
+        assert regions['corner_tl'] == (2, 5), "TL mixed corner should be transposed"
+
+    def test_resolve_splits_with_symmetry_fallback_to_gap_splits(self):
+        """When specific corner splits not set, should fall back to gap_*_splits."""
+        bdc = BoxDiscretizationConfig(
+            enabled=True,
+            gap_wide_splits=[20, 4],
+            gap_narrow_splits=[10, 2],
+            # No specific corner splits set
+        )
+
+        # Mock assembly model with anti-diagonal symmetry
+        class MockAssemblyModel:
+            def check_diagonal_symmetry(self):
+                return "anti-diagonal"
+
+        assembly_model = MockAssemblyModel()
+        regions = bdc.resolve_splits_with_symmetry(n_cols=8, n_rows=8, assembly_model=assembly_model)
+
+        # TL should use gap_wide_splits
+        assert regions['corner_tl'] == (20, 4)
+        # BR should use gap_narrow_splits
+        assert regions['corner_br'] == (10, 2)
+
+    def test_mixed_corner_transposition_only(self):
+        """Verify that only mixed corners are transposed; wide/narrow corners are NOT.
+
+        This test ensures the correct understanding of the transposition convention:
+        - wide_wide_corner_splits: fixed (NOT transposed)
+        - narrow_narrow_corner_splits: fixed (NOT transposed)
+        - mixed_corner_splits: transposed selectively based on symmetry
+        """
+        from starterDD.DDModel.DragonModel import CartesianAssemblyModel
+
+        bdc = BoxDiscretizationConfig(
+            enabled=True,
+            wide_wide_corner_splits=[3, 7],      # Asymmetric (not square)
+            narrow_narrow_corner_splits=[5, 2],  # Asymmetric (not square)
+            mixed_corner_splits=[4, 1],          # Asymmetric to show transposition clearly
+        )
+
+        # Mock assembly model with anti-diagonal symmetry
+        class MockAssemblyModel:
+            def check_diagonal_symmetry(self):
+                return "anti-diagonal"
+
+        assembly_model = MockAssemblyModel()
+        regions = bdc.resolve_splits_with_symmetry(n_cols=8, n_rows=8, assembly_model=assembly_model)
+
+        # Wide-wide and narrow-narrow should NOT be transposed ← Key assertions
+        assert regions['corner_tl'] == (3, 7), \
+            "wide-wide corner MUST NOT be transposed"
+        assert regions['corner_br'] == (5, 2), \
+            "narrow-narrow corner MUST NOT be transposed"
+
+        # Mixed corners should be transposed selectively
+        assert regions['corner_tr'] == (4, 1), \
+            "mixed corner TR gets direct: 4 splits along top gap, 1 along right gap"
+        assert regions['corner_bl'] == (1, 4), \
+            "mixed corner BL MUST BE transposed: 1 split along left gap, 4 along bottom gap"
+
+
+
+    def test_vertical_side_permutation(self):
+        """Vertical sides should have permuted splits."""
+        bdc = BoxDiscretizationConfig(
+            enabled=True,
+            gap_wide_splits=[20, 4],
+            gap_narrow_splits=[10, 2],
+        )
+
+        # Mock assembly model
+        class MockAssemblyModel:
+            def check_diagonal_symmetry(self):
+                return "anti-diagonal"
+
+        assembly_model = MockAssemblyModel()
+        regions = bdc.resolve_splits_with_symmetry(n_cols=8, n_rows=8, assembly_model=assembly_model)
+
+        # Horizontal sides should not be permuted
+        assert regions['side_top'] == (20, 4) or regions['side_top'] == (10, 2)
+        assert regions['side_bottom'] == (10, 2) or regions['side_bottom'] == (20, 4)
+
+        # Vertical sides should be permuted
+        assert regions['side_left'] == (4, 20) or regions['side_left'] == (2, 10)
+        assert regions['side_right'] == (2, 10) or regions['side_right'] == (4, 20)
+
 
 # =====================================================================
 #  ControlCrossSubmeshConfig
@@ -383,23 +595,40 @@ class TestControlCrossSubmeshConfig:
 class TestCrossModeratorDiscretizationConfig:
     def test_defaults(self):
         cdc = CrossModeratorDiscretizationConfig()
-        assert cdc.narrow_gap_splits is None
+        assert cdc.cross_side_gap_splits is None
         assert cdc.moderator_at_cross_corner_splits is None
         assert cdc.stub_splits is None
 
     def test_custom(self):
         cdc = CrossModeratorDiscretizationConfig(
-            narrow_gap_splits=[4, 2],
+            cross_side_gap_splits=[4, 2],
             moderator_at_cross_corner_splits=[3, 3],
             stub_splits=[2, 1],
         )
-        assert cdc.narrow_gap_splits == (4, 2)
+        assert cdc.cross_side_gap_splits == (4, 2)
         assert cdc.moderator_at_cross_corner_splits == (3, 3)
         assert cdc.stub_splits == (2, 1)
 
+    def test_backward_compatibility_narrow_gap_splits(self):
+        """Test that old 'narrow_gap_splits' parameter still works with deprecation warning."""
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            cdc = CrossModeratorDiscretizationConfig(
+                narrow_gap_splits=[4, 2],
+                moderator_at_cross_corner_splits=[3, 3],
+                stub_splits=[2, 1],
+            )
+            # Check that deprecated parameter is accepted
+            assert cdc.cross_side_gap_splits == (4, 2)
+            # Check that a deprecation warning was issued
+            assert len(w) == 1
+            assert issubclass(w[0].category, DeprecationWarning)
+            assert "narrow_gap_splits" in str(w[0].message)
+
     def test_resolve_auto(self):
         cdc = CrossModeratorDiscretizationConfig()
-        ng, mc, st = cdc.resolve(
+        cross_side_gap, mc, st = cdc.resolve(
             gap_splits=(10, 2),
             lattice_pitch=10.0,
             wide_gap_width=1.0,
@@ -407,19 +636,19 @@ class TestCrossModeratorDiscretizationConfig:
             cross_corner_dims=(0.5, 0.5),
             stub_dims=(5.0, 0.25),
         )
-        assert isinstance(ng, tuple) and len(ng) == 2
+        assert isinstance(cross_side_gap, tuple) and len(cross_side_gap) == 2
         assert isinstance(mc, tuple) and len(mc) == 2
         assert isinstance(st, tuple) and len(st) == 2
         # All auto-computed values must be >= 1
-        assert all(v >= 1 for v in ng + mc + st)
+        assert all(v >= 1 for v in cross_side_gap + mc + st)
 
     def test_resolve_explicit(self):
         cdc = CrossModeratorDiscretizationConfig(
-            narrow_gap_splits=[4, 2],
+            cross_side_gap_splits=[4, 2],
             moderator_at_cross_corner_splits=[3, 3],
             stub_splits=[2, 1],
         )
-        ng, mc, st = cdc.resolve(
+        cross_side_gap, mc, st = cdc.resolve(
             gap_splits=(10, 2),
             lattice_pitch=10.0,
             wide_gap_width=1.0,
@@ -427,7 +656,7 @@ class TestCrossModeratorDiscretizationConfig:
             cross_corner_dims=(0.5, 0.5),
             stub_dims=(5.0, 0.25),
         )
-        assert ng == (4, 2)
+        assert cross_side_gap == (4, 2)
         assert mc == (3, 3)
         assert st == (2, 1)
 
@@ -966,6 +1195,103 @@ class TestFromYAML:
             assert moc_step.box_discretization.enabled is True
             assert moc_step.box_discretization.corner_splits == (3, 3)
             assert moc_step.box_discretization.gap_splits == (10, 1)
+        finally:
+            os.unlink(tmp_path)
+
+    def test_from_yaml_box_discretization_asymmetric_gaps(self):
+        """Verify gap_wide_splits, gap_narrow_splits, and corner splits are parsed."""
+        scheme_data = {
+            "DRAGON_CALCULATION_SCHEME": {
+                "name": "asymmetric_gaps_test",
+                "steps": [
+                    {
+                        "name": "FLUX_MOC",
+                        "step_type": "flux",
+                        "spatial_method": "MOC",
+                        "tracking": "TSPC",
+                        "flux_level": 2,
+                        "radial_scheme": "automatic",
+                        "radial_params": {"num_radial_zones": 3},
+                        "polar_angles_quadrature": "GAUS",
+                        "number_of_polar_angles": 4,
+                        "export_macros": True,
+                        "sectorization": {
+                            "enabled": True,
+                            "windmill": True,
+                            "fuel_pins": {
+                                "sectors": [1, 1, 1, 12],
+                                "angles": [0, 0, 0, 15.0],
+                            },
+                        },
+                        "box_discretization": {
+                            "enabled": True,
+                            "corner_splits": [3, 3],
+                            "gap_splits": [10, 1],
+                            "gap_wide_splits": [20, 4],
+                            "gap_narrow_splits": [10, 2],
+                            "wide_wide_corner_splits": [8, 8],
+                            "narrow_narrow_corner_splits": [5, 5],
+                            "mixed_corner_splits": [6, 6],
+                        },
+                    },
+                ],
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(scheme_data, f)
+            tmp_path = f.name
+
+        try:
+            scheme = DragonCalculationScheme.from_yaml(tmp_path)
+            moc_step = scheme.get_step("FLUX_MOC")
+            assert moc_step.box_discretization is not None
+            assert moc_step.box_discretization.enabled is True
+            assert moc_step.box_discretization.gap_wide_splits == (20, 4)
+            assert moc_step.box_discretization.gap_narrow_splits == (10, 2)
+            assert moc_step.box_discretization.wide_wide_corner_splits == (8, 8)
+            assert moc_step.box_discretization.narrow_narrow_corner_splits == (5, 5)
+            assert moc_step.box_discretization.mixed_corner_splits == (6, 6)
+            # Original gap_splits should still be present
+            assert moc_step.box_discretization.gap_splits == (10, 1)
+        finally:
+            os.unlink(tmp_path)
+
+    def test_from_yaml_box_discretization_partial_asymmetric_gaps(self):
+        """Verify partial specification of gap_wide/narrow splits."""
+        scheme_data = {
+            "DRAGON_CALCULATION_SCHEME": {
+                "name": "partial_asymmetric_test",
+                "steps": [
+                    {
+                        "name": "FLUX",
+                        "step_type": "flux",
+                        "spatial_method": "IC",
+                        "tracking": "TISO",
+                        "radial_scheme": "Santamarina",
+                        "export_macros": True,
+                        "box_discretization": {
+                            "enabled": True,
+                            "gap_splits": [10, 2],
+                            "gap_wide_splits": [20, 4],  # Only this is specified
+                            # gap_narrow_splits is omitted
+                        },
+                    },
+                ],
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(scheme_data, f)
+            tmp_path = f.name
+
+        try:
+            scheme = DragonCalculationScheme.from_yaml(tmp_path)
+            flux = scheme.get_step("FLUX")
+            assert flux.box_discretization is not None
+            assert flux.box_discretization.gap_wide_splits == (20, 4)
+            assert flux.box_discretization.gap_narrow_splits is None
+            assert flux.box_discretization.gap_splits == (10, 2)
         finally:
             os.unlink(tmp_path)
 
