@@ -41,7 +41,7 @@ class CartesianAssemblyModel:
         Parse the geometry description YAML file for the assembly.
 
         All coordinates are relative to the origin set at the bottom-left corner of the assembly.
-        In Cartesian gometries : this is the xmin, ymin corner of the assembly, this can be specified as : 
+        In Cartesian geometries : this is the xmin, ymin corner of the assembly, this can be specified as : 
             - A "problem_boundaries" if present in the assembly_box_description of the input yaml file.
             - Implicitly as xmin=0, ymin=0 of in a [0, assembly_pitch] x [0, assembly_pitch] square if the "assembly_box_description" is not provided in the input yaml file.
             In this case the assembly_pitch parameter must be set in the ASSEMBLY_GEOMETRY section of the geometry description yaml file to define the size of the assembly.
@@ -455,9 +455,9 @@ class CartesianAssemblyModel:
                             else:
                                 # if no specific temperature defined for the material, use the default uniform temperatures defined for the assembly       
                                 pin_model.set_fuel_temperature(self.default_fuel_temperature)
-                                pin_model.set_clad_temperature(self.default_structural_temperature)
-                                pin_model.set_gap_temperature(self.default_gap_temperature)
-                                pin_model.set_coolant_temperature(self.default_coolant_temperature)
+                            pin_model.set_clad_temperature(self.default_structural_temperature)
+                            pin_model.set_gap_temperature(self.default_gap_temperature)
+                            pin_model.set_coolant_temperature(self.default_coolant_temperature)
                             # Set the generating cell status for self-shielding treatment and order of mix creation in glow
                             if material_name not in material_descriptors_used:
                                 pin_model.set_generating_cell_status(True)

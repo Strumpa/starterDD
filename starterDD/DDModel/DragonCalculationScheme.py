@@ -1910,7 +1910,7 @@ class DragonCalculationScheme:
             export_macros=d.get("export_macros", False),
             box_discretization=box_disc,
             mix_numbering_strategy=d.get("mix_numbering_strategy", "by_material"),
-            tdt_file_id=d.get("tdt_file_identifier", None),
+            tdt_file_id=d.get("tdt_file_id", None),
             **tracking_kwargs,
         )
 
