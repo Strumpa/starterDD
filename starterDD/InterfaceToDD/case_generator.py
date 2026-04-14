@@ -877,7 +877,9 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(uss_line)
         )
-        proc.add_body_line(" PASS 3")
+        proc.add_body_line("   PASS 3")
+        proc.add_body_line(";")
+        proc.add_body_line("")
 
         if mixeq_procedures:
             for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
@@ -1313,7 +1315,7 @@ class DragonCase:
         )
         proc.add_body_line("    PASS 3")
         proc.add_body_line(f"{inner_indent};")
-        proc.add_body_line("")
+        proc.add_body_line("\n")
 
         if mixeq_procedures:
             for proc_name, _, current_step_name, next_step_name in mixeq_procedures:

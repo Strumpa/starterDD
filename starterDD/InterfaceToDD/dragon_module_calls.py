@@ -1525,8 +1525,6 @@ class SALT:
         ``step.name`` when ``None``.
     title : str or None
         Title string for the SALT call.  Auto-generated if ``None``.
-    batch : int or None
-        BATCH parameter.  Defaults to 1 if unspecified.
     """
 
     AVAILABLE_QUADRATURES = (
@@ -1535,7 +1533,7 @@ class SALT:
     AVAILABLE_TSPC_ANGLES = (2, 6, 8, 12, 14, 18, 20, 24, 30)
 
     def __init__(self, calculation_step, tdt_var_name,
-                 track_name=None, title=None, batch=None):
+                 track_name=None, title=None):
         self.step = calculation_step
         self.tdt_var_name = tdt_var_name
 
@@ -1563,12 +1561,11 @@ class SALT:
         )
         lines.append("    EDIT 2")
         lines.append(f"    TITLE '{self.title}'")
-        if self.batch is not None:
+        if self.batch:
             lines.append(f"    BATCH {self.batch}")
         lines.append(f"    ANIS {s.anisotropy_level}")
         
-        if s.spatial_method == "MOC":
-            #lines.append(f"    {s.polar_angles_quadrature}")    
+        if s.spatial_method == "MOC":  
             lines.append("    ALLG")
             lines.append(
                 f"    {s.tracking} "
