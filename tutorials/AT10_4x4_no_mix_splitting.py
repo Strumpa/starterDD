@@ -45,7 +45,7 @@ DRAGLIBS_PATH = Path(os.environ.get('DRAGLIB_DIR', "/path/to/draglibs"))
 GLOW_DATA = PROJECT_ROOT.parent / "glow_data"
 AT10_OUTPUT = GLOW_DATA / "starterDD_outputs" / "AT10_4x4" / "2L_scheme"
 run_dragon=True  # Set to False for a dry run (no Dragon execution)
-run_glow = False  # Set to True to call glow for geometry processing (if needed)s
+run_glow = False  # Set to True to call glow for geometry processing (if needed)
 
 AT10_4x4_test_case = DragonCase(
         case_name="AT10_4x4_by_pin",

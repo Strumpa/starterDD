@@ -29,7 +29,7 @@ GE14_DOM_test_case = DragonCase(
         case_name="GE14_DOM",
         call_glow=run_glow,
         draglib_name_to_alias={
-            "draglibendfb8r1SHEM295": "endfb8r1_295",
+            "draglibendfb8r1SHEM295_v5p1": "endfb8r1_295",
         },
         config_yamls={
             "MATS": str(GE14_INPUTS / "material_compositions.yaml"),

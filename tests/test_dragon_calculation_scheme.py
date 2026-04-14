@@ -380,8 +380,28 @@ class TestBoxDiscretizationConfig:
         assert regions['corner_br'] == (4, 4)
         # TR should get mixed_corner_splits directly
         assert regions['corner_tr'] == (6, 3)
-        # BL should get mixed_corner_splits transposed
+        # BL should get mixed_corner_splits transposed ← Key difference from old implementation
         assert regions['corner_bl'] == (3, 6), "BL mixed corner should be transposed"
+
+        #Specific corner splits should override gap_*_splits.
+        bdc = BoxDiscretizationConfig(
+            enabled=True,
+            gap_wide_splits=[20, 4],
+            gap_narrow_splits=[10, 2],
+            wide_wide_corner_splits=[8, 8],  # Explicit override
+        )
+
+        # Mock assembly model with anti-diagonal symmetry
+        class MockAssemblyModel:
+            def check_diagonal_symmetry(self):
+                return "anti-diagonal"
+
+        assembly_model = MockAssemblyModel()
+        regions = bdc.resolve_splits_with_symmetry(n_cols=8, n_rows=8, assembly_model=assembly_model)
+
+        # TL should use wide_wide_corner_splits, not gap_wide_splits
+        assert regions['corner_tl'] == (8, 8)
+        assert regions['corner_tl'] != (20, 4)
 
     def test_resolve_splits_with_symmetry_main_diagonal(self):
         """Main-diagonal: BL=wide-wide, TR=narrow-narrow, with mixed corner transposition."""
@@ -470,53 +490,7 @@ class TestBoxDiscretizationConfig:
         assert regions['corner_bl'] == (1, 4), \
             "mixed corner BL MUST BE transposed: 1 split along left gap, 4 along bottom gap"
 
-    def test_resolve_splits_with_symmetry_anti_diagonal_new(self):
-        """Anti-diagonal: TL=wide-wide, BR=narrow-narrow, with mixed corner transposition."""
-        bdc = BoxDiscretizationConfig(
-            enabled=True,
-            gap_wide_splits=[20, 4],
-            gap_narrow_splits=[10, 2],
-            wide_wide_corner_splits=[8, 8],
-            narrow_narrow_corner_splits=[4, 4],
-            mixed_corner_splits=[6, 3],  # Asymmetric to verify transposition
-        )
 
-        # Mock assembly model with anti-diagonal symmetry
-        class MockAssemblyModel:
-            def check_diagonal_symmetry(self):
-                return "anti-diagonal"
-
-        assembly_model = MockAssemblyModel()
-        regions = bdc.resolve_splits_with_symmetry(n_cols=8, n_rows=8, assembly_model=assembly_model)
-
-        # TL should be wide-wide (no transpose)
-        assert regions['corner_tl'] == (8, 8)
-        # BR should be narrow-narrow (no transpose)
-        assert regions['corner_br'] == (4, 4)
-        # TR should get mixed_corner_splits directly
-        assert regions['corner_tr'] == (6, 3)
-        # BL should get mixed_corner_splits transposed ← Key difference from old implementation
-        assert regions['corner_bl'] == (3, 6), "BL mixed corner should be transposed"
-
-        #Specific corner splits should override gap_*_splits.
-        bdc = BoxDiscretizationConfig(
-            enabled=True,
-            gap_wide_splits=[20, 4],
-            gap_narrow_splits=[10, 2],
-            wide_wide_corner_splits=[8, 8],  # Explicit override
-        )
-
-        # Mock assembly model with anti-diagonal symmetry
-        class MockAssemblyModel:
-            def check_diagonal_symmetry(self):
-                return "anti-diagonal"
-
-        assembly_model = MockAssemblyModel()
-        regions = bdc.resolve_splits_with_symmetry(n_cols=8, n_rows=8, assembly_model=assembly_model)
-
-        # TL should use wide_wide_corner_splits, not gap_wide_splits
-        assert regions['corner_tl'] == (8, 8)
-        assert regions['corner_tl'] != (20, 4)
 
     def test_vertical_side_permutation(self):
         """Vertical sides should have permuted splits."""
