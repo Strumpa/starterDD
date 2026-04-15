@@ -1510,8 +1510,8 @@ class S2_EnergyGrid:
     
     @classmethod
     def full_range(cls, name: str = "full",
-                   e_min: float = 1.0E-11,
-                   e_max: float = 2.0E+1):
+                   e_min: float = 1.0E-10,
+                   e_max: float = 1.96403E+01):
         """Create a single-bin energy grid covering the full energy range.
         
         This is the default for reaction rate detectors where energy-resolved
@@ -1519,8 +1519,8 @@ class S2_EnergyGrid:
         
         Args:
             name: Grid name.
-            e_min: Minimum energy in MeV (default: 1e-11 MeV = 0.01 meV).
-            e_max: Maximum energy in MeV (default: 20 MeV).
+            e_min: Minimum energy in MeV (default: 1e-10 MeV = 0.01 meV).
+            e_max: Maximum energy in MeV (default: 1.96403e+01 MeV).
         
         Returns:
             S2_EnergyGrid instance with a single energy bin.
@@ -1665,7 +1665,7 @@ class S2_Detector:
         """
         lines = [f"det {self.name}"]
         
-        if self.energy_grid_name:
+        if self.energy_grid_name and self.energy_grid_name != "full":
             lines.append(f"    de {self.energy_grid_name}")
         
         if self.detector_type is not None:
@@ -1721,7 +1721,7 @@ class S2_Detector:
         Returns:
             S2_Detector instance.
         """
-        det_name = f"det_{pin_universe.universe_name}{suffix}"
+        det_name = f"det_{energy_grid_name}_{pin_universe.universe_name}{suffix}"
         det = cls(
             name=det_name,
             energy_grid_name=energy_grid_name,

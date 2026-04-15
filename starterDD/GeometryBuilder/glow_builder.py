@@ -576,6 +576,8 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
             center=(0.0, 0.0, 0.0),
         )
 
+        n_regions = 1 # default number of regions if no sectorization provided
+        
         if calculation_step is not None:
             vr_sector_cfg = calculation_step.get_vanished_rod_sectorization()
             if vr_sector_cfg is not None:
@@ -590,8 +592,7 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
                 if vr_sector_cfg.sector_config:
                     tmp_cell.sectorize(vr_sector_cfg.sector_config.sectors, vr_sector_cfg.sector_config.angles, windmill=vr_sector_cfg.windmill)
                 n_regions = len(radii) + 1 # number of regions is number of circles + 1 (the central region inside the innermost circle)
-            else: 
-                n_regions = 1
+
         tmp_cell.set_properties({
             PropertyType.MATERIAL: ["COOLANT"]*n_regions,
             PropertyType.MACRO: [f"MACRO_{rod_model.rod_ID}"]*n_regions,

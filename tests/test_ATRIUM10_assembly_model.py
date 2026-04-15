@@ -894,7 +894,7 @@ class TestAT10VanishedRods:
 
     def test_default_sectorization_radius_and_vanished_rods_attribute(self, at10_assembly_vanished_base):
         """Verify default sectorization radius is applied when vanished rods are present."""
-        assert at10_assembly_vanished_base.vanished_rods is not []
+        assert at10_assembly_vanished_base.vanished_rods
         for vanished_rod_model in at10_assembly_vanished_base.vanished_rods:
             assert vanished_rod_model.default_sectorization_radius == at10_assembly_vanished_base.lattice[0][0].radii[-1], \
                 "Vanished rod default sectorization radius should match clad radius of fuel pins"
@@ -1039,7 +1039,7 @@ class TestSerpent2DetectorAPI:
         )
         
         # Check detector name
-        assert det.name == "det_UOX_test_1"
+        assert det.name == "det_full_UOX_test_1"
         
         # Check domain materials (fuel zones only)
         assert "UOX_zone1_pin1" in det.domain_materials
@@ -1080,8 +1080,7 @@ class TestSerpent2DetectorAPI:
         
         card = det.format_card()
         
-        assert "det det_test_pin" in card
-        assert "de full" in card
+        assert "det det_full_test_pin" in card
         assert "dt -4" in card
         assert "dm fuel_z1" in card
         assert "dm fuel_z2" in card

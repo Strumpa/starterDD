@@ -470,15 +470,15 @@ class CartesianAssemblyModel:
                                 self.non_generating_fuel_cells.append(pin_model)
                             lattice_row.append(pin_model)
                         elif descriptor in self.non_fuel_rod_ids:
-                            center_x = self.translation_offset_x + x_index * pin_pitch + pin_pitch / 2.0
-                            center_y = self.translation_offset_y + y_index * pin_pitch + pin_pitch / 2.0
+                            if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
+                                center_x = self.translation_offset_x + x_index * pin_pitch + pin_pitch / 2.0
+                                center_y = self.translation_offset_y + y_index * pin_pitch + pin_pitch / 2.0
                             if descriptor == "WROD": # count the numver of water rod placholders
                                 number_of_water_rod_placeholders += 1
                                 dummy_pin_model = DummyPinModel(descriptor)
                                 dummy_pin_model.set_position_in_lattice(x_index, y_index)
                                 # compute and set the center of the dummy pin in the assembly coordinate system
                                 if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
-                                    
                                     dummy_pin_model.set_center(center_x, center_y)
                                 lattice_row.append(dummy_pin_model)
                             elif descriptor == "VANR": # count the number of VANished Rods
@@ -491,6 +491,13 @@ class CartesianAssemblyModel:
                                 vanished_rod_model.set_default_sectorization_radius(clad_radius) # set the default sectorization radius for the vanished rod model to the clad radius defined for the pins in the geometry description yaml file, this is an arbitrary choice but it can be updated later if needed based on the expected size of the vanished rods in the assembly and the desired default discretization for them.
                                 self.vanished_rods.append(vanished_rod_model)
                                 lattice_row.append(vanished_rod_model)
+                            else: # add dummy pin in case a non-fuel descriptor is provided that is neither water rod or vanished rod :
+                                dummy_pin_model = DummyPinModel(descriptor)
+                                dummy_pin_model.set_position_in_lattice(x_index, y_index)
+                                # compute and set the center of the dummy pin in the assembly coordinate system
+                                if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
+                                    dummy_pin_model.set_center(center_x, center_y)
+                                lattice_row.append(dummy_pin_model)
                     else:
                         lattice_row.append(descriptor) # if not building the pin models, just store the descriptor in the lattice data structure for now
                 else:
@@ -839,7 +846,7 @@ class CartesianAssemblyModel:
             translation_offset_y = gap_wide + cbt + intra_assembly_coolant_width  (both use wide)
         """
         # Check prerequisites
-        if (self.gap_wide is None or self.channel_box_thickness is None
+        if (self.gap_wide is None or self.gap_narrow is None or self.channel_box_thickness is None
                 or self.intra_assembly_coolant_width is None):
             self.translation_offset_x = None
             self.translation_offset_y = None

@@ -91,7 +91,7 @@ class SectorConfig:
     def _validate_sector_to_angles(self):
         """
         Validate that the number of sectors matches the number of angles
-        or is in the predefined mapping for angle defaults.
+        and that the combinations of number of sectors and angles are supported by GLOW.
 
         Raises
         ------
@@ -100,13 +100,23 @@ class SectorConfig:
             and is not in the predefined mapping.
         """
         if len(self.sectors) != len(self.angles):
-            for n in self.sectors:
-                if n not in self.VALID_SECTOR_NO_TO_ANGLE:
-                    raise ValueError(
-                        f"Number of sectors {n} does not match number of angles "
-                        f"{len(self.angles)} supported by GLOW."
-                        f"The valid sector to angles mapping is: {self.VALID_SECTOR_NO_TO_ANGLE}"
-                    )
+            raise ValueError(
+                f"Number of sector rings {len(self.sectors)} does not match "
+                f"number of angle entries {len(self.angles)}. Either they must "
+                f"match or the number of sectors must be in the predefined mapping."
+            )
+        for n in self.sectors:
+            if n not in self.VALID_SECTOR_NO_TO_ANGLE:
+                raise ValueError(
+                    f"Number of sectors {n} does not match the number of sectors supported by GLOW"
+                    f"The valid sector to angles mapping is: {self.VALID_SECTOR_NO_TO_ANGLE}"
+                )
+            elif self.angles[self.sectors.index(n)] not in self.VALID_SECTOR_NO_TO_ANGLE[n]:
+                raise ValueError(
+                    f"Angle {self.angles[self.sectors.index(n)]} is not valid for {n} sectors. "
+                    f"The valid angles for {n} sectors are: {self.VALID_SECTOR_NO_TO_ANGLE[n]}"
+                )
+
 
     # ------------------------------------------------------------------
     # Radial-split helpers (circular water rods)
@@ -828,27 +838,31 @@ class VanishedRodDiscretizationConfig:
         If base_radius is None, and radius is provided, radial splits are computed as equally spaced radii between 0. and radius.
         If both base_radius and radius are None, radial splits are set to 0. This is 
         """
-        print(f"Resolving vanished rod discretization with base_radius={self.base_radius} and input radius={radius}")
 
         if radius is not None:
-            # override the user input sectorization to ensure consistency with the number of radial splits
+            # override the user input radius to ensure consistency with the provided radius
             self.base_radius = radius
-        
-        self.radial_split_points = [round(self.base_radius * (i + 1) / self.radial_splits, 6) for i in range(self.radial_splits)]
+        resolved_radius = self.base_radius
+        if resolved_radius is None:
+            self.radial_split_points = []
+        else:
+            self.radial_split_points = [round(resolved_radius * (i + 1) / self.radial_splits, 6) for i in range(self.radial_splits)]
         # extend the sector config to match the number of radial splits if needed
-        total_number_of_regions = self.radial_splits + 1  # radial splits create radial_splits + 1 region
+        resolved_radial_splits = len(self.radial_split_points)
+        total_number_of_regions = resolved_radial_splits + 1  # radial splits create n + 1 regions
         if self.sector_config and self.sector_config.sectors:
-            sectors = [self.sector_config.sectors[0]] * self.radial_splits
+            sectors = [self.sector_config.sectors[0]] * resolved_radial_splits
             if self.sector_config.angles:
-                angles = [self.sector_config.angles[0]] * self.radial_splits
+                angles = [self.sector_config.angles[0]] * resolved_radial_splits
                 angles.extend([self.sector_config.angles[-1]] * (total_number_of_regions - len(angles))) # radial splits are within r<radius, last entry is the outermost region with r>radius
             else:
                 angles = None
             # same logic for sectors
             sectors.extend([self.sector_config.sectors[-1]] * (total_number_of_regions - len(sectors)))
-            if len(self.sector_config.sectors) != self.radial_splits + 1 and len(self.sector_config.angles) != self.radial_splits + 1:
-                # over ride the user input sectorization to ensure consistency with the number of radial splits
-                self.sector_config = SectorConfig(sectors=sectors, angles=angles, windmill=self.windmill)
+            angle_count = len(self.sector_config.angles) if self.sector_config.angles else 0
+            if len(self.sector_config.sectors) != total_number_of_regions or angle_count != total_number_of_regions:
+                    # over ride the user input sectorization to ensure consistency with the number of radial splits
+                    self.sector_config = SectorConfig(sectors=sectors, angles=angles, windmill=self.windmill)
 
 
 
