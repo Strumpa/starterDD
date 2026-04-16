@@ -110,7 +110,7 @@ def analyse_mesh(x1, y1, x2, y2, inner_box, solide_total, lignes_chauffantes, li
 
 def analyse_3d_volume(tranches_axiales, x1, y1, x2, y2, z1, z2):
     """
-    Calculate porosity, hydraulic diameter, heating perimeter, inner box perimeter, and water rod perimeter for a 3D volume 
+    Calculate porosity, fluid area, hydraulic diameter, heating perimeter, inner box perimeter, and water rod perimeter for a 3D volume 
     defined by (x1, y1, z1) to (x2, y2, z2) across multiple axial slices.
     
     Parameters:
@@ -123,6 +123,7 @@ def analyse_3d_volume(tranches_axiales, x1, y1, x2, y2, z1, z2):
     
     Returns:
     - poro_3d: Porosity of the volume (fluid volume / total volume)
+    - a_cool: Total area of fluid in the volume (sum of fluid area across slices * slice thickness)
     - dh_3d: Hydraulic diameter of the fluid region (4 * fluid volume / wetted perimeter)
     - ph_moyen: Average heating perimeter in contact with the fluid across the axial height
     - pbox_moyen: Average inner box perimeter in contact with the fluid across the axial height
@@ -137,7 +138,7 @@ def analyse_3d_volume(tranches_axiales, x1, y1, x2, y2, z1, z2):
     
     hauteur_totale = z2 - z1
     if hauteur_totale <= 0:
-        return 0.0, 0.0, 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
     for tranche in tranches_axiales:
         z_min_overlap = max(z1, tranche['z_start'])
@@ -157,15 +158,16 @@ def analyse_3d_volume(tranches_axiales, x1, y1, x2, y2, z1, z2):
             s_wr += p_wr * dz
 
     if v_total <= 1e-9:
-        return 0.0, 0.0, 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
     poro_3d = v_fluide / v_total
+    a_cool = v_fluide / (z2-z1)
     dh_3d = (4 * v_fluide) / s_mouillee if s_mouillee > 0 else 0.0
     ph_moyen = s_chauffante / hauteur_totale
     pbox_moyen = s_box / hauteur_totale
     pwr_moyen = s_wr / hauteur_totale
     
-    return round(poro_3d, 5), round(dh_3d, 5), round(ph_moyen, 5), round(pbox_moyen, 5), round(pwr_moyen, 5)
+    return round(poro_3d, 5), round(a_cool, 5), round(dh_3d, 5), round(ph_moyen, 5), round(pbox_moyen, 5), round(pwr_moyen, 5)
 
 
 class GeometricAnalyser:
@@ -299,7 +301,7 @@ class GeometricAnalyser:
 
     def _calculer_et_mettre_en_cache(self, x1, y1, x2, y2, z1, z2):
         """
-        Internal method to calculate porosity, 
+        Internal method to calculate porosity, fluid area,
         hydraulic diameter, heating perimeter, inner box perimeter, and water rod perimeter for a given volume.
         
         Parameters:
@@ -310,6 +312,7 @@ class GeometricAnalyser:
         
         Returns:
         - poro_3d: Porosity of the volume (fluid volume / total volume)
+        - a_cool: Total area of fluid in the volume (sum of fluid area across slices * slice thickness)
         - dh_3d: Hydraulic diameter of the fluid region (4 * fluid volume / wetted perimeter)
         - ph_moyen: Average heating perimeter in contact with the fluid across the axial height
         - pbox_moyen: Average inner box perimeter in contact with the fluid across the axial height
@@ -320,10 +323,10 @@ class GeometricAnalyser:
         if self._dernier_args == args_actuels:
             return self._dernier_resultats
             
-        p, dh, ph, pbox, pwr = analyse_3d_volume(self.tranches, x1, y1, x2, y2, z1, z2)
+        p, a_cool, dh, ph, pbox, pwr = analyse_3d_volume(self.tranches, x1, y1, x2, y2, z1, z2)
         self._dernier_args = args_actuels
-        self._dernier_resultats = (p, dh, ph, pbox, pwr)
-        return p, dh, ph, pbox, pwr
+        self._dernier_resultats = (p, a_cool, dh, ph, pbox, pwr)
+        return p, a_cool, dh, ph, pbox, pwr
     
     def _get_cylinders(self, data):
         """
@@ -494,6 +497,22 @@ class GeometricAnalyser:
         """
         return self._calculer_et_mettre_en_cache(x1, y1, x2, y2, z1, z2)[0]
     
+    def get_a_cool_z_cv(self, x1, y1, x2, y2, z1, z2): 
+        """
+        Public method to get total fluid area in the z-direction for a control volume 
+        defined by (x1, y1, z1) to (x2, y2, z2).
+        
+        Parameters:
+        - (x1, y1): Bottom-left corner of the control volume
+        - (x2, y2): Top-right corner of the control volume
+        - z1: Starting axial coordinate of the control volume
+        - z2: Ending axial coordinate of the control volume 
+        
+        Returns:
+        - a_cool: Total area of fluid in the z-direction of the specified control volume
+        """
+        return self._calculer_et_mettre_en_cache(x1, y1, x2, y2, z1, z2)[1]
+    
     def get_dh_z_cv(self, x1, y1, x2, y2, z1, z2): 
         """Public method to get hydraulic diameter in the z-direction for a control volume 
         defined by (x1, y1, z1) to (x2, y2, z2). 
@@ -507,7 +526,7 @@ class GeometricAnalyser:
         Returns:
         - hydraulic_diameter: Hydraulic diameter in the z-direction of the specified control volume
         """
-        return self._calculer_et_mettre_en_cache(x1, y1, x2, y2, z1, z2)[1]
+        return self._calculer_et_mettre_en_cache(x1, y1, x2, y2, z1, z2)[2]
     
     def get_ph_cv(self, x1, y1, x2, y2, z1, z2): 
         """Public method to get average heating perimeter for a control volume 
@@ -522,7 +541,7 @@ class GeometricAnalyser:
         Returns:
         - average_heating_perimeter: Average heating perimeter of the specified control volume
         """
-        return self._calculer_et_mettre_en_cache(x1, y1, x2, y2, z1, z2)[2]
+        return self._calculer_et_mettre_en_cache(x1, y1, x2, y2, z1, z2)[3]
     
     def get_pbox_cv(self, x1, y1, x2, y2, z1, z2): 
         """
@@ -538,7 +557,7 @@ class GeometricAnalyser:
         Returns:
         - average_inner_box_perimeter: Average inner box perimeter of the specified control volume
         """
-        return self._calculer_et_mettre_en_cache(x1, y1, x2, y2, z1, z2)[3]
+        return self._calculer_et_mettre_en_cache(x1, y1, x2, y2, z1, z2)[4]
     
     def get_pwr_cv(self, x1, y1, x2, y2, z1, z2): 
         """
@@ -554,7 +573,7 @@ class GeometricAnalyser:
         Returns:
         - average_water_rod_perimeter: Average water rod perimeter of the specified control volume
         """
-        return self._calculer_et_mettre_en_cache(x1, y1, x2, y2, z1, z2)[4]
+        return self._calculer_et_mettre_en_cache(x1, y1, x2, y2, z1, z2)[5]
 
 # Canal (Water Channel)
     def get_porosity_z_canal(self, i, j, z1, z2):
@@ -572,6 +591,22 @@ class GeometricAnalyser:
         """
         x1, y1, x2, y2 = self._obtenir_bornes_canal(i, j)
         return self.get_porosity_z_cv(x1, y1, x2, y2, z1, z2)
+    
+    def get_a_cool_z_canal(self, i, j, z1, z2):
+        """Public method to get total fluid area in the z-direction for a water channel 
+        defined by its lattice position (i, j) and axial bounds (z1, z2).
+        
+        Parameters:
+        - i: Row index of the canal (1 is bottom row)
+        - j: Column index of the canal (1 is left column)
+        - z1: Starting axial coordinate of the canal
+        - z2: Ending axial coordinate of the canal
+        
+        Returns:
+        - a_cool: Total area of fluid in the z-direction of the specified water channel
+        """
+        x1, y1, x2, y2 = self._obtenir_bornes_canal(i, j)
+        return self.get_a_cool_z_cv(x1, y1, x2, y2, z1, z2)
     
     def get_dh_z_canal(self, i, j, z1, z2):
         """Public method to get hydraulic diameter in the z-direction for a water channel 
@@ -657,6 +692,23 @@ class GeometricAnalyser:
         x1, y1, x2, y2 = self._obtenir_bornes_rod(i, j)
         return self.get_porosity_z_cv(x1, y1, x2, y2, z1, z2)
     
+    def get_a_cool_z_rod(self, i, j, z1, z2):
+        """
+        Public method to get total fluid area in the z-direction for a fuel rod
+        defined by its lattice position (i, j) and axial bounds (z1, z2).
+        
+        Parameters:
+        - i: Row index of the rod (1 is bottom row)
+        - j: Column index of the rod (1 is left column)
+        - z1: Starting axial coordinate of the rod
+        - z2: Ending axial coordinate of the rod
+
+        Returns:
+        - a_cool: Total area of fluid in the z-direction of the specified fuel rod
+        """
+        x1, y1, x2, y2 = self._obtenir_bornes_rod(i, j)
+        return self.get_a_cool_z_cv(x1, y1, x2, y2, z1, z2)
+    
     def get_dh_z_rod(self, i, j, z1, z2):
         """
         Public method to get hydraulic diameter in the z-direction for a fuel rod
@@ -730,7 +782,7 @@ class GeometricAnalyser:
     def execute_profile_z(self, section_type, h, p, z_min, z_max):
         """
         Execute an axial profile analysis for the specified control volume, rod, or canal.
-        It computes porosity, hydraulic diameter,
+        It computes porosity, fluid area, hydraulic diameter,
         and heating perimeter in the z direction at multiple axial positions.
 
         Parameters:
@@ -746,12 +798,13 @@ class GeometricAnalyser:
         Returns:
         - z_coords: List of axial coordinates where the properties were computed
         - porosities: List of porosity values corresponding to z_coords
+        - a_cools: List of fluid area values corresponding to z_coords
         - dhs: List of hydraulic diameter values corresponding to z_coords
         - phs: List of heating perimeter values corresponding to z_coords
         - cible_str: String identifier of the target (e.g. "cv_x1_y1_x2_y2", "rod_i_j", "water_i_j") for labeling purposes
         """
         z_coords = []
-        porosities, dhs, phs = [], [], []
+        porosities, a_cools, dhs, phs = [], [], [], []
         
         curr_z = z_min
         while curr_z + h <= z_max:
@@ -761,34 +814,38 @@ class GeometricAnalyser:
             if section_type[0]=='cv':
                 x1, y1, x2, y2 = section_type[1]
                 phi = self.get_porosity_z_cv(x1, y1, x2, y2, z1, z2)
+                a_cool = self.get_a_cool_z_cv(x1, y1, x2, y2, z1, z2)
                 dh = self.get_dh_z_cv(x1, y1, x2, y2, z1, z2)
                 ph = self.get_ph_cv(x1, y1, x2, y2, z1, z2)
                 cible_str = f"cv_{x1}_{y1}_{x2}_{y2}"
             elif section_type[0]=='rod':
                 i, j = section_type[1]
                 phi = self.get_porosity_z_rod(i, j, z1, z2)
+                a_cool = self.get_a_cool_z_rod(i, j, z1, z2)
                 dh = self.get_dh_z_rod(i, j, z1, z2)
                 ph = self.get_ph_rod(i, j, z1, z2)
                 cible_str = f"rod_{i}_{j}"
             elif section_type[0]=='water':
                 i, j = section_type[1]
                 phi = self.get_porosity_z_canal(i, j, z1, z2)
+                a_cool = self.get_a_cool_z_canal(i, j, z1, z2)
                 dh = self.get_dh_z_canal(i, j, z1, z2)
                 ph = self.get_ph_canal(i, j, z1, z2)
                 cible_str = f"water_{i}_{j}"
                 
             z_coords.append(curr_z + h/2.0) 
             porosities.append(phi)
+            a_cools.append(a_cool)
             dhs.append(dh)
             phs.append(ph)
             curr_z += p
-        return z_coords, porosities, dhs, phs, cible_str
+        return z_coords, porosities, a_cools, dhs, phs, cible_str
     
     def execute_mesh_z(self, mesh_type, z1, z2):
         """
         Execute a mesh analysis for the entire assembly based on the 
         specified mesh type (fuel, water, or regular).
-        It computes porosity, hydraulic diameter, and heating perimeter in the z direction
+        It computes porosity, fluid area, hydraulic diameter, and heating perimeter in the z direction
         for each cell in the mesh and organizes the results in matrices of x and y coordinates.
         
         Parameters:
