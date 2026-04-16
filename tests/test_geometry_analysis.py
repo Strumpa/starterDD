@@ -78,15 +78,17 @@ if __name__ == "__main__":
         if not (args.cv_z or args.rod_z or args.water_z):
             print("Erreur : Spécifiez une cible (--cv_z, --rod_z, ou --water_z) pour --plot_z.")
             exit(1)
-        z_coords, porosities, dhs, phs, cible_str= analyser.execute_profile_z(section_type, h, p, z_min, z_max)
-        fig, axs = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+        z_coords, porosities, a_cools, dhs, phs, cible_str= analyser.execute_profile_z(section_type, h, p, z_min, z_max)
+        fig, axs = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
         axs[0].plot(z_coords, porosities, label=r'Porosité ($\phi$)', color='blue')
         axs[0].set_ylabel(r"Porosité $\phi$ (-)")
-        axs[1].plot(z_coords, dhs, label='Dh', color='green')
-        axs[1].set_ylabel("Diamètre Hydraulique Dh (cm)")
-        axs[2].plot(z_coords, phs, label='Ph', color='red')
-        axs[2].set_ylabel("Périmètre de Chauffe Ph (cm)")
-        axs[2].set_xlabel("Altitude axiale Z (cm)")
+        axs[1].plot(z_coords, a_cools, label=r'Acool (cm²)', color='orange')
+        axs[1].set_ylabel(r"Surface de passage fluide $A_{cool}$ (cm²)")
+        axs[2].plot(z_coords, dhs, label='Dh', color='green')
+        axs[2].set_ylabel("Diamètre Hydraulique Dh (cm)")
+        axs[3].plot(z_coords, phs, label='Ph', color='red')
+        axs[3].set_ylabel("Périmètre de Chauffe Ph (cm)")
+        axs[3].set_xlabel("Altitude axiale Z (cm)")
         
         titre = f"Profil Axial (Fenêtre h={args.h}cm, Pas p={args.p}cm) - {cible_str} [Assm: {args.core_pos[0]},{args.core_pos[1]}]"
         
@@ -298,6 +300,7 @@ if __name__ == "__main__":
         if section_type[0] == 'cv':
             x1, y1, x2, y2 = section_type[1]
             phi = analyser.get_porosity_z_cv(x1, y1, x2, y2, z1, z2)
+            a_cool = analyser.get_a_cool_z_cv(x1, y1, x2, y2, z1, z2)
             dh = analyser.get_dh_z_cv(x1, y1, x2, y2, z1, z2)
             ph = analyser.get_ph_cv(x1, y1, x2, y2, z1, z2)
             p_box = analyser.get_pbox_cv(x1, y1, x2, y2, z1, z2)
@@ -305,6 +308,7 @@ if __name__ == "__main__":
         elif section_type[0] == 'rod':
             i, j = section_type[1]
             phi = analyser.get_porosity_z_rod(i, j, z1, z2)
+            a_cool = analyser.get_a_cool_z_rod(i, j, z1, z2)
             dh = analyser.get_dh_z_rod(i, j, z1, z2)
             ph = analyser.get_ph_rod(i, j, z1, z2)
             p_box = analyser.get_pbox_rod(i, j, z1, z2)
@@ -312,11 +316,13 @@ if __name__ == "__main__":
         elif section_type[0] == 'water':
             i, j = section_type[1]
             phi = analyser.get_porosity_z_canal(i, j, z1, z2)
+            a_cool = analyser.get_a_cool_z_canal(i, j, z1, z2)
             dh = analyser.get_dh_z_canal(i, j, z1, z2)
-            ph = analyser.get_ph_z_canal(i, j, z1, z2)
+            ph = analyser.get_ph_canal(i, j, z1, z2)
             p_box = analyser.get_pbox_canal(i, j, z1, z2)
             p_wr = analyser.get_pwr_canal(i, j, z1, z2)
         print(f"Porosité (phi) : {phi}")
+        print(f"Surface de passage fluide (A_cool) : {a_cool} cm²")
         print(f"Dh (cm)        : {dh}")
         print(f"Ph (cm)        : {ph}\n")
         print(f"P_box (cm) : {p_box}")
