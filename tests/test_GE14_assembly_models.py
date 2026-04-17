@@ -13,7 +13,7 @@ import pytest
 from starterDD.MaterialProperties.material_mixture import MaterialMixture, Composition
 from starterDD.MaterialProperties.material_mixture import parse_all_compositions_from_yaml
 from starterDD.GeometryAnalysis.tdt_parser import read_material_mixture_indices_from_tdt_file
-from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel, DummyPinModel
+from starterDD.DDModel.DragonModel import CartesianAssemblyModel, FuelPinModel, DummyPinModel, VanishedRodModel
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.InterfaceToDD.dragon_module_calls import LIB
 from starterDD.InterfaceToDD.dragon_module_calls import EDI, COMPO, EDI_COMPO
@@ -25,6 +25,7 @@ from starterDD.InterfaceToDD.Serpent2_exports import (
 from conftest import (
     GE14_COMPOSITIONS_YAML,
     GE14_DOM_GEOMETRY_YAML,
+    GE14_VAN_GEOMETRY_YAML,
     GE14_TDT_DIR,
     OUTPUTS_DIR,
 )
@@ -36,7 +37,8 @@ from conftest import (
 FLUX_TRACKING_OPTION = "TISO"
 INCLUDE_MACROS = True
 PATH_TO_YAML_COMPOSITIONS = GE14_COMPOSITIONS_YAML
-PATH_TO_YAML_GEOMETRY = GE14_DOM_GEOMETRY_YAML
+PATH_TO_YAML_DOM_GEOMETRY = GE14_DOM_GEOMETRY_YAML
+PATH_TO_YAML_VAN_GEOMETRY = GE14_VAN_GEOMETRY_YAML
 PATH_TO_TDT = GE14_TDT_DIR
 TDT_FILE_NAME = "GE14_DOM_SSH_IC"
 
@@ -51,13 +53,39 @@ def ge14_assembly_base():
     material mixture numbering. This fixture is shared across tests.
     """
     ROD_to_material = associate_material_to_rod_ID(
-        PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_GEOMETRY
+        PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_DOM_GEOMETRY
     )
 
     assembly = CartesianAssemblyModel(
         name="GE14_assembly",
         tdt_file=f"{PATH_TO_TDT}/{TDT_FILE_NAME}.tdt",
-        geometry_description_yaml=PATH_TO_YAML_GEOMETRY
+        geometry_description_yaml=PATH_TO_YAML_DOM_GEOMETRY
+    )
+    assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+    assembly.set_uniform_temperatures(
+        fuel_temperature=900.0,
+        gap_temperature=600.0,
+        coolant_temperature=600.0,
+        moderator_temperature=600.0,
+        structural_temperature=600.0
+    )
+    assembly.analyze_lattice_description(build_pins=True, apply_self_shielding="from_yaml")
+    return assembly
+
+@pytest.fixture(scope="module")
+def ge14_van_assembly_base():
+    """
+    Create a base GE14 assembly VAN model with lattice analyzed but without
+    material mixture numbering. This fixture is shared across tests.
+    """
+    ROD_to_material = associate_material_to_rod_ID(
+        PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_VAN_GEOMETRY
+    )
+
+    assembly = CartesianAssemblyModel(
+        name="GE14_van_assembly",
+        tdt_file=f"{PATH_TO_TDT}/{TDT_FILE_NAME}.tdt",
+        geometry_description_yaml=PATH_TO_YAML_VAN_GEOMETRY
     )
     assembly.set_rod_ID_to_material_mapping(ROD_to_material)
     assembly.set_uniform_temperatures(
@@ -129,6 +157,34 @@ class TestAssemblyModelCreation:
         assert ge14_assembly_base.lattice[0][0].fuel_material_name == "UOX28"
         assert ge14_assembly_base.lattice[1][2].fuel_material_name == "UOX44Gd6"
         assert ge14_assembly_base.lattice[3][3].rod_ID == "WROD"
+
+# ----------------------------------------------------------------------------
+# Tests: Assembly model creation with vanished rods and lattice analysis
+# ----------------------------------------------------------------------------
+# This test class is similar to TestAssemblyModelCreation but focuses on the assembly model with vanished rods (GE14_van_assembly_base fixture).
+
+class TestVanishedRodAssemblyModelCreation:
+    """Tests for assembly model creation with vanished rods and lattice analysis."""
+
+    def test_lattice_description_exists(self, ge14_van_assembly_base):
+        """Verify lattice description is parsed from YAML."""
+        assert ge14_van_assembly_base.lattice_description is not None
+
+    def test_lattice_structure(self, ge14_van_assembly_base):
+        """Verify lattice is built with correct dimensions."""
+        assert ge14_van_assembly_base.lattice is not None
+        assert len(ge14_van_assembly_base.lattice) == 10
+        assert len(ge14_van_assembly_base.lattice[0]) == 10
+
+    def test_lattice_pin_assignments(self, ge14_van_assembly_base):
+        """Verify specific pins have correct rod IDs and materials."""
+        assert ge14_van_assembly_base.lattice[0][0].rod_ID == "ROD2"
+        assert ge14_van_assembly_base.lattice[0][0].fuel_material_name == "UOX28"
+        assert ge14_van_assembly_base.lattice[1][2].fuel_material_name == "UOX44Gd6"
+        # Verify that the vanished rod location has a VanishedRodModel (placeholder for vanished rod)
+        assert isinstance(ge14_van_assembly_base.lattice[1][1], VanishedRodModel), "Expected a VanishedRodModel at the vanished rod location (1,1)" 
+        assert isinstance(ge14_van_assembly_base.lattice[5][4], VanishedRodModel), "Expected a VanishedRodModel at the vanished rod location (5,4)" 
+        assert ge14_van_assembly_base.number_of_vanished_rods == 14, "Expected 14 vanished rods"
 
 
 # ---------------------------------------------------------------------------
@@ -799,14 +855,14 @@ class TestGE14Serpent2Model:
         from starterDD.DDModel.helpers import associate_material_to_rod_ID
 
         ROD_to_material = associate_material_to_rod_ID(
-            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_GEOMETRY
+            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_DOM_GEOMETRY
         )
         compositions = parse_all_compositions_from_yaml(PATH_TO_YAML_COMPOSITIONS)
 
         assembly = CartesianAssemblyModel(
             name="GE14_S2",
             tdt_file=f"{PATH_TO_TDT}/{TDT_FILE_NAME}.tdt",
-            geometry_description_yaml=PATH_TO_YAML_GEOMETRY,
+            geometry_description_yaml=PATH_TO_YAML_DOM_GEOMETRY,
         )
         assembly.set_rod_ID_to_material_mapping(ROD_to_material)
         assembly.set_uniform_temperatures(

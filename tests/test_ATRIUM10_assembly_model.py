@@ -20,7 +20,7 @@ import yaml
 from starterDD.MaterialProperties.material_mixture import MaterialMixture, Composition
 from starterDD.MaterialProperties.material_mixture import parse_all_compositions_from_yaml
 from starterDD.DDModel.DragonModel import (
-    CartesianAssemblyModel, FuelPinModel, DummyPinModel, SquareWaterRodModel,
+    CartesianAssemblyModel, FuelPinModel, DummyPinModel, SquareWaterRodModel, VanishedRodModel
 )
 from starterDD.DDModel.DragonCalculationScheme import (
     DragonCalculationScheme, CalculationStep, SectorConfig,
@@ -35,7 +35,8 @@ from starterDD.InterfaceToDD.Serpent2_exports import (
 
 from conftest import (
     AT10_COMPOSITIONS_YAML,
-    AT10_GEOMETRY_YAML,
+    AT10_GEOMETRY_NOM_YAML,
+    AT10_GEOMETRY_VAN_YAML,
     AT10_CALC_SCHEME_YAML,
     OUTPUTS_DIR,
 )
@@ -45,7 +46,8 @@ from conftest import (
 # Test configuration constants
 # ---------------------------------------------------------------------------
 PATH_TO_YAML_COMPOSITIONS = AT10_COMPOSITIONS_YAML
-PATH_TO_YAML_GEOMETRY = AT10_GEOMETRY_YAML
+PATH_TO_YAML_NOM_GEOMETRY = AT10_GEOMETRY_NOM_YAML
+PATH_TO_YAML_VAN_GEOMETRY = AT10_GEOMETRY_VAN_YAML
 PATH_TO_YAML_CALC_SCHEME = AT10_CALC_SCHEME_YAML
 
 
@@ -59,13 +61,13 @@ def at10_assembly_base():
     material mixture numbering. Uses the square water rod geometry.
     """
     ROD_to_material = associate_material_to_rod_ID(
-        PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_GEOMETRY
+        PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_NOM_GEOMETRY
     )
 
     assembly = CartesianAssemblyModel(
         name="ATRIUM10_assembly",
         tdt_file="dummy.tdt",
-        geometry_description_yaml=PATH_TO_YAML_GEOMETRY,
+        geometry_description_yaml=PATH_TO_YAML_NOM_GEOMETRY,
     )
     assembly.set_rod_ID_to_material_mapping(ROD_to_material)
     assembly.set_uniform_temperatures(
@@ -77,6 +79,47 @@ def at10_assembly_base():
     )
     assembly.analyze_lattice_description(build_pins=True, apply_self_shielding="from_yaml")
     return assembly
+
+@pytest.fixture(scope="module")
+def at10_assembly_vanished_base():
+    """
+    Create a base ATRIUM-10 assembly model with lattice analyzed but without
+    material mixture numbering. Uses the square water rod geometry.
+    8 vanished rods
+    """
+    ROD_to_material = associate_material_to_rod_ID(
+        PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_VAN_GEOMETRY
+    )
+
+    assembly = CartesianAssemblyModel(
+        name="ATRIUM10_assembly",
+        tdt_file="dummy.tdt",
+        geometry_description_yaml=PATH_TO_YAML_VAN_GEOMETRY,
+    )
+    assembly.set_rod_ID_to_material_mapping(ROD_to_material)
+    assembly.set_uniform_temperatures(
+        fuel_temperature=900.0,
+        gap_temperature=600.0,
+        coolant_temperature=600.0,
+        moderator_temperature=600.0,
+        structural_temperature=600.0,
+    )
+    assembly.analyze_lattice_description(build_pins=True, apply_self_shielding="from_yaml")
+    return assembly
+
+@pytest.fixture(scope="module")
+def at10_assembly_vanished_numbered_by_material(at10_assembly_vanished_base):
+    compositions = parse_all_compositions_from_yaml(PATH_TO_YAML_COMPOSITIONS)
+    at10_assembly_vanished_base.set_material_compositions(compositions)
+    at10_assembly_vanished_base.number_fuel_material_mixtures_by_material()
+    return at10_assembly_vanished_base
+
+@pytest.fixture(scope="module")
+def at10_assembly_vanished_numbered_by_pin(at10_assembly_vanished_base):
+    compositions = parse_all_compositions_from_yaml(PATH_TO_YAML_COMPOSITIONS)
+    at10_assembly_vanished_base.set_material_compositions(compositions)
+    at10_assembly_vanished_base.number_fuel_material_mixtures_by_pin()
+    return at10_assembly_vanished_base
 
 
 @pytest.fixture(scope="module")
@@ -514,14 +557,14 @@ class TestAT10Serpent2Model:
     def at10_serpent2_model(self):
         """Build and return a Serpent2Model from the ATRIUM-10 assembly."""
         ROD_to_material = associate_material_to_rod_ID(
-            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_GEOMETRY
+            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_NOM_GEOMETRY
         )
         compositions = parse_all_compositions_from_yaml(PATH_TO_YAML_COMPOSITIONS)
 
         assembly = CartesianAssemblyModel(
             name="ATRIUM10_S2",
             tdt_file="dummy.tdt",
-            geometry_description_yaml=PATH_TO_YAML_GEOMETRY,
+            geometry_description_yaml=PATH_TO_YAML_NOM_GEOMETRY,
         )
         assembly.set_rod_ID_to_material_mapping(ROD_to_material)
         assembly.set_uniform_temperatures(
@@ -795,6 +838,91 @@ class TestAT10SquareWaterRodCornerRadius:
         finally:
             os.unlink(tmp_path)
 
+# --------------------------------------------------------------------------------------
+# Tests : ATRIUM-10 assembly with vanished rods and vanished rods sectorization options
+# --------------------------------------------------------------------------------------
+
+class TestAT10VanishedRods:
+    """Tests for handling of vanished rods and sectorization in ATRIUM-10 assembly."""
+    @pytest.fixture(scope="class")
+    def at10_calc_scheme_with_vanished_rods_discretization(self):
+        """Load the ATRIUM-10 calculation scheme from YAML."""
+        return DragonCalculationScheme.from_yaml(PATH_TO_YAML_CALC_SCHEME)
+
+    def test_vanished_rod_placeholders(self, at10_assembly_vanished_base):
+        """Verify VANR placeholders are created for vanished rod positions."""
+        count_vanished = 0
+        for row in at10_assembly_vanished_base.lattice:
+            for pin in row:
+                if isinstance(pin, VanishedRodModel) and "VANR" in pin.rod_ID:
+                    count_vanished += 1
+        assert count_vanished == 8, f"Expected 8 VANROD placeholders, found {count_vanished}"
+        assert at10_assembly_vanished_base.number_of_vanished_rods == 8, \
+            f"Assembly should report 8 vanished rods, got {at10_assembly_vanished_base.number_of_vanished_rods}"
+
+    def test_fuel_pins_still_have_centers_with_vanished_rods(self, at10_assembly_vanished_base):
+        """Verify fuel pins still have center coordinates when vanished rods are present."""
+        for row in at10_assembly_vanished_base.lattice:
+            for pin in row:
+                if isinstance(pin, FuelPinModel):
+                    assert pin.center is not None
+    
+    def test_by_pin_numbering_with_vanished_rods(self, at10_assembly_vanished_numbered_by_pin):
+        """Verify mixture numbering works with vanished rods present."""
+        names = at10_assembly_vanished_numbered_by_pin.get_fuel_material_mixture_names()
+        indices = at10_assembly_vanished_numbered_by_pin.get_fuel_material_mixture_indices()
+        assert len(names) > 0
+        assert len(names) == len(indices)
+
+    def test_by_material_numbering_with_vanished_rods(self, at10_assembly_vanished_numbered_by_material):
+        """Verify mixture numbering works with vanished rods present."""
+        names = at10_assembly_vanished_numbered_by_material.get_fuel_material_mixture_names()
+        indices = at10_assembly_vanished_numbered_by_material.get_fuel_material_mixture_indices()
+        assert len(names) > 0
+        assert len(names) == len(indices)
+        assert len(set(names)) == len(names), "Mixture names should be unique even with vanished rods"
+    
+    def test_number_of_fuel_rods_with_vanished_rods(self, at10_assembly_vanished_base):
+        """Verify number of fuel rods is correct when vanished rods are present."""
+        count_fuel = 0
+        for row in at10_assembly_vanished_base.lattice:
+            for pin in row:
+                if isinstance(pin, FuelPinModel):
+                    count_fuel += 1
+        expected = 100 - 9 - 8  # 100 total - 9 WROD placeholders - 8 VANR placeholders
+        assert count_fuel == expected, f"Expected {expected} fuel pins with vanished rods, found {count_fuel}"
+
+    def test_default_sectorization_radius_and_vanished_rods_attribute(self, at10_assembly_vanished_base):
+        """Verify default sectorization radius is applied when vanished rods are present."""
+        assert at10_assembly_vanished_base.vanished_rods
+        for vanished_rod_model in at10_assembly_vanished_base.vanished_rods:
+            assert vanished_rod_model.default_sectorization_radius == at10_assembly_vanished_base.lattice[0][0].radii[-1], \
+                "Vanished rod default sectorization radius should match clad radius of fuel pins"
+            
+    def test_vanished_rod_sectorization_options(self, at10_calc_scheme_with_vanished_rods_discretization):
+        """Verify sectorization options for vanished rods are correctly set."""
+        step = at10_calc_scheme_with_vanished_rods_discretization.get_step("SSH")
+        assert hasattr(step, 'vanished_rods_sectors'), "SSH step should have vanished_rods_sectors attribute"
+        vanished_rod_sectorization = step.vanished_rods_sectors
+        assert vanished_rod_sectorization is not None, "Vanished rod sectorization should be defined in SSH step"
+        assert vanished_rod_sectorization.base_radius == 0.51, "Vanished rod sectorization base radius should be 0.51 cm, set in CALC_SCHEME_AT10.yaml"
+        assert vanished_rod_sectorization.radial_splits == 4, "Vanished rod sectorization should have 4 radial splits, set in CALC_SCHEME_AT10.yaml"
+        # resolve sectorization 
+        vanished_rod_sectorization.resolve_radii_and_sectors()
+        assert len(vanished_rod_sectorization.radial_split_points) == 4, "Vanished rod sectorization with 4 radial splits"
+        assert len(vanished_rod_sectorization.sector_config.sectors) == 5, "Vanished rod sectorization with 5 sectors (4 inner radial splits + 1 outer)"
+        assert len(vanished_rod_sectorization.sector_config.angles) == 5, "Vanished rod sectorization with 5 sectors (4 inner radial splits + 1 outer)"
+        # change the base radius by giving the radius argument to the resolve_radii_and_sectors method and verify split points are updated accordingly
+        new_radius = 0.53
+        vanished_rod_sectorization.resolve_radii_and_sectors(radius=new_radius)
+        assert vanished_rod_sectorization.base_radius == new_radius, "Vanished rod sectorization base radius should be updated to new radius"
+        assert vanished_rod_sectorization.radial_split_points[0] == pytest.approx(new_radius / 4), "Vanished rod sectorization radial split point 1 should be at 1/4 of the new radius"
+        assert vanished_rod_sectorization.radial_split_points[1] == pytest.approx(new_radius / 2), "Vanished rod sectorization radial split point 2 should be at 1/2 of the new radius"
+        assert vanished_rod_sectorization.radial_split_points[2] == pytest.approx(3 * new_radius / 4), "Vanished rod sectorization radial split point 3 should be at 3/4 of the new radius"
+        assert vanished_rod_sectorization.radial_split_points[3] == pytest.approx(new_radius), "Vanished rod sectorization radial split point 4 should be at the new radius"
+        
+
+
 
 # ---------------------------------------------------------------------------
 # Tests: ATRIUM-10 Calculation Scheme with splits for square water rods
@@ -911,7 +1039,7 @@ class TestSerpent2DetectorAPI:
         )
         
         # Check detector name
-        assert det.name == "det_UOX_test_1"
+        assert det.name == "det_full_UOX_test_1"
         
         # Check domain materials (fuel zones only)
         assert "UOX_zone1_pin1" in det.domain_materials
@@ -952,8 +1080,7 @@ class TestSerpent2DetectorAPI:
         
         card = det.format_card()
         
-        assert "det det_test_pin" in card
-        assert "de full" in card
+        assert "det det_full_test_pin" in card
         assert "dt -4" in card
         assert "dm fuel_z1" in card
         assert "dm fuel_z2" in card
@@ -981,14 +1108,14 @@ class TestSerpent2DetectorAPI:
         """Verify Serpent2Model.add_detector_config() with reaction_isotope_map."""
         # Load assembly model
         ROD_to_material = associate_material_to_rod_ID(
-            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_GEOMETRY
+            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_NOM_GEOMETRY
         )
         compositions = parse_all_compositions_from_yaml(PATH_TO_YAML_COMPOSITIONS)
 
         assembly = CartesianAssemblyModel(
             name="detector_test",
             tdt_file="dummy.tdt",
-            geometry_description_yaml=PATH_TO_YAML_GEOMETRY,
+            geometry_description_yaml=PATH_TO_YAML_NOM_GEOMETRY,
         )
         assembly.set_rod_ID_to_material_mapping(ROD_to_material)
         assembly.set_uniform_temperatures(
@@ -1032,14 +1159,14 @@ class TestSerpent2DetectorAPI:
         """Verify full_range energy grid is default when energy_bounds=None."""
         # Create a simple assembly model
         ROD_to_material = associate_material_to_rod_ID(
-            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_GEOMETRY
+            PATH_TO_YAML_COMPOSITIONS, PATH_TO_YAML_NOM_GEOMETRY
         )
         compositions = parse_all_compositions_from_yaml(PATH_TO_YAML_COMPOSITIONS)
 
         assembly = CartesianAssemblyModel(
             name="energy_grid_test",
             tdt_file="dummy.tdt",
-            geometry_description_yaml=PATH_TO_YAML_GEOMETRY,
+            geometry_description_yaml=PATH_TO_YAML_NOM_GEOMETRY,
         )
         assembly.set_rod_ID_to_material_mapping(ROD_to_material)
         assembly.set_uniform_temperatures(
