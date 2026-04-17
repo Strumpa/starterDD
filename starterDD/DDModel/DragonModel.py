@@ -473,7 +473,7 @@ class CartesianAssemblyModel:
                             if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
                                 center_x = self.translation_offset_x + x_index * pin_pitch + pin_pitch / 2.0
                                 center_y = self.translation_offset_y + y_index * pin_pitch + pin_pitch / 2.0
-                            if descriptor == "WROD": # count the numver of water rod placholders
+                            if descriptor == "WROD": # count the number of water rod placeholders
                                 number_of_water_rod_placeholders += 1
                                 dummy_pin_model = DummyPinModel(descriptor)
                                 dummy_pin_model.set_position_in_lattice(x_index, y_index)
@@ -2265,8 +2265,9 @@ class DummyPinModel:
     Minimal attributes:
 
     - descriptor: descriptor of the region in the lattice description
-      (e.g. WROD for Water Rod placeholders, VANR for vanished rods
+    (e.g. WROD for Water Rod placeholders,
       would be desirable to extend to IT for instrumentation tubes and GT for guide tubes for example).
+
 
     Methods:
 

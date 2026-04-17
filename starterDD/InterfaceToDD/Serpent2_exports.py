@@ -1519,7 +1519,7 @@ class S2_EnergyGrid:
         
         Args:
             name: Grid name.
-            e_min: Minimum energy in MeV (default: 1e-10 MeV = 0.01 meV).
+            e_min: Minimum energy in MeV (default: 1e-10 MeV = 0.1 meV).
             e_max: Maximum energy in MeV (default: 1.96403e+01 MeV).
         
         Returns:
@@ -1721,6 +1721,8 @@ class S2_Detector:
         Returns:
             S2_Detector instance.
         """
+        if energy_grid_name is None:
+            energy_grid_name = "full"
         det_name = f"det_{energy_grid_name}_{pin_universe.universe_name}{suffix}"
         det = cls(
             name=det_name,

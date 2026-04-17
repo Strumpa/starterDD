@@ -547,16 +547,23 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
     lattice : Lattice
         The lattice to which vanished rod cells will be added
     assembly_model : CartesianAssemblyModel
-        The assembly model containing the vanished rod geometry parameters
-        (vanished_rods list with center, side_length, material, etc.)
+        The assembly model containing a ``vanished_rods`` list of ``VanishedRodModel``
+        instances. This function uses each model's ``rod_ID``, ``center``, and
+        ``default_sectorization_radius`` attributes; lattice indices may also be
+        present on the model but are not used here. Vanished rod centers are
+        expected to already be in assembly/YAML coordinates.
     translation_x : float
-        Unused. Vanished rod centers are already in assembly coordinates (from YAML).
+        Unused. Vanished rod centers are already in assembly coordinates if translation_offset_x has been defined 
+        from YAML input geometry.
         Kept for function signature consistency with pin positioning.
     translation_y : float
-        Unused. Vanished rod centers are already in assembly coordinates (from YAML).
+        Unused. Vanished rod centers are already in assembly coordinates if translation_offset_x has been defined 
+        from YAML input geometry.
         Kept for function signature consistency with pin positioning.
     calculation_step : CalculationStep or None
         CalculationStep object to retrieve vanished rod sectorization options from.
+
+    If translation offsets are not provided, vanished rods will be positioned according to their position in the lattice.
 
     """
     from ..DDModel.DragonModel import VanishedRodModel
@@ -598,7 +605,13 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
             PropertyType.MACRO: [f"MACRO_{rod_model.rod_ID}"]*n_regions,
         })
 
-        cx, cy = rod_model.center
+        if rod_model.center is None:
+            # compute center from lattice indices if not provided
+            posx, posy = rod_model.x_index, rod_model.y_index
+            cx = (posx + 0.5) * lattice_pin_pitch
+            cy = (posy + 0.5) * lattice_pin_pitch
+        else:
+            cx, cy = rod_model.center
         lattice.add_cell(
             tmp_cell,
             (cx, cy, 0.0),
@@ -3259,6 +3272,7 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
         # Step 4: Subdivide assembly box if needed
         #   - IC + macros  → per-pin-row/column MACRO regions
         #   - MOC + box_discretization enabled → fine grid for MOC tracking
+        print("Calculation step spatial method:", calculation_step.spatial_method)
         if (calculation_step.spatial_method == "IC"
                 and calculation_step.export_macros):
             assembly_box_cell = subdivide_box_into_macros(
@@ -3266,6 +3280,7 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
             )
         elif (calculation_step.box_discretization is not None
                 and calculation_step.box_discretization.enabled):
+            print("Box discretization enabled for MOC tracking; subdividing assembly box into ")
             assembly_box_cell = discretize_box(
                 assembly_box_cell, assembly_model,
                 calculation_step.box_discretization,

@@ -16,7 +16,9 @@ from ..DDModel.DragonCalculationScheme import (
 from ..DDModel.helpers import associate_material_to_rod_ID
 from ..MaterialProperties.material_mixture import (
     parse_all_compositions_from_yaml,
-    compute_water_iso_densities_at_densities,
+)
+from ..MaterialProperties.water_properties import (
+    compute_water_iso_densities_at_densities
 )
 from ..GeometryAnalysis.tdt_parser import (
     read_material_mixture_indices_from_tdt_file,
@@ -564,14 +566,10 @@ class DragonCase:
                     geometry_type_to_show=GeometryType.SECTORIZED,
                     property_type_to_show=PropertyType.MATERIAL,
                 )
-                if step.export_macros:
+                if step.export_macros: # would be desirable to have an option to plot MACROS or MATERIALS.
                     lattice.show(
                         geometry_type_to_show=GeometryType.SECTORIZED,
                         property_type_to_show=PropertyType.MACRO,
-                    )
-                    lattice.show(
-                        geometry_type_to_show=GeometryType.SECTORIZED,
-                        property_type_to_show=PropertyType.MATERIAL,
                     )
 
             # 4b. Read TDT and enforce material indices for THIS step

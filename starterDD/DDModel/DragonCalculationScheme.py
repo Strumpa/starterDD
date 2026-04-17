@@ -105,15 +105,15 @@ class SectorConfig:
                 f"number of angle entries {len(self.angles)}. Either they must "
                 f"match or the number of sectors must be in the predefined mapping."
             )
-        for n in self.sectors:
+        for i, n in enumerate(self.sectors):
             if n not in self.VALID_SECTOR_NO_TO_ANGLE:
                 raise ValueError(
                     f"Number of sectors {n} does not match the number of sectors supported by GLOW"
                     f"The valid sector to angles mapping is: {self.VALID_SECTOR_NO_TO_ANGLE}"
                 )
-            elif self.angles[self.sectors.index(n)] not in self.VALID_SECTOR_NO_TO_ANGLE[n]:
+            elif self.angles[i] not in self.VALID_SECTOR_NO_TO_ANGLE[n]:
                 raise ValueError(
-                    f"Angle {self.angles[self.sectors.index(n)]} is not valid for {n} sectors. "
+                    f"Angle {self.angles[i]} is not valid for {n} sectors. "
                     f"The valid angles for {n} sectors are: {self.VALID_SECTOR_NO_TO_ANGLE[n]}"
                 )
 
@@ -823,6 +823,8 @@ class VanishedRodDiscretizationConfig:
 
     def __init__(self, base_radius=None, radial_splits=1, sectors=None, angles=None, windmill=False):
         self.base_radius = base_radius
+        if radial_splits < 1:
+            raise ValueError("radial_splits must be at least 1")
         self.radial_splits = radial_splits
         self.sector_config = SectorConfig(sectors=sectors, angles=angles, windmill=windmill)
         self.windmill = windmill
@@ -1938,7 +1940,7 @@ class DragonCalculationScheme:
                     base_radius=van_rod.get("base_radius", None),
                     radial_splits=van_rod.get("radial_splits", 1),
                     sectors=van_rod.get("sectors", []),
-                    angles=van_rod.get("angles", []),
+                    angles=van_rod.get("angles"),
                     windmill=sect.get("windmill", False),
                 )
 

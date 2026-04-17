@@ -44,6 +44,7 @@ DRAGON_CALCULATION_SCHEME:
           # Vanished rods discretization options:
           base_radius: 0.51
           radial_splits: 4
-          # 2 sectors for inner region (0<r<base_radius) and 1 sector for outer region (r>base_radius) for a total of 3 sectors per vanished rod.
+          # 4 sectors for inner region (0<r<base_radius) and 1 sector for outer region (r>base_radius) for a total of 5 sectors per vanished rod.
+          # The sectorization parameters will be extended in order to match the number of regions defined by the radial split parameters
           sectors: [1, 1, 1]
           angles:  [0, 0, 0]
