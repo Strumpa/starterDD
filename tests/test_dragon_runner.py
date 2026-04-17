@@ -751,10 +751,107 @@ class TestInputStaging:
             os.path.join(staging_dir, "endfb8r1_295")
         )
 
+    def test_custom_tdt_file_id_tracked_and_symlinked(
+        self, tmp_path, monkeypatch
+    ):
+        """TDT files tracked in tdt_files_used are symlinked (not all .dat files).
 
-# =========================================================
-# Dry run mode
-# =========================================================
+        Verifies that the dragon_runner only symlinks TDT files that are tracked
+        during procedure generation, not all .dat files in the directory. This is
+        important for supporting custom tdt_file_id naming and preventing unwanted
+        symlinks to old or unused TDT files.
+        """
+        draglib = tmp_path / "draglibendfb8r1SHEM295"
+        draglib.write_text("fake draglib content")
+
+        output_dir = tmp_path / "output"
+
+        # Use existing GE14 test case with standard naming
+        case = DragonCase(
+            case_name="GE14_DOM",
+            call_glow=False,
+            draglib_name_to_alias={
+                "draglibendfb8r1SHEM295": "endfb8r1_295",
+            },
+            config_yamls={
+                "MATS": GE14_COMPOSITIONS_YAML,
+                "GEOM": GE14_DOM_GEOMETRY_YAML,
+                "CALC_SCHEME": GE14_CALC_SCHEME_1L_YAML,
+            },
+            output_path=str(output_dir),
+            tdt_path=GE14_TDT_DIR,
+            tdt_base_name="GE14_DOM",
+        )
+
+        # Generate procedures (this populates tdt_files_used)
+        procs = case.generate_cle2000_procedures()
+
+        # Verify that tdt_files_used was populated
+        assert len(case.tdt_files_used) > 0, (
+            "tdt_files_used should be populated after procedure generation"
+        )
+
+        # Verify we have both SSH and FLUX steps tracked
+        tracked_steps = set(case.tdt_files_used.keys())
+        assert "SSH" in tracked_steps, "SSH step should be tracked"
+        assert "FLUX" in tracked_steps, "FLUX step should be tracked"
+
+        # Verify that the tracked files match the expected naming
+        ssh_file = case.tdt_files_used["SSH"]
+        flux_file = case.tdt_files_used["FLUX"]
+
+        assert "SSH" in ssh_file, f"SSH filename should contain 'SSH': {ssh_file}"
+        assert "IC_TISO" in ssh_file, f"SSH should have IC_TISO in name: {ssh_file}"
+        assert "FLUX" in flux_file, f"FLUX filename should contain 'FLUX': {flux_file}"
+        assert "MOC_TSPC" in flux_file, f"FLUX should have MOC_TSPC in name: {flux_file}"
+
+        # Setup runner and stage inputs
+        runner = DragonRunner(
+            dragon_case=case,
+            draglib_paths={
+                "draglibendfb8r1SHEM295": str(draglib),
+            },
+            results_root=str(tmp_path / "results"),
+        )
+        runner._scheme = case.scheme
+        runner._procedure_files = procs
+        runner.draglib_paths = runner._resolve_draglib_paths({
+            "draglibendfb8r1SHEM295": str(draglib),
+        })
+
+        run_dir = runner._build_run_directory("2026-03-12T14-32-07")
+        staging_dir = str(tmp_path / "staging")
+        os.makedirs(staging_dir)
+
+        # Stage inputs
+        runner._stage_inputs(run_dir, staging_dir)
+
+        # Verify that ONLY tracked TDT files are symlinked
+        staged_dat_files = set(
+            f for f in os.listdir(staging_dir) if f.endswith(".dat")
+        )
+
+        tracked_files = set(case.tdt_files_used.values())
+
+        # Each tracked file should be symlinked
+        for tdt_filename in tracked_files:
+            assert tdt_filename in staged_dat_files, (
+                f"Tracked TDT file '{tdt_filename}' not symlinked to staging. "
+                f"Staged files: {staged_dat_files}"
+            )
+            # Verify it's actually a symlink
+            assert os.path.islink(os.path.join(staging_dir, tdt_filename)), (
+                f"TDT file '{tdt_filename}' should be a symlink"
+            )
+
+        # Verify symlinks resolve correctly
+        for tdt_filename in tracked_files:
+            symlink_path = os.path.join(staging_dir, tdt_filename)
+            target = os.readlink(symlink_path)
+            assert os.path.exists(target), (
+                f"Symlink '{tdt_filename}' does not resolve. Target: {target}"
+            )
+
 
 class TestDryRun:
     """Tests for dry_run=True mode."""

@@ -398,7 +398,36 @@ class DragonRunner:
 
         # 2. Symlink TDT geometry files
         tdt_path = os.path.abspath(self.case.tdt_path)
-        if os.path.isdir(tdt_path):
+
+        # Check if we have tracked TDT files from procedure generation
+        if hasattr(self.case, 'tdt_files_used') and self.case.tdt_files_used:
+            # Use specific TDT files that were actually used in procedures
+            log.info(
+                f"Staging {len(self.case.tdt_files_used)} tracked TDT file(s)"
+            )
+            for step_name, tdt_filename in self.case.tdt_files_used.items():
+                src = os.path.join(tdt_path, tdt_filename)
+                dst = os.path.join(staging_dir, tdt_filename)
+                if not os.path.exists(dst):
+                    if os.path.isfile(src):
+                        os.symlink(src, dst)
+                        log.info(
+                            f"Symlinked TDT for step '{step_name}': "
+                            f"{tdt_filename}"
+                        )
+                    else:
+                        log.warning(
+                            f"Expected TDT file for step '{step_name}' "
+                            f"not found: {src}"
+                        )
+        elif os.path.isdir(tdt_path):
+            # Fallback: symlink all .dat files (legacy behavior)
+            log.warning(
+                "No tracked TDT files available. "
+                "Symlinking all .dat files (legacy behavior). "
+                "This may symlink unintended files if multiple TDT "
+                "generations have occurred."
+            )
             for fname in os.listdir(tdt_path):
                 if fname.endswith(".dat"):
                     src = os.path.join(tdt_path, fname)
@@ -406,7 +435,7 @@ class DragonRunner:
                     if not os.path.exists(dst):
                         os.symlink(src, dst)
         elif os.path.isfile(tdt_path):
-            # Single file
+            # Single file case (unchanged)
             dst = os.path.join(
                 staging_dir, os.path.basename(tdt_path)
             )

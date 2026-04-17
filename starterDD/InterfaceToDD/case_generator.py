@@ -105,6 +105,10 @@ class DragonCase:
         self._fuel_material_temperatures = {}  # {material_name: temperature_K}
         self._non_fuel_temperatures = {}  # {material_type: temperature_K}
 
+        # TDT files used mapping: {step_name: tdt_filename}
+        # Populated during procedure generation to track custom-named TDT files
+        self.tdt_files_used = {}
+
         # ----------------------------------------------------------
         # Resolve all paths to absolute so the case is
         # independent of later CWD changes.
@@ -593,6 +597,11 @@ class DragonCase:
                     f"pointing at the directory that "
                     f"contains the file."
                 )
+
+            # Store the TDT filename for this step (used by dragon_runner for symlinks)
+            tdt_filename_only = os.path.basename(tdt_full)
+            self.tdt_files_used[step.name] = tdt_filename_only
+
             tdt_indices = (
                 read_material_mixture_indices_from_tdt_file(
                     tdt_file_path=tdt_file_path,
