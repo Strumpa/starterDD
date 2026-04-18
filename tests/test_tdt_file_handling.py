@@ -126,8 +126,11 @@ class TestTDTFileHandling:
             tdt_path=GE14_TDT_DIR,
         )
         
-        # After procedure generation, tdt_files_used should exist
-        assert hasattr(case, 'tdt_files_used'), "Case should have tdt_files_used attribute"
+        # After procedure generation, tdt_files_used should exist and be a dict
+        assert hasattr(case, 'tdt_files_used'), \
+            "Case should have tdt_files_used attribute"
+        assert isinstance(case.tdt_files_used, dict), \
+            "tdt_files_used should be a dictionary"
         # (Populated during generate_cle2000_procedures)
 
     def test_phase3_tdt_file_mapping_tracked(self):
@@ -171,7 +174,7 @@ class TestTDTFileHandling:
         case.tdt_file_mapping = {
             'SSH': {
                 'actual': 'custom_ssh_CP_2D.dat',
-                'standardized': 'test_manifest_tdt_SSH_CP_2DTRAN.dat',
+                'standardized': 'test_manifest_tdt_SSH_CP_TISO.dat',
                 'match': False,
             }
         }
@@ -181,9 +184,14 @@ class TestTDTFileHandling:
             results_root=temp_output_dir,
         )
         
-        # Build scheme manifest
-        # (Would verify manifest includes tdt_files list)
-        # This is a conceptual test; full testing requires running Dragon
+        # Verify runner has access to case with tdt_file_mapping
+        assert runner.case == case
+        assert runner.case.tdt_file_mapping is not None
+        assert 'SSH' in runner.case.tdt_file_mapping
+        mapping = runner.case.tdt_file_mapping['SSH']
+        assert mapping['actual'] == 'custom_ssh_CP_2D.dat'
+        assert mapping['standardized'] == 'test_manifest_tdt_SSH_CP_TISO.dat'
+        assert mapping['match'] is False
 
     def test_phase4_dragon_runner_validates_tdt_symlinks(self, temp_tdt_dir, temp_output_dir):
         """Phase 4: Verify dragon_runner validates TDT symlinks in staging directory."""
@@ -201,9 +209,16 @@ class TestTDTFileHandling:
             tdt_path=tmpdir,
         )
         
-        # Populate tdt_files_used for testing
+        # Populate tdt_files_used and tdt_file_mapping for testing
         case.tdt_files_used = {
             'SSH': 'custom_ssh_CP_2D.dat',
+        }
+        case.tdt_file_mapping = {
+            'SSH': {
+                'actual': 'custom_ssh_CP_2D.dat',
+                'standardized': 'test_symlink_validation_SSH_CP_TISO.dat',
+                'match': False,
+            }
         }
         
         runner = DragonRunner(
@@ -218,11 +233,27 @@ class TestTDTFileHandling:
             run_dir = os.path.join(temp_output_dir, "test_run")
             os.makedirs(run_dir, exist_ok=True)
             
-            # This would normally be called by run()
-            # runner._stage_inputs(run_dir, staging_dir)
+            # Initialize _procedure_files mock for staging
+            runner._procedure_files = {}
+            
+            # Call _stage_inputs to verify TDT symlink creation
+            runner._stage_inputs(run_dir, staging_dir, skip_draglibs=True)
             
             # Verify symlinks were created and resolve correctly
-            # (Full test requires complete setup)
+            staging_symlink = os.path.join(
+                staging_dir, 
+                'test_symlink_validation_SSH_CP_TISO.dat'
+            )
+            assert os.path.islink(staging_symlink), \
+                "Staging symlink should be created for TDT file"
+            assert os.path.exists(staging_symlink), \
+                "Staging symlink should resolve to actual file"
+            
+            # Verify the symlink points to the correct source
+            link_target = os.readlink(staging_symlink)
+            expected_source = os.path.join(tmpdir, 'custom_ssh_CP_2D.dat')
+            assert link_target == expected_source, \
+                f"Symlink should point to source TDT file: {link_target}"
 
 
 class TestTDTFileIntegration:
@@ -242,8 +273,11 @@ class TestTDTFileIntegration:
             tdt_path=GE14_TDT_DIR,
         )
         
-        # tdt_files_used should be populated
-        assert hasattr(case, 'tdt_files_used')
+        # tdt_files_used should be initialized and be a dict
+        assert hasattr(case, 'tdt_files_used'), \
+            "Case should have tdt_files_used attribute"
+        assert isinstance(case.tdt_files_used, dict), \
+            "tdt_files_used should be a dictionary"
         # After generation, it will contain step names mapped to filenames
 
     def test_no_symlinks_in_tdt_path_after_generation(self):
@@ -307,8 +341,13 @@ class TestTDTFileIntegration:
             tdt_path=GE14_TDT_DIR,
         )
         
-        assert hasattr(case, 'tdt_file_mapping')
-        assert isinstance(case.tdt_file_mapping, dict)
+        # Verify both attributes exist and have correct types
+        assert hasattr(case, 'tdt_file_mapping'), \
+            "Case should have tdt_file_mapping attribute"
+        assert isinstance(case.tdt_file_mapping, dict), \
+            "tdt_file_mapping should be a dictionary"
+        assert len(case.tdt_file_mapping) == 0, \
+            "tdt_file_mapping should be empty until procedure generation"
 
 
 if __name__ == "__main__":

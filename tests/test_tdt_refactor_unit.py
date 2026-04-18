@@ -176,12 +176,19 @@ class TestDragonRunnerTDTValidation:
             with tempfile.TemporaryDirectory() as staging_dir:
                 run_dir = tmpdir
                 
-                try:
+                # Ensure FileNotFoundError is raised with step name in message
+                with pytest.raises(FileNotFoundError) as exc_info:
                     runner._stage_inputs(run_dir, staging_dir, skip_draglibs=True)
-                except FileNotFoundError as e:
-                    # Error should mention the step name
-                    assert 'SSH' in str(e) or 'FLUX' in str(e) or 'step' in str(e).lower(), \
-                        f"Error should mention step name: {e}"
+                
+                # Error should mention the step name (SSH or FLUX)
+                error_msg = str(exc_info.value)
+                has_step_name = (
+                    'SSH' in error_msg or 
+                    'FLUX' in error_msg or 
+                    'step' in error_msg.lower()
+                )
+                assert has_step_name, \
+                    f"Error should mention step name in message: {error_msg}"
 
 
 class TestManifestTDTInformation:

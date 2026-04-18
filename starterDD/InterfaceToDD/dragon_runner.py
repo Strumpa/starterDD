@@ -466,7 +466,39 @@ class DragonRunner:
                     )
                 
                 # Create standardized symlink if destination doesn't exist
-                if not os.path.exists(dst):
+                # Use os.path.lexists() to detect both valid and broken symlinks
+                # (os.path.exists() returns False for broken symlinks, but they
+                #  still exist as paths, causing os.symlink() to raise FileExistsError)
+                if os.path.lexists(dst):
+                    # Path exists (valid link or broken link)
+                    if os.path.islink(dst):
+                        # It's a symlink - check if it's broken or points to wrong target
+                        current_target = os.readlink(dst)
+                        if current_target == src:
+                            # Already points to correct source, skip
+                            log.debug(
+                                f"[OK] Staging symlink already correct for step '{step_name}': {dst}"
+                            )
+                        else:
+                            # Broken or points to wrong file - replace it
+                            os.remove(dst)
+                            os.symlink(src, dst)
+                            log.info(
+                                f"[REPLACED] TDT staging symlink for step '{step_name}':\n"
+                                f"  Standardized name: {standardized_filename}\n"
+                                f"  Points to actual: {actual_tdt_filename}\n"
+                                f"  Link: {dst} -> {src}"
+                            )
+                    else:
+                        # It's a regular file - this is an error, don't overwrite
+                        log.error(
+                            f"[ERROR] Staging path exists as a regular file for step '{step_name}': {dst}"
+                        )
+                        raise FileExistsError(
+                            f"Staging path is a regular file (not a symlink) for step '{step_name}': {dst}"
+                        )
+                else:
+                    # Path doesn't exist - create new symlink
                     os.symlink(src, dst)
                     log.info(
                         f"[OK] Staged TDT for step '{step_name}':\n"

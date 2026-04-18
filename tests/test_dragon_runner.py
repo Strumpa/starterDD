@@ -840,31 +840,52 @@ class TestInputStaging:
         # Stage inputs
         runner._stage_inputs(run_dir, staging_dir)
 
-        # Verify that ONLY tracked TDT files are symlinked
+        # Verify that ONLY tracked TDT files are symlinked (using standardized names)
         staged_dat_files = set(
             f for f in os.listdir(staging_dir) if f.endswith(".dat")
         )
 
-        tracked_files = set(case.tdt_files_used.values())
+        # Get the standardized filenames from the mapping
+        # (symlinks are created with standardized names, pointing to actual files)
+        expected_staged_names = set()
+        for step_name, mapping in case.tdt_file_mapping.items():
+            standardized = mapping.get('standardized')
+            if standardized:
+                expected_staged_names.add(standardized)
 
-        # Each tracked file should be symlinked
-        for tdt_filename in tracked_files:
-            assert tdt_filename in staged_dat_files, (
-                f"Tracked TDT file '{tdt_filename}' not symlinked to staging. "
+        # Verify all expected standardized symlinks exist
+        for standardized_filename in expected_staged_names:
+            assert standardized_filename in staged_dat_files, (
+                f"Expected standardized TDT symlink '{standardized_filename}' not found in staging. "
                 f"Staged files: {staged_dat_files}"
             )
+            
             # Verify it's actually a symlink
-            assert os.path.islink(os.path.join(staging_dir, tdt_filename)), (
-                f"TDT file '{tdt_filename}' should be a symlink"
+            symlink_path = os.path.join(staging_dir, standardized_filename)
+            assert os.path.islink(symlink_path), (
+                f"TDT file '{standardized_filename}' should be a symlink"
             )
-
-        # Verify symlinks resolve correctly
-        for tdt_filename in tracked_files:
-            symlink_path = os.path.join(staging_dir, tdt_filename)
+            
+            # Verify symlink resolves correctly
             target = os.readlink(symlink_path)
             assert os.path.exists(target), (
-                f"Symlink '{tdt_filename}' does not resolve. Target: {target}"
+                f"Symlink '{standardized_filename}' does not resolve. Target: {target}"
             )
+            
+            # Verify the symlink points to the correct actual file
+            # Find which step this symlink corresponds to
+            actual_filename = None
+            for step_name, mapping in case.tdt_file_mapping.items():
+                if mapping.get('standardized') == standardized_filename:
+                    actual_filename = mapping.get('actual')
+                    break
+            
+            if actual_filename:
+                expected_source = os.path.join(case.tdt_path, actual_filename)
+                assert target == expected_source, (
+                    f"Symlink '{standardized_filename}' should point to actual file. "
+                    f"Expected: {expected_source}, Got: {target}"
+                )
 
 
 class TestDryRun:

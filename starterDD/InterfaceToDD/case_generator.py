@@ -4,10 +4,16 @@
 #
 # R.Guasch — 10/03/2026
 
+import logging
+
 from .CLE2000 import (
     main_procedure, sub_procedure,
     validate_varname, wrap_cle2000_line,
 )
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
 from .dragon_module_calls import LIB, EDI_COMPO, TRK, EDI_condensation, SPH_correction, MIXEQ
 from ..DDModel.DragonCalculationScheme import (
     DragonCalculationScheme,
@@ -603,17 +609,15 @@ class DragonCase:
                 )
 
             # Construct standardized filename (what TRK expects)
+            # Note: TRK._tdt_file_name() uses self.case_name, NOT tdt_base_name
+            # This ensures staging creates symlinks with names that procedures reference
             standardized_filename = (
-                f"{self.tdt_base_name}_{step.name}"
+                f"{self.case_name}_{step.name}"
                 f"_{step.spatial_method}_{step.tracking}" + ("_MACRO" if step.export_macros else "") + ".dat"
             )
             actual_basename = os.path.basename(tdt_full)
             
-            # Log TDT file information
-            print(f"[TDT] Processing step '{step.name}':")
-            print(f"  Actual TDT file: {actual_basename}")
-            print(f"  Standardized TDT file: {standardized_filename}")
-            
+            # Log TDT file information            
             # Store the actual filename for dragon_runner staging
             # No intermediate symlinks created in tdt_path (keep it clean)
             self.tdt_files_used[step.name] = actual_basename
@@ -629,10 +633,10 @@ class DragonCase:
             
             # Log whether names match
             if actual_basename == standardized_filename:
-                print(f"[TDT] ✓ File already has standardized name")
+                log.debug(f"[TDT] File already has standardized name")
             else:
-                print(
-                    f"[TDT] ℹ Custom-named file detected for step '{step.name}':\n"
+                log.info(
+                    f"[TDT] Custom-named file detected for step '{step.name}':\n"
                     f"      actual: {actual_basename}\n"
                     f"      standardized would be: {standardized_filename}"
                 )
