@@ -106,8 +106,12 @@ class DragonCase:
         self._non_fuel_temperatures = {}  # {material_type: temperature_K}
 
         # TDT files used mapping: {step_name: tdt_filename}
-        # Populated during procedure generation to track custom-named TDT files
+        # Populated during procedure generation to track which TDT files are used
         self.tdt_files_used = {}
+        
+        # TDT file mapping: {step_name: {'actual': ..., 'standardized': ..., 'match': bool}}
+        # Tracks relationship between actual and standardized filenames
+        self.tdt_file_mapping = {}
 
         # ----------------------------------------------------------
         # Resolve all paths to absolute so the case is
@@ -603,31 +607,35 @@ class DragonCase:
                 f"{self.tdt_base_name}_{step.name}"
                 f"_{step.spatial_method}_{step.tracking}" + ("_MACRO" if step.export_macros else "") + ".dat"
             )
-            standardized_path = os.path.join(tdt_file_path, standardized_filename)
             actual_basename = os.path.basename(tdt_full)
+            
+            # Log TDT file information
             print(f"[TDT] Processing step '{step.name}':")
             print(f"  Actual TDT file: {actual_basename}")
             print(f"  Standardized TDT file: {standardized_filename}")
-            # If the actual file has a detailed name (with sectorization, etc),
-            # create a symlink to the standardized name for TRK compatibility
-            if actual_basename != standardized_filename:
-                if not os.path.exists(standardized_path):
-                    try:
-                        os.symlink(actual_basename, standardized_path)
-                        print(
-                            f"[TDT] Created symlink for step '{step.name}': "
-                            f"{standardized_filename} -> {actual_basename}"
-                        )
-                    except OSError as e:
-                        print(
-                            f"[WARNING] Could not create symlink for step '{step.name}': {e}\n"
-                            f"  Attempting to use actual file: {actual_basename}"
-                        )
-                        # Fall back to using the actual filename
-                        standardized_filename = actual_basename
-
-            # Store the standardized filename for dragon_runner symlinks
-            self.tdt_files_used[step.name] = standardized_filename
+            
+            # Store the actual filename for dragon_runner staging
+            # No intermediate symlinks created in tdt_path (keep it clean)
+            self.tdt_files_used[step.name] = actual_basename
+            
+            # Track filename mapping for manifest and debugging (Phase 3)
+            if not hasattr(self, 'tdt_file_mapping'):
+                self.tdt_file_mapping = {}
+            self.tdt_file_mapping[step.name] = {
+                'actual': actual_basename,
+                'standardized': standardized_filename,
+                'match': (actual_basename == standardized_filename),
+            }
+            
+            # Log whether names match
+            if actual_basename == standardized_filename:
+                print(f"[TDT] ✓ File already has standardized name")
+            else:
+                print(
+                    f"[TDT] ℹ Custom-named file detected for step '{step.name}':\n"
+                    f"      actual: {actual_basename}\n"
+                    f"      standardized would be: {standardized_filename}"
+                )
 
             tdt_indices = (
                 read_material_mixture_indices_from_tdt_file(

@@ -401,25 +401,89 @@ class DragonRunner:
 
         # Check if we have tracked TDT files from procedure generation
         if hasattr(self.case, 'tdt_files_used') and self.case.tdt_files_used:
-            # Use specific TDT files that were actually used in procedures
+            # Create standardized symlinks pointing to actual full-named TDT files
+            # The x2m uses standardized names (short enough for CLE2000)
+            # but they must point to the actual full-named files in tdt_path
             log.info(
-                f"Staging {len(self.case.tdt_files_used)} tracked TDT file(s)"
+                f"Staging {len(self.case.tdt_files_used)} TDT file(s) "
+                f"with standardized names pointing to full names"
             )
-            for step_name, tdt_filename in self.case.tdt_files_used.items():
-                src = os.path.join(tdt_path, tdt_filename)
-                dst = os.path.join(staging_dir, tdt_filename)
+            
+            # Get file mapping that was created during procedure generation
+            tdt_file_mapping = getattr(self.case, 'tdt_file_mapping', {})
+            
+            for step_name, actual_tdt_filename in self.case.tdt_files_used.items():
+                # Get the standardized filename from the mapping (computed in case_generator)
+                if step_name in tdt_file_mapping:
+                    standardized_filename = tdt_file_mapping[step_name].get('standardized')
+                else:
+                    # Fallback: try to reconstruct from step (but this may fail in tests)
+                    standardized_filename = None
+                    if (hasattr(self.case, 'scheme') and 
+                        self.case.scheme is not None and
+                        hasattr(self.case.scheme, 'get_trackable_steps')):
+                        try:
+                            for s in self.case.scheme.get_trackable_steps():
+                                if s.name == step_name:
+                                    suffix = "_MACRO" if s.export_macros else ""
+                                    standardized_filename = (
+                                        f"{self.case.case_name}_{s.name}"
+                                        f"_{s.spatial_method}_{s.tracking}{suffix}.dat"
+                                    )
+                                    break
+                        except (TypeError, AttributeError):
+                            pass
+                
+                if standardized_filename is None:
+                    log.error(
+                        f"Could not determine standardized filename for step '{step_name}'. "
+                        f"No mapping found and scheme lookup failed."
+                    )
+                    raise ValueError(
+                        f"Cannot determine standardized filename for step '{step_name}'. "
+                        f"Check that tdt_file_mapping was populated during procedure generation."
+                    )
+                
+                # Source: actual full-named file in tdt_path
+                src = os.path.join(tdt_path, actual_tdt_filename)
+                # Destination: standardized symlink in staging directory
+                dst = os.path.join(staging_dir, standardized_filename)
+                
+                # Validate source file exists before attempting to symlink
+                if not os.path.isfile(src):
+                    available_files = os.listdir(tdt_path) if os.path.isdir(tdt_path) else []
+                    log.error(
+                        f"[ERROR] TDT file not found for step '{step_name}':\n"
+                        f"  Expected: {src}\n"
+                        f"  Actual name: {actual_tdt_filename}\n"
+                        f"  TDT directory: {tdt_path}\n"
+                        f"  Available files in tdt_path: {available_files}"
+                    )
+                    raise FileNotFoundError(
+                        f"TDT file not found for step '{step_name}': {src}\n"
+                        f"Expected actual filename: {actual_tdt_filename}\n"
+                        f"Make sure the TDT file exists and tdt_path is set correctly."
+                    )
+                
+                # Create standardized symlink if destination doesn't exist
                 if not os.path.exists(dst):
-                    if os.path.isfile(src):
-                        os.symlink(src, dst)
-                        log.info(
-                            f"Symlinked TDT for step '{step_name}': "
-                            f"{tdt_filename}"
-                        )
-                    else:
-                        log.warning(
-                            f"Expected TDT file for step '{step_name}' "
-                            f"not found: {src}"
-                        )
+                    os.symlink(src, dst)
+                    log.info(
+                        f"[OK] Staged TDT for step '{step_name}':\n"
+                        f"  Standardized name: {standardized_filename}\n"
+                        f"  Points to actual: {actual_tdt_filename}\n"
+                        f"  Link: {dst} -> {src}"
+                    )
+                
+                # Validate that staging symlink resolves correctly
+                if os.path.islink(dst) and not os.path.exists(dst):
+                    log.error(
+                        f"[ERROR] TDT staging symlink is broken for step '{step_name}': {dst}"
+                    )
+                    raise FileNotFoundError(
+                        f"TDT staging symlink broken for step '{step_name}': {dst} -> {src}"
+                    )
+
         elif os.path.isdir(tdt_path):
             # Fallback: symlink all .dat files (legacy behavior)
             log.warning(
@@ -639,6 +703,17 @@ class DragonRunner:
             branches_info[b.type] = b.values
 
         outputs_info = [o.name for o in scheme.outputs]
+        
+        # Build TDT file mapping information (Phase 3: Diagnostics)
+        tdt_info = []
+        if hasattr(self.case, 'tdt_file_mapping'):
+            for step_name, mapping in self.case.tdt_file_mapping.items():
+                tdt_info.append({
+                    'step_name': step_name,
+                    'actual_filename': mapping.get('actual'),
+                    'standardized_filename': mapping.get('standardized'),
+                    'names_match': mapping.get('match'),
+                })
 
         return {
             "name": scheme.name,
@@ -647,6 +722,7 @@ class DragonRunner:
             "branches": branches_info,
             "total_statepoints": scheme.get_total_statepoints(),
             "outputs": outputs_info,
+            "tdt_files": tdt_info,
         }
 
     def _update_manifest_with_results(
