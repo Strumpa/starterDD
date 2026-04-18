@@ -756,10 +756,15 @@ class TestInputStaging:
     ):
         """TDT files tracked in tdt_files_used are symlinked (not all .dat files).
 
-        Verifies that the dragon_runner only symlinks TDT files that are tracked
-        during procedure generation, not all .dat files in the directory. This is
-        important for supporting custom tdt_file_id naming and preventing unwanted
-        symlinks to old or unused TDT files.
+        Verifies that:
+        1. The dragon_runner only symlinks TDT files that are tracked during
+           procedure generation (not all .dat files in the directory)
+        2. When TDT files have detailed names with sectorization details, symlinks
+           are created to standardized names
+        3. The x2m will reference the standardized names (which resolve via symlink)
+
+        This is important for supporting custom tdt_file_id naming and preventing
+        unwanted symlinks to old or unused TDT files.
         """
         draglib = tmp_path / "draglibendfb8r1SHEM295"
         draglib.write_text("fake draglib content")
@@ -783,7 +788,7 @@ class TestInputStaging:
             tdt_base_name="GE14_DOM",
         )
 
-        # Generate procedures (this populates tdt_files_used)
+        # Generate procedures (this populates tdt_files_used with standardized names)
         procs = case.generate_cle2000_procedures()
 
         # Verify that tdt_files_used was populated
@@ -796,7 +801,7 @@ class TestInputStaging:
         assert "SSH" in tracked_steps, "SSH step should be tracked"
         assert "FLUX" in tracked_steps, "FLUX step should be tracked"
 
-        # Verify that the tracked files match the expected naming
+        # Verify that the tracked files use standardized naming
         ssh_file = case.tdt_files_used["SSH"]
         flux_file = case.tdt_files_used["FLUX"]
 
@@ -804,6 +809,15 @@ class TestInputStaging:
         assert "IC_TISO" in ssh_file, f"SSH should have IC_TISO in name: {ssh_file}"
         assert "FLUX" in flux_file, f"FLUX filename should contain 'FLUX': {flux_file}"
         assert "MOC_TSPC" in flux_file, f"FLUX should have MOC_TSPC in name: {flux_file}"
+
+        # Verify that symlinks exist in the TDT directory for standardized names
+        # (case_generator creates these symlinks when detailed filenames exist)
+        for step_name, tracked_filename in case.tdt_files_used.items():
+            tracked_path = os.path.join(GE14_TDT_DIR, tracked_filename)
+            assert os.path.exists(tracked_path), (
+                f"Tracked file for step '{step_name}' should exist "
+                f"(either directly or as a symlink): {tracked_path}"
+            )
 
         # Setup runner and stage inputs
         runner = DragonRunner(

@@ -598,9 +598,36 @@ class DragonCase:
                     f"contains the file."
                 )
 
-            # Store the TDT filename for this step (used by dragon_runner for symlinks)
-            tdt_filename_only = os.path.basename(tdt_full)
-            self.tdt_files_used[step.name] = tdt_filename_only
+            # Construct standardized filename (what TRK expects)
+            standardized_filename = (
+                f"{self.tdt_base_name}_{step.name}"
+                f"_{step.spatial_method}_{step.tracking}" + ("_MACRO" if step.export_macros else "") + ".dat"
+            )
+            standardized_path = os.path.join(tdt_file_path, standardized_filename)
+            actual_basename = os.path.basename(tdt_full)
+            print(f"[TDT] Processing step '{step.name}':")
+            print(f"  Actual TDT file: {actual_basename}")
+            print(f"  Standardized TDT file: {standardized_filename}")
+            # If the actual file has a detailed name (with sectorization, etc),
+            # create a symlink to the standardized name for TRK compatibility
+            if actual_basename != standardized_filename:
+                if not os.path.exists(standardized_path):
+                    try:
+                        os.symlink(actual_basename, standardized_path)
+                        print(
+                            f"[TDT] Created symlink for step '{step.name}': "
+                            f"{standardized_filename} -> {actual_basename}"
+                        )
+                    except OSError as e:
+                        print(
+                            f"[WARNING] Could not create symlink for step '{step.name}': {e}\n"
+                            f"  Attempting to use actual file: {actual_basename}"
+                        )
+                        # Fall back to using the actual filename
+                        standardized_filename = actual_basename
+
+            # Store the standardized filename for dragon_runner symlinks
+            self.tdt_files_used[step.name] = standardized_filename
 
             tdt_indices = (
                 read_material_mixture_indices_from_tdt_file(
