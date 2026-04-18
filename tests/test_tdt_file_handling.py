@@ -57,7 +57,7 @@ class TestTDTFileHandling:
         with tempfile.TemporaryDirectory() as tmpdir:
             yield tmpdir
 
-    def test_phase1_no_intermediate_symlinks_created(self, temp_tdt_dir, temp_output_dir):
+    def test_no_intermediate_symlinks_created(self, temp_tdt_dir, temp_output_dir):
         """Phase 1: Verify case generator does NOT create intermediate symlinks in tdt_path."""
         tmpdir, files = temp_tdt_dir
         
@@ -112,8 +112,8 @@ class TestTDTFileHandling:
         assert final_symlinks == initial_symlinks, \
             "Case generator should not create intermediate symlinks in tdt_path"
 
-    def test_phase1_tdt_files_used_stores_actual_names(self):
-        """Phase 1: Verify tdt_files_used stores actual filenames, not standardized."""
+    def test_tdt_files_used_stores_actual_names(self):
+        """Verify tdt_files_used stores actual filenames, not standardized."""
         case = DragonCase(
             case_name="test_actual_names",
             call_glow=False,
@@ -133,8 +133,8 @@ class TestTDTFileHandling:
             "tdt_files_used should be a dictionary"
         # (Populated during generate_cle2000_procedures)
 
-    def test_phase3_tdt_file_mapping_tracked(self):
-        """Phase 3: Verify tdt_file_mapping is created and tracks actual vs standardized."""
+    def test_tdt_file_mapping_tracked(self):
+        """Verify tdt_file_mapping is created and tracks actual vs standardized."""
         case = DragonCase(
             case_name="test_mapping",
             call_glow=False,
@@ -153,11 +153,11 @@ class TestTDTFileHandling:
         assert isinstance(case.tdt_file_mapping, dict), \
             "tdt_file_mapping should be a dictionary"
 
-    def test_phase3_manifest_includes_tdt_info(self, temp_output_dir):
-        """Phase 3: Verify manifest includes TDT file mapping information."""
+    def test_manifest_includes_tdt_info(self, temp_output_dir):
+        """Verify manifest includes TDT file mapping information."""
         # This test verifies that when a DragonRunner creates a manifest,
         # it includes tdt_file information from case.tdt_file_mapping
-        
+
         case = DragonCase(
             case_name="test_manifest_tdt",
             call_glow=False,
@@ -169,29 +169,47 @@ class TestTDTFileHandling:
             },
             tdt_path=GE14_TDT_DIR,
         )
-        
+
+        # For unit testing, manually set the scheme without calling
+        # generate_cle2000_procedures (which would require actual TDT files).
+        # The test goal is to verify manifest includes tdt_file_mapping info.
+        case.scheme = DragonCalculationScheme.from_yaml(
+            GE14_CALC_SCHEME_1L_YAML
+        )
+
         # Populate tdt_file_mapping manually for testing
         case.tdt_file_mapping = {
             'SSH': {
-                'actual': 'custom_ssh_CP_2D.dat',
-                'standardized': 'test_manifest_tdt_SSH_CP_TISO.dat',
+                'actual': 'GE14_DOM_SSH_IC_TISO_MACRO.dat',
+                'standardized': 'test_manifest_tdt_SSH_IC_TISO.dat',
                 'match': False,
             }
         }
-        
+
         runner = DragonRunner(
             case,
             results_root=temp_output_dir,
         )
-        
+
+        # Manually set the scheme on runner for this unit test
+        # (normally set by run() method, but we're testing manifest building separately)
+        runner._scheme = case.scheme
+
         # Verify runner has access to case with tdt_file_mapping
         assert runner.case == case
         assert runner.case.tdt_file_mapping is not None
         assert 'SSH' in runner.case.tdt_file_mapping
         mapping = runner.case.tdt_file_mapping['SSH']
-        assert mapping['actual'] == 'custom_ssh_CP_2D.dat'
-        assert mapping['standardized'] == 'test_manifest_tdt_SSH_CP_TISO.dat'
+        assert mapping['actual'] == 'GE14_DOM_SSH_IC_TISO_MACRO.dat'
+        assert mapping['standardized'] == 'test_manifest_tdt_SSH_IC_TISO.dat'
         assert mapping['match'] is False
+
+        manifest = runner._build_scheme_manifest()
+        assert len(manifest['tdt_files']) > 0
+        tdt_file_info = manifest['tdt_files'][0]
+        assert tdt_file_info['actual_filename'] == 'GE14_DOM_SSH_IC_TISO_MACRO.dat'
+        assert tdt_file_info['standardized_filename'] == 'test_manifest_tdt_SSH_IC_TISO.dat'
+        assert tdt_file_info['step_name'] == 'SSH'
 
     def test_phase4_dragon_runner_validates_tdt_symlinks(self, temp_tdt_dir, temp_output_dir):
         """Phase 4: Verify dragon_runner validates TDT symlinks in staging directory."""
@@ -312,7 +330,7 @@ class TestTDTFileIntegration:
             
             # Generate procedures (if TDT files available)
             try:
-                # case.generate_cle2000_procedures()
+                #case.generate_cle2000_procedures()
                 pass
             except Exception:
                 pytest.skip("TDT files not available for full integration test")

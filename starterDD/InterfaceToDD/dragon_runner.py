@@ -704,7 +704,13 @@ class DragonRunner:
     def _build_scheme_manifest(self):
         """Build a dict summarising the calculation scheme for
         the manifest."""
-        scheme = self._scheme
+        # Use _scheme if already loaded, otherwise fall back to case.scheme
+        scheme = self._scheme or getattr(self.case, 'scheme', None)
+        if scheme is None:
+            raise ValueError(
+                "Calculation scheme not available. "
+                "Either call runner.run() or case.generate_cle2000_procedures() first."
+            )
         steps_info = []
         for s in scheme.steps:
             if isinstance(s, EditionBetweenLevelsStep):
