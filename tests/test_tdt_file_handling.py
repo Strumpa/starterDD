@@ -1,9 +1,9 @@
 # Tests for TDT file handling in case generation and Dragon execution.
 #
 # Covers:
-# - Phase 1: Case generator stores actual filenames (no intermediate symlinks)
-# - Phase 3: TDT file mapping tracking in manifest
-# - Phase 4: Dragon runner validates staging symlinks
+# - Case generator stores actual filenames (no intermediate symlinks)
+# - TDT file mapping tracking in manifest
+# - Dragon runner validates staging symlinks
 #
 # R.Guasch — 04/17/2026
 
@@ -30,7 +30,7 @@ from conftest import (
 
 
 class TestTDTFileHandling:
-    """Tests for TDT file handling refactor (Phase 1-4)."""
+    """Tests for TDT file handling refactor."""
 
     @pytest.fixture
     def temp_tdt_dir(self):
@@ -58,7 +58,7 @@ class TestTDTFileHandling:
             yield tmpdir
 
     def test_no_intermediate_symlinks_created(self, temp_tdt_dir, temp_output_dir):
-        """Phase 1: Verify case generator does NOT create intermediate symlinks in tdt_path."""
+        """Verify case generator does NOT create intermediate symlinks in tdt_path."""
         tmpdir, files = temp_tdt_dir
         
         # Create a basic calculation scheme
@@ -211,8 +211,8 @@ class TestTDTFileHandling:
         assert tdt_file_info['standardized_filename'] == 'test_manifest_tdt_SSH_IC_TISO.dat'
         assert tdt_file_info['step_name'] == 'SSH'
 
-    def test_phase4_dragon_runner_validates_tdt_symlinks(self, temp_tdt_dir, temp_output_dir):
-        """Phase 4: Verify dragon_runner validates TDT symlinks in staging directory."""
+    def test_dragon_runner_validates_tdt_symlinks(self, temp_tdt_dir, temp_output_dir):
+        """Verify dragon_runner validates TDT symlinks in staging directory."""
         tmpdir, files = temp_tdt_dir
         
         case = DragonCase(

@@ -19,7 +19,7 @@ from starterDD.InterfaceToDD.dragon_runner import DragonRunner
 
 
 class TestCaseGeneratorTDTFilenameStorage:
-    """Unit tests for Phase 1: TDT filename storage in case_generator."""
+    """Unit tests for TDT filename storage in case_generator."""
 
     def test_dragoncase_initializes_tdt_attributes(self):
         """Verify DragonCase.__init__ initializes TDT tracking attributes."""
@@ -78,7 +78,7 @@ class TestCaseGeneratorTDTFilenameStorage:
 
 
 class TestDragonRunnerTDTValidation:
-    """Unit tests for Phase 4: Enhanced validation in dragon_runner."""
+    """Unit tests for enhanced validation in dragon_runner."""
 
     def test_stage_inputs_requires_tdt_files_to_exist(self):
         """Verify _stage_inputs raises error if TDT file doesn't exist."""
@@ -192,7 +192,7 @@ class TestDragonRunnerTDTValidation:
 
 
 class TestManifestTDTInformation:
-    """Unit tests for Phase 3: TDT information in manifest."""
+    """Unit tests for TDT information in manifest."""
 
     def test_build_scheme_manifest_includes_tdt_files(self):
         """Verify _build_scheme_manifest includes tdt_files list."""
