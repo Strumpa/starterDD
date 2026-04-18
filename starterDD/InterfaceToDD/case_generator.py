@@ -4,10 +4,16 @@
 #
 # R.Guasch — 10/03/2026
 
+import logging
+
 from .CLE2000 import (
     main_procedure, sub_procedure,
     validate_varname, wrap_cle2000_line,
 )
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
 from .dragon_module_calls import LIB, EDI_COMPO, TRK, EDI_condensation, SPH_correction, MIXEQ
 from ..DDModel.DragonCalculationScheme import (
     DragonCalculationScheme,
@@ -104,6 +110,14 @@ class DragonCase:
         # Temperature dictionaries for material-specific temperatures
         self._fuel_material_temperatures = {}  # {material_name: temperature_K}
         self._non_fuel_temperatures = {}  # {material_type: temperature_K}
+
+        # TDT files used mapping: {step_name: tdt_filename}
+        # Populated during procedure generation to track which TDT files are used
+        self.tdt_files_used = {}
+        
+        # TDT file mapping: {step_name: {'actual': ..., 'standardized': ..., 'match': bool}}
+        # Tracks relationship between actual and standardized filenames
+        self.tdt_file_mapping = {}
 
         # ----------------------------------------------------------
         # Resolve all paths to absolute so the case is
@@ -593,6 +607,40 @@ class DragonCase:
                     f"pointing at the directory that "
                     f"contains the file."
                 )
+
+            # Construct standardized filename (what TRK expects)
+            # Note: TRK._tdt_file_name() uses self.case_name, NOT tdt_base_name
+            # This ensures staging creates symlinks with names that procedures reference
+            standardized_filename = (
+                f"{self.case_name}_{step.name}"
+                f"_{step.spatial_method}_{step.tracking}" + ("_MACRO" if step.export_macros else "") + ".dat"
+            )
+            actual_basename = os.path.basename(tdt_full)
+            
+            # Log TDT file information            
+            # Store the actual filename for dragon_runner staging
+            # No intermediate symlinks created in tdt_path (keep it clean)
+            self.tdt_files_used[step.name] = actual_basename
+            
+            # Track filename mapping for manifest and debugging (Phase 3)
+            if not hasattr(self, 'tdt_file_mapping'):
+                self.tdt_file_mapping = {}
+            self.tdt_file_mapping[step.name] = {
+                'actual': actual_basename,
+                'standardized': standardized_filename,
+                'match': (actual_basename == standardized_filename),
+            }
+            
+            # Log whether names match
+            if actual_basename == standardized_filename:
+                log.debug(f"[TDT] File already has standardized name")
+            else:
+                log.info(
+                    f"[TDT] Custom-named file detected for step '{step.name}':\n"
+                    f"      actual: {actual_basename}\n"
+                    f"      standardized would be: {standardized_filename}"
+                )
+
             tdt_indices = (
                 read_material_mixture_indices_from_tdt_file(
                     tdt_file_path=tdt_file_path,
