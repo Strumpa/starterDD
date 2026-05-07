@@ -829,6 +829,58 @@ class CartesianAssemblyModel:
                 if self.lattice_description[i][j] != self.lattice_description[j][i]:
                     return False
         return True
+    
+    def check_quarter_symmetry(self):
+        """
+        Check whether the lattice description has quarter symmetry.
+        It is symmetric about a central x=ap/2 axis and a central y=ap/2 axis, where ap is the lattice pitch. 
+        ie if the lattice matrix can be subdivided into 4 sub-blocks that are equivalent by reflection about the central axes.
+
+        Returns
+        -------
+        bool
+        """
+        n = len(self.lattice_description)
+        for row in self.lattice_description:
+            if len(row) != n:
+                return False
+        for i in range(n):
+            for j in range(n):
+                if self.lattice_description[i][j] != self.lattice_description[n - 1 - i][j]:
+                    return False
+                if self.lattice_description[i][j] != self.lattice_description[i][n - 1 - j]:
+                    return False
+        return True
+
+    def check_half_symmetry(self):
+        """
+        Check whether the lattice description has half symmetry.
+        It is symmetric about a central x=ap/2 axis or a central y=ap/2 axis, where ap is the lattice pitch. 
+        ie if the lattice matrix can be subdivided into 2 sub-blocks that are equivalent by reflection about one of the central axes.
+
+        Returns
+        -------
+        str or None
+            "x" if symmetric about x-axis, "y" if symmetric about y-axis, None if no half symmetry.
+        """
+        n = len(self.lattice_description)
+        for row in self.lattice_description:
+            if len(row) != n:
+                return None
+        symmetric_x = True
+        symmetric_y = True
+        for i in range(n):
+            for j in range(n):
+                if self.lattice_description[i][j] != self.lattice_description[n - 1 - i][j]:
+                    symmetric_x = False
+                if self.lattice_description[i][j] != self.lattice_description[i][n - 1 - j]:
+                    symmetric_y = False
+        if symmetric_x and not symmetric_y:
+            return "x"
+        elif symmetric_y and not symmetric_x:
+            return "y"
+        else:
+            return None
 
     def _compute_translation_offsets(self):
         """
@@ -2024,16 +2076,25 @@ class FuelPinModel:
 
         print(f"Created : Pin with fuel material {self.fuel_material_name} subdivided into radial zones with radii {self.radii} based on self-shielding option {self.self_shielding_option}.")
 
+    def subvivide_into_volume_based_radii(self, list_of_volumes):
+        # Import helper 
+        from ..GeometryBuilder.helpers import computeVolumeBasedRadii
+
+        fuel_radius = self.technological_radii[0]
+        gap_radius = self.technological_radii[1]
+        clad_radius = self.technological_radii[2]
+
+        self.radii = computeVolumeBasedRadii(fuel_radius, gap_radius, clad_radius, list_of_volumes)
 
     def subdivide_into_Santamarina_radii(self):
         # Import here to avoid circular import issues
-        from ..GeometryBuilder.helpers import computeSantamarinaradii
+        from ..GeometryBuilder.helpers import computeSantamarinaRadii
         
         fuel_radius = self.technological_radii[0]
         gap_radius = self.technological_radii[1]
         clad_radius = self.technological_radii[2]
         # subdivide the pin into radial zones for self-shielding treatment in Dragon based on the Santamarina radii definition
-        self.radii = computeSantamarinaradii(fuel_radius, gap_radius, clad_radius, gadolinium=self.isGd)
+        self.radii = computeSantamarinaRadii(fuel_radius, gap_radius, clad_radius, gadolinium=self.isGd)
 
 
     def subdivide_into_radial_zones(self, num_radial_zones = None):
@@ -2371,10 +2432,10 @@ class ControlCrossModel:
         if tube_spacing is not None:
             self.tube_spacing = tube_spacing
         else:
-            self.tube_spacing = inner_wing_length / (number_tubes_per_wing + 0.5)
+            self.tube_spacing = inner_wing_length / float(number_tubes_per_wing)
 
         if first_tube_offset is not None:
-            self.first_tube_offset = first_tube_offset
+            self.first_tube_offset = float(first_tube_offset)
         else:
             self.first_tube_offset = (
                 central_structure_half_span + sheath_thickness

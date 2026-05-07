@@ -39,7 +39,7 @@ from starterDD.DDModel.DragonModel import (
 )
 from starterDD.DDModel.helpers import associate_material_to_rod_ID
 from starterDD.GeometryAnalysis.tdt_parser import read_material_mixture_indices_from_tdt_file
-from starterDD.GeometryBuilder.helpers import computeSantamarinaradii
+from starterDD.GeometryBuilder.helpers import computeSantamarinaRadii
 from starterDD.InterfaceToDD.dragon_module_calls import (
     LIB,
     MAC,
@@ -187,30 +187,30 @@ class TestXSDataEdgeCases:
 # ═══════════════════════════════════════════════════════════════
 
 class TestSantamarinaRadii:
-    """Tests for computeSantamarinaradii() in GeometryBuilder/helpers.py."""
+    """Tests for computeSantamarinaRadii() in GeometryBuilder/helpers.py."""
 
     def test_uox_returns_list(self):
         """Non-gadolinium mode should return a list of radii."""
-        radii = computeSantamarinaradii(fuel_radius=0.438, gap_radius=0.45, clad_radius=0.51)
+        radii = computeSantamarinaRadii(fuel_radius=0.438, gap_radius=0.45, clad_radius=0.51)
         assert isinstance(radii, list)
         assert len(radii) > 0
 
     def test_gd_returns_more_zones(self):
         """Gadolinium mode should return more radial zones than non-Gd."""
-        radii_uox = computeSantamarinaradii(fuel_radius=0.438, gap_radius=0.45, clad_radius=0.51, gadolinium=False)
-        radii_gd = computeSantamarinaradii(fuel_radius=0.438, gap_radius=0.45, clad_radius=0.51, gadolinium=True)
+        radii_uox = computeSantamarinaRadii(fuel_radius=0.438, gap_radius=0.45, clad_radius=0.51, gadolinium=False)
+        radii_gd = computeSantamarinaRadii(fuel_radius=0.438, gap_radius=0.45, clad_radius=0.51, gadolinium=True)
         assert len(radii_gd) >= len(radii_uox)
 
     def test_radii_are_increasing(self):
         """All radii should be strictly increasing."""
-        radii = computeSantamarinaradii(fuel_radius=0.438, gap_radius=0.45, clad_radius=0.51)
+        radii = computeSantamarinaRadii(fuel_radius=0.438, gap_radius=0.45, clad_radius=0.51)
         for i in range(1, len(radii)):
             assert radii[i] > radii[i - 1]
 
     def test_fuel_radius_in_output(self):
         """The fuel pellet radius should appear in the radii list."""
         fuel_r = 0.438
-        radii = computeSantamarinaradii(fuel_radius=fuel_r, gap_radius=0.45, clad_radius=0.51)
+        radii = computeSantamarinaRadii(fuel_radius=fuel_r, gap_radius=0.45, clad_radius=0.51)
         assert fuel_r in radii or any(
             abs(r - fuel_r) < 1e-6 for r in radii
         ), f"Fuel radius {fuel_r} not found in radii {radii}"

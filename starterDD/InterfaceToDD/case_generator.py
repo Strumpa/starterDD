@@ -570,21 +570,12 @@ class DragonCase:
                         "SALOME platform (typically run "
                         "via Docker)."
                     )
-                lattice, assembly_box = build_full_assembly_geometry(
+                assembly_universe = build_full_assembly_geometry(
                     assembly_model=assembly,
                     calculation_step=step,
                     output_path=self.tdt_path,
                     output_file_name=tdt_file_name,
                 )
-                lattice.show(
-                    geometry_type_to_show=GeometryType.SECTORIZED,
-                    property_type_to_show=PropertyType.MATERIAL,
-                )
-                if step.export_macros: # would be desirable to have an option to plot MACROS or MATERIALS.
-                    lattice.show(
-                        geometry_type_to_show=GeometryType.SECTORIZED,
-                        property_type_to_show=PropertyType.MACRO,
-                    )
 
             # 4b. Read TDT and enforce material indices for THIS step
             #     This records the TDT-assigned indices in the step's state history
