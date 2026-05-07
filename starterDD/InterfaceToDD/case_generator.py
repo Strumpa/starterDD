@@ -1821,8 +1821,8 @@ class DragonCase:
         from .CLE2000 import wrap_cle2000_line
 
         edi_step = scheme.get_edition_between_levels_steps()[0]
-        edi_cond = EDI_condensation(edi_step, lib_name="LIBEQ")
-        sph_corr = SPH_correction(edi_step, lib_name="LIBEQ")
+        edi_cond = EDI_condensation(edi_step, lib_name="LIBEQL1")
+        sph_corr = SPH_correction(edi_step, lib_name="LIBEQL1")
 
         flux_steps = scheme.get_flux_steps()
         l1_step = flux_steps[0]
@@ -1856,6 +1856,7 @@ class DragonCase:
         proc.add_linked_list("FLUXL2")
         proc.add_linked_list("EDITION")
         proc.add_linked_list(edi_cond.lib_name)
+        proc.add_linked_list("LIBEQL2")
         proc.add_linked_list("COMPO")
         proc.add_linked_list("PARAMS")
         for _, trkfil in trk.get_track_names():
@@ -2230,7 +2231,7 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(
                 f"{inner_indent}COMPO := {edir_proc_name} FLUXL2 "
-                f"{edi_cond.lib_name} "
+                f"{flux_level2_library} "
                 f"{l2_trk} COMPO :: <<name_compo>> "
                 f"{para_args} ;"
             )

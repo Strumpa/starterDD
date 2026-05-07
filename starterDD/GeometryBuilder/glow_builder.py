@@ -422,14 +422,17 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
                             water_rod_model.inner_radius
                         )
 
-            tmp_cell.add(Region(Circle(radius=water_rod_model.outer_radius), properties={PropertyType.MATERIAL: water_rod_model.cladding_material_name,
-                                                                 PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"}))
-            tmp_cell.add(Region(Circle(radius=water_rod_model.inner_radius), properties={PropertyType.MATERIAL: water_rod_model.moderator_material_name,
-                                                                 PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"}))
+            tmp_cell.add(Region(Circle(radius=water_rod_model.outer_radius), 
+                                properties={PropertyType.MATERIAL: water_rod_model.cladding_material_name,
+                                            PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"}))
+            tmp_cell.add(Region(Circle(radius=water_rod_model.inner_radius), 
+                                properties={PropertyType.MATERIAL: water_rod_model.moderator_material_name,
+                                            PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"}))
             # Add circles: extra moderator sub-rings, then inner, then outer
             for r in extra_radii[::-1]:  # add extra moderator radii from outermost to innermost
-                tmp_cell.add(Region(Circle(radius=r), properties={PropertyType.MATERIAL: water_rod_model.moderator_material_name,
-                                                 PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"}))
+                tmp_cell.add(Region(Circle(radius=r), 
+                                    properties={PropertyType.MATERIAL: water_rod_model.moderator_material_name,
+                                                PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"}))
 
 
 
@@ -509,15 +512,13 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
                     splitting_faces.append(splitting_face)
                     
                     
-                    
-                re_partitioned = make_partition(
-                        [tmp_cell.face],
-                        splitting_faces,
-                        shape_type=ShapeType.COMPOUND,
-                    )
-                tmp_cell.update_geometry_from_face(
-                        GeometryType.TECHNOLOGICAL, re_partitioned,
-                    )
+                partitioned_face = make_partition(
+                    [tmp_cell],
+                    splitting_faces,
+                    shape_type=ShapeType.COMPOUND,
+                )
+                tmp_cell.geometry_maps[GeometryType.SECTORIZED] = \
+                wrap_shape(tmp_cell.get_geometry_map(GeometryType.SECTORIZED)) // wrap_shape(partitioned_face)    
                     
 
         elif assembly_model.water_rod_type == "square":
@@ -595,16 +596,10 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
                     vr_sector_cfg.resolve_radii_and_sectors(rod_model.default_sectorization_radius)
                 radii = vr_sector_cfg.radial_split_points
                 for radius in radii:
-                    tmp_cell.add(Region(Circle(radius=radius, properties={PropertyType.MATERIAL:"COOLANT",
-                                                              PropertyType.MACRO:f"MACRO_{rod_model.rod_ID}"})))
+                    tmp_cell.add(Region(Circle(radius=radius), properties={PropertyType.MATERIAL:"COOLANT",
+                                                              PropertyType.MACRO:f"MACRO_{rod_model.rod_ID}"}))
                 if vr_sector_cfg.sector_config:
                     tmp_cell.sectorize(vr_sector_cfg.sector_config.sectors, vr_sector_cfg.sector_config.angles, windmill=vr_sector_cfg.windmill)
-                n_regions = len(radii) + 1 # number of regions is number of circles + 1 (the central region inside the innermost circle)
-
-        tmp_cell.set_properties({
-            PropertyType.MATERIAL: ["COOLANT"]*n_regions,
-            PropertyType.MACRO: [f"MACRO_{rod_model.rod_ID}"]*n_regions,
-        })
 
         if rod_model.center is None:
             # compute center from lattice indices if not provided
@@ -668,6 +663,8 @@ def export_glow_geom(output_path, output_file_name, assembly_universe, symmetry_
             print(f"Error occurred while showing material properties on SECTORIZED geometry: {e}, trying to show properties on TECHNOLOGICAL geometry instead")
             geometry_type_to_show = GeometryType.TECHNOLOGICAL
             assembly_universe.show(property_to_show, geometry_type_to_show)
+
+        assembly_universe.show(PropertyType.MATERIAL, GeometryType.TECHNOLOGICAL) # ensure material properties are shown on technological geometry at least, as this is needed for export
 
     full_tdt_path = os.path.join(output_path, output_file_name)
 
@@ -768,7 +765,7 @@ def _remap_rounded_corner_indices(corner_indices, cross_corner):
 
 def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
     """
-    Build a control cross geometry in CSG appraoch using glow v1.1.0
+    Build the elements describing the control cross
     
     Parameters
     ----------
@@ -837,20 +834,25 @@ def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
     elements["CTRL_H_SHEATH"] = {}
     elements["CTRL_V_SHEATH"] = {}
     # Create a universe cell for the control cross and add all regions
+    cx, cy = _corner_transform(corner, bhs/2.0, ap, ap)
     control_cross_horizontal_wing = Rectangle(
         name="CTRL_CROSS_H",
         width=bhs,
         height=bt,
-        center=(bhs/2.0, ap, 0.0)
+        center=(cx, cy, ap, 0.0)
         #rounded_corners=_remap_rounded_corner_indices([(1, tr), (2, tr)], corner) if tr > 0.0 else None
     )
     control_cross_horizontal_wing_rounded = Rectangle(
         name="CTRL_CROSS_H_rounded",
         width=bhs,
         height=bt,
-        center=(bhs/2.0, ap, 0.0),
+        center=(cx, cy, ap, 0.0),
         rounded_corners=_remap_rounded_corner_indices([(1, tr), (2, tr)], corner) if tr > 0.0 else None
     )
+
+    if not is_solid:
+        rounded_modertator_tip_h = control_cross_horizontal_wing*assembly_bounding_rect - control_cross_horizontal_wing_rounded*assembly_bounding_rect
+
 
     # compute delta between centers of horizontal wing with rounded corners and horizontal wing without rounded corners
     delta_centers_x_horizontal_wing = get_point_coordinates(control_cross_horizontal_wing_rounded.o)[0] - get_point_coordinates(control_cross_horizontal_wing.o)[0]
@@ -863,20 +865,25 @@ def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
     elements["CTRL_H_SHEATH"]["offset"] = (delta_centers_x_horizontal_wing, delta_centers_y_horizontal_wing, 0.0)
     elements["CTRL_H_SHEATH"]["macro"] = "CTRL_H"
     elements["CTRL_H_SHEATH"]["material"] = sheath_mat
+    print(f"offset is : {elements['CTRL_H_SHEATH']['offset']}")
 
+    cx, cy = _corner_transform(corner, 0.0, ap - bhs/2.0, ap)
     control_cross_vertical_wing = Rectangle(
         name="CTRL_CROSS_V",
         width=bt,
         height=bhs,
-        center=(0.0, ap - bhs/2.0, 0.0)
+        center=(cx, cy, 0.0)
     )
     control_cross_vertical_wing_rounded = Rectangle(
         name="CTRL_CROSS_V_rounded",
         width=bt,
         height=bhs,
-        center=(0.0, ap - bhs/2.0, 0.0),
+        center=(cx, cy, 0.0),
         rounded_corners=_remap_rounded_corner_indices([(0, tr), (1, tr)], corner) if tr > 0.0 else None
     )
+
+    if not is_solid:
+        rounded_modertator_tip_v = control_cross_vertical_wing*assembly_bounding_rect - control_cross_vertical_wing_rounded*assembly_bounding_rect
 
     delta_centers_x_vertical_wing = get_point_coordinates(control_cross_vertical_wing_rounded.o)[0] - get_point_coordinates(control_cross_vertical_wing.o)[0]
     delta_centers_y_vertical_wing = get_point_coordinates(control_cross_vertical_wing_rounded.o)[1] - get_point_coordinates(control_cross_vertical_wing.o)[1]
@@ -893,18 +900,19 @@ def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
         elements["CTRL_H_HOLLOW"] = {}
         elements["CTRL_V_HOLLOW"] = {}
     # build inner region for hollow sheath (moderator-filled cavity inside the blade)
+        cx, cy = _corner_transform(corner, cshs + (bhs - st - cshs)/2.0, ap, ap)
         inner_sheath_horizontal_wing = Rectangle(
             name="CTRL_CROSS_H_INNER",
             width=(bhs - st - cshs),
             height=(bt - 2.0*st),
-            center=(cshs + (bhs - st - cshs)/2.0, ap, 0.0)
+            center=(cx, cy, 0.0)
         )
         # get center for the horizontal wing inner sheath without rounded corners :
         inner_sheath_horizontal_wing_rounded = Rectangle(
             name="CTRL_CROSS_H_INNER_HOLLOW",
             width=(bhs - st - cshs),
             height=(bt - 2.0*st),
-            center=(cshs + (bhs - st - cshs)/2.0, ap, 0.0),
+            center=(cx, cy, 0.0),
             rounded_corners=_remap_rounded_corner_indices([(1, tr - st), (2, tr - st)], corner) if tr > 0.0 else None
         )
         delta_centers_x_inner_sheath = get_point_coordinates(inner_sheath_horizontal_wing_rounded.o)[0] - get_point_coordinates(inner_sheath_horizontal_wing.o)[0]
@@ -918,17 +926,18 @@ def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
     
 
         # inner region for hollow sheath in vertical wing :
+        cx, cy = _corner_transform(corner, 0.0, ap - (cshs + (bhs - st - cshs)/2.0), ap)
         inner_sheath_vertical_wing = Rectangle(
             name="CTRL_CROSS_V_INNER",
             width=(bt - 2.0*st),
             height=(bhs - st - cshs),
-            center=(0.0, ap - (cshs + (bhs - st - cshs)/2.0), 0.0)
+            center=(cx, cy, 0.0)
         )
         inner_sheath_vertical_wing_rounded = Rectangle(
             name="CTRL_CROSS_V_INNER_HOLLOW",
             width=(bt - 2.0*st),
             height=(bhs - st - cshs),
-            center=(0.0, ap - (cshs + (bhs - st - cshs)/2.0), 0.0),
+            center=(cx, cy, 0.0),
             rounded_corners=_remap_rounded_corner_indices([(0, tr - st), (1, tr - st)], corner) if tr > 0.0 else None
         )
 
@@ -991,6 +1000,64 @@ def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
             elements[f"SHEATH_TUBE_V_{i}"]["macro"] = "CTRL_V"
             elements[f"SHEATH_TUBE_V_{i}"]["material"] = sheath_mat
     
+    # create tip elements : intersections of a rectangle of bt / 4 by st with : moderator
+    
+    #if not is_solid:
+    if False:
+        cx, cy = _corner_transform(corner, bhs - st/2.0, ap - bt/4.0, ap)
+        tip_rectangle_h = Rectangle(
+            name="CTRL_H_TIP",
+            width=st,
+            height=bt/2,
+            center=(cx, cy, 0.0)
+        )
+        rounded_sheath_tip = tip_rectangle_h*h_wing_in_assembly_footprint
+        moder_around_tip = tip_rectangle_h - h_wing_in_assembly_footprint
+        extra_moder_outside_of_tip_rectangle = rounded_modertator_tip_h - tip_rectangle_h
+        # build regions information and store in elements
+        macro = "CTRL_H"
+        elements["CTRL_H_TIP_SHEATH"] = {}
+        elements["CTRL_H_TIP_SHEATH"]["macro"] = macro
+        elements["CTRL_H_TIP_SHEATH"]["material"] = sheath_mat
+        elements["CTRL_H_TIP_SHEATH"]["geometry"] = rounded_sheath_tip
+
+        elements["CTRL_H_TIP_MODER"] = {}
+        elements["CTRL_H_TIP_MODER"]["macro"] = macro 
+        elements["CTRL_H_TIP_MODER"]["material"] = "MODERATOR"
+        elements["CTRL_H_TIP_MODER"]["geometry"] = moder_around_tip
+
+        elements["CTRL_H_TIP_EXTRA_MODER"] = {}
+        elements["CTRL_H_TIP_EXTRA_MODER"]["macro"] = macro 
+        elements["CTRL_H_TIP_EXTRA_MODER"]["material"] = "MODERATOR"
+        elements["CTRL_H_TIP_EXTRA_MODER"]["geometry"] = extra_moder_outside_of_tip_rectangle
+
+        cx, cy = _corner_transform(corner, bt/4.0, ap - (bhs - st/2.0), ap)
+        tip_rectangle_v = Rectangle(
+            name="CTRL_V_TIP",
+            height=st,
+            width=bt/2,
+            center=(cx, cy, 0.0)
+        )
+        rounded_sheath_tip = tip_rectangle_v*v_wing_in_assembly_footprint
+        moder_around_tip = tip_rectangle_v - v_wing_in_assembly_footprint
+        extra_moder_outside_of_tip_rectangle = rounded_modertator_tip_v - tip_rectangle_v
+        # build regions information and store in elements
+        macro = "CTRL_V"
+        elements["CTRL_V_TIP_SHEATH"] = {}
+        elements["CTRL_V_TIP_SHEATH"]["macro"] = macro
+        elements["CTRL_V_TIP_SHEATH"]["material"] = sheath_mat
+        elements["CTRL_V_TIP_SHEATH"]["geometry"] = rounded_sheath_tip
+
+        elements["CTRL_V_TIP_MODER"] = {}
+        elements["CTRL_V_TIP_MODER"]["macro"] = macro 
+        elements["CTRL_V_TIP_MODER"]["material"] = "MODERATOR"
+        elements["CTRL_V_TIP_MODER"]["geometry"] = moder_around_tip
+
+        elements["CTRL_V_TIP_EXTRA_MODER"] = {}
+        elements["CTRL_V_TIP_EXTRA_MODER"]["macro"] = macro 
+        elements["CTRL_V_TIP_EXTRA_MODER"]["material"] = "MODERATOR"
+        elements["CTRL_V_TIP_EXTRA_MODER"]["geometry"] = extra_moder_outside_of_tip_rectangle
+
     return elements
 
 def _compute_asymmetric_coolant_channel_box_rects(assembly_model, center):
@@ -1074,13 +1141,15 @@ def _compute_asymmetric_coolant_channel_box_rects(assembly_model, center):
 
     elif sym_type == "main-diagonal":
         # Symmetric on both axes (both use gap_wide due to symmetry)
-        channel_box_outer_x = ap - 2.0 * gap_wide
-        channel_box_outer_y = ap - 2.0 * gap_wide
+        channel_box_outer_x = ap - gap_wide - gap_narrow
+        channel_box_outer_y = ap - gap_narrow - gap_wide 
 
         channel_box_inner_x = channel_box_outer_x - 2.0 * cbt
         channel_box_inner_y = channel_box_outer_y - 2.0 * cbt
 
-        rect_center = center
+        offset = (gap_wide - gap_narrow) / 2.0
+
+        rect_center = (center[0] + offset, center[1] + offset, center[2])
 
     else:
         # No symmetry or quarter/eighth symmetry
@@ -3108,6 +3177,20 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
         calculation_step=calculation_step
     )
 
+
+    # ======================================================================
+    # STEP 2: Optionally apply MOC box discretization
+    # ======================================================================
+    # If MOC method with box discretization enabled, subdivide assembly box further
+    # for fine MOC tracking grid
+    if (calculation_step.box_discretization is not None
+            and calculation_step.box_discretization.enabled):
+        print(f"Box discretization enabled for MOC tracking; subdividing assembly box")
+        assembly_universe = discretize_box(
+            assembly_universe, assembly_model,
+            calculation_step.box_discretization,
+        )
+
     # ======================================================================
     # STEP 2: Apply symmetry
     # ======================================================================
@@ -3143,23 +3226,7 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
         assembly_universe.apply_symmetry(SymmetryType.FULL)
         symmetry = SymmetryType.FULL
 
-    
-
-
-    # ======================================================================
-    # STEP 3: Optionally apply MOC box discretization
-    # ======================================================================
-    # If MOC method with box discretization enabled, subdivide assembly box further
-    # for fine MOC tracking grid
-    if (calculation_step.box_discretization is not None
-            and calculation_step.box_discretization.enabled):
-        print(f"Box discretization enabled for MOC tracking; subdividing assembly box")
-        assembly_universe = discretize_box(
-            assembly_universe, assembly_model,
-            calculation_step.box_discretization,
-        )
-    assembly_universe.show(PropertyType.MATERIAL, GeometryType.TECHNOLOGICAL)
-
+        
     # ======================================================================
     # STEP 4: Export to TDT file
     # ======================================================================

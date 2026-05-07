@@ -146,7 +146,7 @@ def compute_water_iso_densities_at_densities(densities):
         One ``{"H1": N_H, "O16": N_O}`` dict per density, in
         atoms/barn·cm.
     """
-    M_H2O = 15.9994 + 2.0 * 1.00794
+    M_H2O = 15.994915 + 2.0 * 1.007825
     results = []
     for rho in densities:
         N_MAT = rho * AVOGADRO / (M_H2O * CM2_TO_BARN)

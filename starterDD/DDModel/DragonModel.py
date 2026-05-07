@@ -5,6 +5,7 @@
 from ..MaterialProperties.material_mixture import MaterialMixture, Composition
 import yaml
 import numpy as np
+from collections import deque
 # Note: computeSantamarinaradii imported in methods to avoid circular imports
 
 class CartesianAssemblyModel:
@@ -189,7 +190,7 @@ class CartesianAssemblyModel:
             self.water_box_outer_side = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("outer_side", None)
             self.water_box_corner_radius = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("corner_radius", None)
         self.water_rod_centers = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("centers", [])
-        self.number_of_water_rods = len(self.water_rod_centers)
+        self.number_of_water_rods = len(self.water_rod_centers) if self.water_rod_centers else yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("number_of_water_rods", 0)
         self.channel_box_inner_side = self.assembly_pitch - 2 * self.channel_box_thickness - self.gap_wide - self.gap_narrow if self.channel_box_thickness is not None and self.gap_wide is not None and self.gap_narrow is not None else None
         n_cols = len(self.lattice_description[0]) if self.lattice_description else 0
         pin_pitch = self.pin_geometry_dict.get("pin_pitch", 0)
@@ -245,6 +246,7 @@ class CartesianAssemblyModel:
         "non_fuel_rod_ids": False,
         "lattice_type": False,
         "reactor_type": False,
+        "number_of_water_rods": False,
     }
 
     _EXPECTED_PIN_KEYS = {
@@ -264,7 +266,7 @@ class CartesianAssemblyModel:
         "inner_side": False,
         "outer_side": False,
         "corner_radius": False,
-        "centers": True,
+        "centers": False,
     }
 
     _EXPECTED_CONTROL_CROSS_KEYS = {
@@ -403,6 +405,7 @@ class CartesianAssemblyModel:
         self.generating_fuel_cells = []
         self.non_generating_fuel_cells = []
         self.vanished_rods = []
+        water_rod_positions = []
         for y_index, row in enumerate(self.lattice_description):
             lattice_row = []
             for x_index, descriptor in enumerate(row):
@@ -481,6 +484,7 @@ class CartesianAssemblyModel:
                                 if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
                                     dummy_pin_model.set_center(center_x, center_y)
                                 lattice_row.append(dummy_pin_model)
+                                water_rod_positions.append((x_index, y_index))
                             elif descriptor == "VANR": # count the number of VANished Rods
                                 number_of_vanished_rods += 1
                                 vanished_rod_model = VanishedRodModel(f"{descriptor}_{number_of_vanished_rods}")
@@ -510,6 +514,9 @@ class CartesianAssemblyModel:
         nb_dummies_per_rod = number_of_water_rod_placeholders / self.number_of_water_rods if self.number_of_water_rods > 0 else None
         water_rod_bounding_box_side = np.sqrt(nb_dummies_per_rod) * self.pin_geometry_dict["pin_pitch"] if nb_dummies_per_rod is not None else None
         self.water_rods = []
+        if not self.water_rod_centers:
+            self._reconstruct_water_rods_centers_from_placeholders(water_rod_ph_positions=water_rod_positions)
+        print(self.water_rod_centers)
         if water_rod_bounding_box_side is not None:
             for rod_nb in range(self.number_of_water_rods):
                 center = self.water_rod_centers[rod_nb]
@@ -530,6 +537,64 @@ class CartesianAssemblyModel:
 
         # set number of vanished rods in the lattice :
         self.number_of_vanished_rods = number_of_vanished_rods
+
+    def _reconstruct_water_rods_centers_from_placeholders(self, water_rod_ph_positions):
+
+        nb_dummies_per_rod = len(water_rod_ph_positions) / self.number_of_water_rods if self.number_of_water_rods > 0 else None
+        self.water_rod_centers = []        
+        groups = self._group_connected_positions(water_rod_ph_positions)
+        for group in groups:
+            # get the center of the group in lattice corrdinates:
+            x_pos = [pos[0] for pos in group]
+            y_pos = [pos[1] for pos in group]
+            print(x_pos)
+            print(y_pos)
+
+            mean_x = (np.mean(x_pos)+0.5)*self.pin_geometry_dict["pin_pitch"]
+            mean_y = (np.mean(y_pos)+0.5)*self.pin_geometry_dict["pin_pitch"]
+
+
+            center = (self.translation_offset_x + mean_x, self.translation_offset_y + mean_y)
+            self.water_rod_centers.append(center)
+
+        return
+
+    def _group_connected_positions(self, positions):
+        points = set(positions)   # fast lookup
+        visited = set()
+        groups = []
+
+        # 4-neighbor connectivity
+        directions = [
+            (1, 0), (-1, 0),
+            (0, 1), (0, -1)
+        ]
+
+        for p in points:
+
+            if p in visited:
+                continue
+
+            # start a new group
+            group = []
+            queue = deque([p])
+            visited.add(p)
+
+            while queue:
+                x, y = queue.popleft()
+                group.append((x, y))
+
+                # explore neighbors
+                for dx, dy in directions:
+                    neighbor = (x + dx, y + dy)
+
+                    if neighbor in points and neighbor not in visited:
+                        visited.add(neighbor)
+                        queue.append(neighbor)
+
+            groups.append(group)
+
+        return groups
 
     def add_pin_to_lattice(self, pin_model):
         """
