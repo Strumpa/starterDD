@@ -583,8 +583,6 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
             base_props={PropertyType.MATERIAL:"COOLANT",
                         PropertyType.MACRO: f"MACRO_{rod_model.rod_ID}"}
         )
-
-        n_regions = 1 # default number of regions if no sectorization provided
         
         if calculation_step is not None:
             vr_sector_cfg = calculation_step.get_vanished_rod_sectorization()
@@ -595,7 +593,7 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
                     # If no base_radius provided, use the default sectorization radius from the rod model (set to be equal to the cladding radius)
                     vr_sector_cfg.resolve_radii_and_sectors(rod_model.default_sectorization_radius)
                 radii = vr_sector_cfg.radial_split_points
-                for radius in radii:
+                for radius in radii[::-1]:
                     tmp_cell.add(Region(Circle(radius=radius), properties={PropertyType.MATERIAL:"COOLANT",
                                                               PropertyType.MACRO:f"MACRO_{rod_model.rod_ID}"}))
                 if vr_sector_cfg.sector_config:
@@ -664,7 +662,7 @@ def export_glow_geom(output_path, output_file_name, assembly_universe, symmetry_
             geometry_type_to_show = GeometryType.TECHNOLOGICAL
             assembly_universe.show(property_to_show, geometry_type_to_show)
 
-        assembly_universe.show(PropertyType.MATERIAL, GeometryType.TECHNOLOGICAL) # ensure material properties are shown on technological geometry at least, as this is needed for export
+        assembly_universe.show(PropertyType.MATERIAL, GeometryType.SECTORIZED) # ensure material properties are shown on technological geometry at least, as this is needed for export
 
     full_tdt_path = os.path.join(output_path, output_file_name)
 
