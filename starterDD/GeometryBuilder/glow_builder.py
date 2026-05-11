@@ -2418,20 +2418,40 @@ def _build_wing_submesh_rects(ctrl, ap, control_cross_submesh_config, ctrl_shape
     # Optionally extend tube bounding surfaces to sheath border and/or
     # bisect tubes.
     # ==================================================================
-    tubes = ctrl_shapes["absorber_tubes"]
+    ## Now every element is represented by [unique key name : for tubes ABS/SHEATH_TUBE_V/H_{i}]["geometry"/"macro"/"material"]
 
     if extend_tube or bisect_tube:
         for i in range(n_tubes):
             # Get tube centres from the Salome geometry objects.
-            # Horizontal tube is at index 2*i, vertical at 2*i+1.
-            tube_h = tubes[2 * i]
-            tube_v = tubes[2 * i + 1]
+            geom_obj_H = ctrl_shapes[f"ABS_TUBE_H_{i}"]["geometry"]
+            geom_obj_V = ctrl_shapes[f"ABS_TUBE_V_{i}"]["geometry"]
 
-            # Retrieve tube centres via Salome GetParameters
-            tx_h = float(tube_h.inner_circles[0].o.GetParameters().split(":")[0])
-            ty_h = float(tube_h.inner_circles[0].o.GetParameters().split(":")[1])
-            tx_v = float(tube_v.inner_circles[0].o.GetParameters().split(":")[0])
-            ty_v = float(tube_v.inner_circles[0].o.GetParameters().split(":")[1])
+            # create dummy regions to reconstruct absorber tube representation from geom_obj
+            region_t_H = Region(
+                    geom_obj=geom_obj_H,
+                    properties={
+                        PropertyType.MATERIAL: "DUMMY_ABS_MAT",
+                    }
+                )
+            
+            region_t_V = Region(
+                    geom_obj=geom_obj_V,
+                    properties={
+                        PropertyType.MATERIAL: "DUMMY_ABS_MAT",
+                    }
+                )
+
+            # Retrieve tube centres from the regions created.
+            tx_h = get_point_coordinates(region_t_H.o)[0]
+            ty_v = get_point_coordinates(region_t_V.o)[1]
+            # get the constant coordinate in assembly coordinate system.
+            # in NW canocical : ty_h = constant = ap
+            # and and tx_v = constant = 0.0
+            xy = _corner_transform(corner, tx_h, ap, ap)
+            ty_h = xy[1]
+            xy = _corner_transform(corner, 0.0, ty_v, ap)
+            tx_v = xy[0]
+
 
             if extend_tube:
                 # Horizontal arm: full bt-wide rectangle at tube centre,
@@ -3115,6 +3135,8 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
                 assembly_universe.add(region, position=offset_center)
             except Exception as e:
                 print(f"  Warning failed to create Region for control cross element : {element_name}")
+
+        assembly_universe._ctrl_cross_shapes = elements
            
 
     return assembly_universe
@@ -3190,7 +3212,7 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
         )
 
     # ======================================================================
-    # STEP 2: Apply symmetry
+    # STEP 3: Apply symmetry
     # ======================================================================
     assembly_universe.update_hierarchical_structure(True)
     # check for symmetries

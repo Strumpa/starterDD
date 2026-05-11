@@ -2488,7 +2488,7 @@ class ControlCrossModel:
         # Derived dimensions
         self.inner_sheath_width = blade_thickness - 2 * sheath_thickness
         self.wing_length = blade_half_span - central_structure_half_span
-
+        
         # Tube spacing: compute automatically if not provided.
         # The tubes are distributed evenly inside the inner sheath
         # region of the wing (from central structure edge + sheath
@@ -2499,12 +2499,13 @@ class ControlCrossModel:
         else:
             self.tube_spacing = inner_wing_length / float(number_tubes_per_wing)
 
+        extra_moderator_gap = (self.tube_spacing - 2.0*absorber_tube_outer_radius) / 2.0
+
         if first_tube_offset is not None:
             self.first_tube_offset = float(first_tube_offset)
         else:
             self.first_tube_offset = (
-                central_structure_half_span + sheath_thickness
-                + self.tube_spacing / 2.0
+                central_structure_half_span + absorber_tube_outer_radius + extra_moderator_gap
             )
 
         # Per-tube material names — populated by
