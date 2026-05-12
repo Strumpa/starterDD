@@ -657,12 +657,19 @@ class DragonCase:
                 
                 # ----- MIX.c2m -----
                 mix_proc_name = "MIX"
+                materials_with_varying_density = []
                 print(f"Generating MIX procedure '{mix_proc_name}' with LIB: ...")
                 has_density = (
                     scheme.has_branches()
                     and scheme.get_branch("coolant_density") is not None
                 )
+                if scheme.get_branch("coolant_density") is not None:
+                    materials_with_varying_density.append("COOLANT")
+                if scheme.get_branch("moderator_density") is not None:
+                    materials_with_varying_density.append("MODERATOR")
+
                 lib = LIB(assembly, density_branch=has_density, ssh_calculation_step=ssh_step)
+                lib.set_varying_density_materials(materials_with_varying_density)
                 mix_path = lib.write_to_c2m(
                     self.output_path, mix_proc_name,
                 )

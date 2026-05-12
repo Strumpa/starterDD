@@ -84,7 +84,7 @@ class LIB:
             3. Optionally, TDT indices enforced
                (``enforce_material_mixture_indices_from_tdt``).
         density_branch : bool
-            When ``True``, COOLANT and MODERATOR mix H1/O16 densities
+            When ``True``, COOLANT mix H1/O16 densities
             are replaced by ``<<N_H>>`` / ``<<N_O>>`` CLE2000 variables
             and the procedure receives two extra REAL input parameters.
         """
@@ -253,6 +253,9 @@ class LIB:
             "temp_var": temperature_variable,
         })
 
+    def set_varying_density_materials(self, list_of_materials_with_varying_density):
+        self.materials_with_varying_density = list_of_materials_with_varying_density
+
     # ------------------------------------------------------------------
     #  Build blocks
     # ------------------------------------------------------------------
@@ -336,6 +339,7 @@ class LIB:
         }
         # Materials affected by coolant-density branching
         _WATER_MATERIALS = {"COOLANT", "MODERATOR"}
+        _COOLANT_MATERIAL = {"COOLANT"}
 
         lines = ""
         for mat_name, idx, composition, temp_var in entries:
@@ -349,6 +353,7 @@ class LIB:
 
             use_density_vars = (
                 self.density_branch
+                and mat_name in self.materials_with_varying_density
                 and mat_name in _WATER_MATERIALS
             )
 
