@@ -19,6 +19,7 @@ from starterDD.MaterialProperties.material_mixture import (
     AVOGADRO,
     CM2_TO_BARN,
     DEFAULT_THERMAL_SCATTERING,
+    ISOTOPIC_MASSES
 )
 
 
@@ -27,13 +28,13 @@ from starterDD.MaterialProperties.material_mixture import (
 # ---------------------------------------------------------------------------
 class TestGetIsotopeAtomicMass:
     def test_hydrogen(self):
-        assert get_isotope_atomic_mass("1001") == 1.0
+        assert get_isotope_atomic_mass("1001") == 1.00782
 
     def test_uranium235(self):
-        assert get_isotope_atomic_mass("92235") == 235.0
+        assert get_isotope_atomic_mass("92235") == 235.04395
 
     def test_oxygen16(self):
-        assert get_isotope_atomic_mass("8016") == 16.0
+        assert get_isotope_atomic_mass("8016") == 15.99492
 
     def test_natural_element_raises(self):
         """A=0 (natural element) should raise since individual isotopes are required."""
@@ -73,21 +74,17 @@ class TestMassDensityMode:
     def test_water_mass_fractions(self):
         """Water at ~1 g/cm³ with mass fractions of H and O."""
         rho = 1.0  # g/cm³
-        M_H = 1.00794
-        M_O = 15.9994
+        M_H = ISOTOPIC_MASSES["1001"]
+        M_O = ISOTOPIC_MASSES["8016"]
         M_H2O = 2.0 * M_H + M_O  # ~18.01528
         w_H = (2.0 * M_H) / M_H2O
         w_O = M_O / M_H2O
 
-        # Using A (mass number) as atomic mass (our current approximation)
-        A_H = 1.0
-        A_O = 16.0
-
         comp = {"1001": w_H, "8016": w_O}
         result = fractions_to_iso_densities(comp, "mass_density", rho)
 
-        expected_H = rho * AVOGADRO * w_H / (A_H * CM2_TO_BARN)
-        expected_O = rho * AVOGADRO * w_O / (A_O * CM2_TO_BARN)
+        expected_H = rho * AVOGADRO * w_H / (M_H * CM2_TO_BARN)
+        expected_O = rho * AVOGADRO * w_O / (M_O * CM2_TO_BARN)
 
         assert result["1001"] == pytest.approx(expected_H, rel=1e-10)
         assert result["8016"] == pytest.approx(expected_O, rel=1e-10)
