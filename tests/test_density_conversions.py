@@ -28,13 +28,13 @@ from starterDD.MaterialProperties.material_mixture import (
 # ---------------------------------------------------------------------------
 class TestGetIsotopeAtomicMass:
     def test_hydrogen(self):
-        assert get_isotope_atomic_mass("1001") == 1.00782
+        assert get_isotope_atomic_mass("1001") == 1.007825
 
     def test_uranium235(self):
         assert get_isotope_atomic_mass("92235") == 235.04395
 
     def test_oxygen16(self):
-        assert get_isotope_atomic_mass("8016") == 15.99492
+        assert get_isotope_atomic_mass("8016") == 15.994915
 
     def test_natural_element_raises(self):
         """A=0 (natural element) should raise since individual isotopes are required."""
