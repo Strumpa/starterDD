@@ -795,7 +795,7 @@ class DragonCase:
 
         proc = main_procedure(self.case_name)
         proc.enable_g2s = self.enable_g2s
-
+        print("in build main x2m")
         # --- Modules ---
         modules = [
             "LIB", "G2S", "SALT", "MCCGT",
@@ -830,7 +830,11 @@ class DragonCase:
             proc.add_seq_binary(trkfil)
 
         # --- Variables ---
-        aniso = ssh_step.anisotropy_level
+        if hasattr(ssh_step, "lib_anisotropy_level"):
+            aniso = ssh_step.lib_anisotropy_level
+        else:
+            aniso = ssh_step.anisotropy_level
+        print(f"ssh_step anisotropy level = {aniso}")
         proc.add_variable("o_anis", "INTEGER", aniso)
         proc.add_variable(
             "name_compo", "STRING",
@@ -921,7 +925,10 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(uss_line)
         )
+        print(uss_line)
         proc.add_body_line("   PASS 3")
+        asm_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
+        proc.add_body_line(f"    EDIT 1 {asm_keyword}")
         proc.add_body_line(";")
         proc.add_body_line("")
 
@@ -942,11 +949,6 @@ class DragonCase:
                     flux_library = "LIBRARY2"
         else:
             flux_library = "LIBRARY2"
-
-        asm_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
-        proc.add_body_line(f"    EDIT 1 {asm_keyword}")
-        proc.add_body_line(";")
-        proc.add_body_line("")
 
         # --- ASM + FLU on flux step ---
         flux_steps = scheme.get_flux_steps()
@@ -1083,7 +1085,10 @@ class DragonCase:
             proc.add_seq_binary(trkfil)
 
         # --- Variables ---
-        aniso = ssh_step.anisotropy_level
+        if hasattr(ssh_step, "lib_anisotropy_level"):
+            aniso = ssh_step.lib_anisotropy_level
+        else:
+            aniso = ssh_step.anisotropy_level
         proc.add_variable("o_anis", "INTEGER", aniso)
         proc.add_variable(
             "name_compo", "STRING",
@@ -1594,7 +1599,10 @@ class DragonCase:
             proc.add_seq_binary(trkfil)
 
         # --- Variables ---
-        aniso = ssh_step.anisotropy_level
+        if hasattr(ssh_step, "lib_anisotropy_level"):
+            aniso = ssh_step.lib_anisotropy_level
+        else:
+            aniso = ssh_step.anisotropy_level
         proc.add_variable("o_anis", "INTEGER", aniso)
         proc.add_variable("name_compo", "STRING",
                           f"_CPO_{self.case_name}")
@@ -1870,7 +1878,10 @@ class DragonCase:
             proc.add_seq_binary(trkfil)
 
         # --- Variables ---
-        aniso = ssh_step.anisotropy_level
+        if hasattr(ssh_step, "lib_anisotropy_level"):
+            aniso = ssh_step.lib_anisotropy_level
+        else:
+            aniso = ssh_step.anisotropy_level
         proc.add_variable("o_anis", "INTEGER", aniso)
         proc.add_variable("name_compo", "STRING",
                           f"_CPO_{self.case_name}")

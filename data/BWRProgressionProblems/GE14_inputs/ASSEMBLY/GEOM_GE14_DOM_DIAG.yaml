@@ -1,6 +1,4 @@
-# Geometry description for the GE14 BWR progression problem.
-# This file describes the geometry of the pincell, including the fuel radius, gap radius, clad radius, and the number of fuel zones. 
-# This information is used to build the pincell geometry.
+# Geometry description for the uncontrolled GE14 in DOM axial slice : BWR progression problem.
 
 PIN_GEOMETRY:
   fuel_radius: 0.438

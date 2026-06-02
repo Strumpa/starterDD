@@ -1401,7 +1401,7 @@ class MAC:
     ngroup : int
         Number of energy groups (default 1).
     anisotropy_level : int
-        Legendre expansion order for scattering (default 0).
+        Legendre expansion order for scattering (default 1).
     """
 
     def __init__(self, macro_lib_name: str, create_new: bool = True):
@@ -1422,7 +1422,7 @@ class MAC:
         self.material_mixtures = []
         self.iprint = 1 # default print level
         self.ngroup = 1 # default number of energy groups
-        self.anisotropy_level = 0 # default anisotropy level
+        self.anisotropy_level = 1 # default anisotropy level
         self.count_mixtures = 0
 
 
@@ -1677,9 +1677,17 @@ class TRK:
         """Create SALT (and MCCGT) objects for each trackable step."""
         for step in self.scheme.get_trackable_steps():
             if step.step_type == "self_shielding":
-                self.problem_anisotropy_level = step.anisotropy_level
+                print(f"step.anisotropy_level = {step.anisotropy_level}")
+                if step.transport_correction == "NONE":
+                    self.problem_anisotropy_level = step.anisotropy_level
+                else:
+                    step.lib_anisotropy_level = step.anisotropy_level
+                    step.anisotropy_level = 1
             else:
-                step.anisotropy_level = getattr(self, "problem_anisotropy_level", 1)
+                if step.transport_correction == "NONE":
+                    step.anisotropy_level = getattr(self, "problem_anisotropy_level", 1)
+                else:
+                    step.anisotropy_level = 1
             tdt_var = self._tdt_var_name(step)
             salt = SALT(step, tdt_var)
             self._salt_objects.append(salt)

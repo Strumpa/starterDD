@@ -153,10 +153,11 @@ class TestAssemblyModelCreation:
 
     def test_lattice_pin_assignments(self, ge14_assembly_base):
         """Verify specific pins have correct rod IDs and materials."""
-        assert ge14_assembly_base.lattice[0][0].rod_ID == "ROD2"
-        assert ge14_assembly_base.lattice[0][0].fuel_material_name == "UOX28"
-        assert ge14_assembly_base.lattice[1][2].fuel_material_name == "UOX44Gd6"
-        assert ge14_assembly_base.lattice[3][3].rod_ID == "WROD"
+        assert ge14_assembly_base.lattice[0][0].rod_ID == "ROD1"
+        assert ge14_assembly_base.lattice[0][0].fuel_material_name == "UOX16"
+        assert ge14_assembly_base.lattice[1][2].fuel_material_name == "UOX32"
+        assert ge14_assembly_base.lattice[3][3].rod_ID == "ROD7G"
+        assert ge14_assembly_base.lattice[5][3].rod_ID == "WROD"
 
 # ----------------------------------------------------------------------------
 # Tests: Assembly model creation with vanished rods and lattice analysis

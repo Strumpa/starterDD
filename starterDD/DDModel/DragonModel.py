@@ -516,7 +516,6 @@ class CartesianAssemblyModel:
         self.water_rods = []
         if not self.water_rod_centers:
             self._reconstruct_water_rods_centers_from_placeholders(water_rod_ph_positions=water_rod_positions)
-        print(self.water_rod_centers)
         if water_rod_bounding_box_side is not None:
             for rod_nb in range(self.number_of_water_rods):
                 center = self.water_rod_centers[rod_nb]
@@ -547,8 +546,6 @@ class CartesianAssemblyModel:
             # get the center of the group in lattice corrdinates:
             x_pos = [pos[0] for pos in group]
             y_pos = [pos[1] for pos in group]
-            print(x_pos)
-            print(y_pos)
 
             mean_x = (np.mean(x_pos)+0.5)*self.pin_geometry_dict["pin_pitch"]
             mean_y = (np.mean(y_pos)+0.5)*self.pin_geometry_dict["pin_pitch"]
