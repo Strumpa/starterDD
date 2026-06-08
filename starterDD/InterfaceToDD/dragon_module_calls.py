@@ -1677,14 +1677,14 @@ class TRK:
         """Create SALT (and MCCGT) objects for each trackable step."""
         for step in self.scheme.get_trackable_steps():
             if step.step_type == "self_shielding":
-                print(f"step.anisotropy_level = {step.anisotropy_level}")
-                if step.transport_correction == "NONE":
+                if step.transport_correction == "NONE" or step.transport_correction is None:
                     self.problem_anisotropy_level = step.anisotropy_level
                 else:
                     step.lib_anisotropy_level = step.anisotropy_level
                     step.anisotropy_level = 1
+                    print(f"Enforcing anisotropy level to 1 for P0 + CTRA")
             else:
-                if step.transport_correction == "NONE":
+                if step.transport_correction == "NONE" or step.transport_correction is None:
                     step.anisotropy_level = getattr(self, "problem_anisotropy_level", 1)
                 else:
                     step.anisotropy_level = 1
