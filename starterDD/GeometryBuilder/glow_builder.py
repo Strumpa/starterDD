@@ -424,13 +424,7 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, windmill=False
     for water_rod_model in assembly_model.water_rods:
         if calculation_step is not None and calculation_step.macro_assignment is not None:
             water_rod_positions = water_rod_model.placeholder_indices
-            print(f"WATER ROD POSITIONS = {water_rod_positions}")
-            print(f"water_rod_model.center = {water_rod_model.center}")
             macro_name = calculation_step.macro_assignment[water_rod_positions[0][1]][water_rod_positions[0][0]]
-            print(f"water_rod_positions[0][0] : = {water_rod_positions[0][0]}")
-            print(f"water_rod_positions[0][1] : = {water_rod_positions[0][1]}")
-            print(calculation_step.macro_assignment)
-            print(f"MACRO NAME = {macro_name}")
         else:
             macro_name = f"MACRO_{water_rod_model.rod_ID}"
 
