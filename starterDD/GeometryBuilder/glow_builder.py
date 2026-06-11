@@ -5,7 +5,6 @@
 # ----------------------------------------------------------------------------
 
 
-from curses.ascii import ctrl
 from glow import *
 from glow.geometry_layouts.layouts import associate_colors_to_regions, build_compound_regions
 from glow.support.types import *
@@ -23,6 +22,9 @@ import numpy as np
 import os
 # Note: CartesianAssemblyModel and FuelPinModel are imported inside functions to avoid circular imports
 
+OX = make_vector((1, 0, 0))
+OY = make_vector((0, 1, 0))
+OZ = make_vector((0, 0, 1))
 
 SYM_TO_LAYOUT_AND_BOUNDARY = {
     SymmetryType.FULL: {"TISO": {"layout": LayoutGeometryType.ISOTROPIC, "boundary": None},
@@ -155,18 +157,22 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
                     raise ValueError(
                         f"Invalid combination of radii: fuel_radius={fuel_radius}, gap_radius={gap_radius}, clad_radius={clad_radius}"
                     )
+                if calculation_step is not None and calculation_step.macro_assignment is not None:
+                        macro_name = calculation_step.macro_assignment[row_idx][cell_idx]
+                else:
+                    macro_name = f"MACRO{row_idx}{cell_idx}" # default to individual cell numbering
                 radii = pin.radii
                 tmp_cell = CartesianCell(
                     name=pin.fuel_material_name,
                     width_height=(pitch, pitch),
                     center=(0.0, 0.0, 0.0),
                     base_props={PropertyType.MATERIAL:last_mat,
-                                PropertyType.MACRO: f"MACRO{row_idx}{cell_idx}"}
+                                PropertyType.MACRO: macro_name}
                 )
                 for radius, mat in zip(radii[::-1],list_of_cell_mats[::-1]):
                     tmp_cell.add(
                         Region(Circle(radius=radius), properties={PropertyType.MATERIAL:mat, 
-                                                                 PropertyType.MACRO:f"MACRO{row_idx}{cell_idx}"})
+                                                                 PropertyType.MACRO:macro_name})
                     )
                             
                 # Apply sectorization from calculation step if provided
@@ -226,14 +232,14 @@ def add_cells_to_cartesian_lattice(lattice, lattice_components, cell_pitch, tran
     return lattice
 
 
-def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
+def _build_square_water_rod_cell(water_rod_model, macro_name, calculation_step=None):
     """
-    Build a ``RectCell`` for a square water rod with 3 concentric
+    Build a square water rod (ATRIUM-10 type) with 3 concentric
     rectangular regions (moderator / cladding / coolant).
 
-    The construction follows the same pattern as ``build_assembly_box``:
-    two inner ``Rectangle`` boundaries are partitioned into the bounding
-    box cell, then materials are assigned from innermost to outermost.
+    A ``CartesianCell`` with water box bounding box dimensions is created
+    A collection of ``Region`` instances are created based on the ``water_rod_model`` 
+    attributes. 
 
     If the ``calculation_step`` provides a ``SectorConfig`` with a
     ``splits`` attribute, the cell is further sub-meshed into an
@@ -247,6 +253,8 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
         The square water rod model with ``bounding_box_side_length``,
         ``moderator_box_inner_side``, ``moderator_box_outer_side``,
         ``center``, ``rod_ID``, and material names.
+    macro_name : str
+        MACRO property name identifier
     calculation_step : CalculationStep or None
         Optional calculation step providing discretization config via
         ``get_water_rod_sectorization().splits``.
@@ -279,7 +287,7 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
         width_height=(bb, bb),
         center=center,
         base_props={PropertyType.MATERIAL: water_rod_model.coolant_material_name,
-                    PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"}
+                    PropertyType.MACRO: macro_name}
     )
 
     # --- 2. Create inner boundary rectangles ---
@@ -302,13 +310,13 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
         name=f"{water_rod_model.rod_ID}_box",
         geom_obj = outer_rect - inner_rect,
         properties={PropertyType.MATERIAL: water_rod_model.cladding_material_name,
-                    PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"},
+                    PropertyType.MACRO: macro_name},
     )
     inner_moderator_cell = Region(
         name=f"{water_rod_model.rod_ID}_moderator",
         geom_obj = inner_rect,
         properties={PropertyType.MATERIAL: water_rod_model.moderator_material_name,
-                    PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"},
+                    PropertyType.MACRO: macro_name},
     )
 
     tmp_cell.add(inner_moderator_cell)
@@ -340,7 +348,9 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
                 )
 
     if splits is not None:
+        
         nx, ny = splits
+        print(f"in square water rods with splits (nx, ny) = ({nx}, {ny})")
         # Build the grid of splitting faces over the bounding box
         bb_rect = Rectangle(
             name=f"{water_rod_model.rod_ID}_grid",
@@ -348,16 +358,35 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
             width=bb,
             center=center,
         )
-        splitting_faces = make_grid_faces(bb_rect, nx, ny)
-
-        # Re-partition the (already 3-region) cell face
-        re_partitioned = make_partition(
-            [tmp_cell],
-            splitting_faces,
-            shape_type=ShapeType.COMPOUND,
+        #splitting_faces = make_grid_faces(bb_rect, nx, ny)
+        x_min, x_max, y_min, y_max = get_bounding_box(bb_rect)
+        print(f"bounding box x_min, x_max = {x_min}, {x_max}")
+        print(f"bounding box y_min, y_max = {y_min}, {y_max}")
+        delta_x = (x_max - x_min) / nx
+        delta_y = (y_max - y_min) / ny
+        print(f"delta_x, delta_y = {delta_x}, {delta_y}")
+        mesh_edge_x = make_edge(
+            make_vertex((x_min, y_min, 0.0)),
+            make_vertex((x_min, y_max, 0.0))
         )
-        tmp_cell.geometry_maps[GeometryType.SECTORIZED] = \
-        tmp_cell.get_geometry_map(GeometryType.SECTORIZED) // wrap_shape(re_partitioned)
+        mesh_edge_y = make_edge(
+            make_vertex((x_min, y_min, 0.0)),
+            make_vertex((x_max, y_min, 0.0))
+        )
+        mesh_x = make_multi_translation_1d(mesh_edge_x, OX, delta_x, nx)
+        mesh_x = make_compound([mesh_x, mesh_edge_x])
+        mesh_y = make_multi_translation_1d(mesh_edge_y, OY, delta_y, ny)
+        mesh_y = make_compound([mesh_y, mesh_edge_y])
+
+        mesh = make_compound([mesh_x, mesh_y])
+        #partitioned_face = make_partition(
+        #        [tmp_cell],
+        #        splitting_faces,
+        #        shape_type=ShapeType.COMPOUND,
+        #    )
+        tmp_cell.geometry_maps[GeometryType.SECTORIZED] = wrap_shape(tmp_cell.geom_obj)
+        tmp_cell.geometry_maps[GeometryType.SECTORIZED] = tmp_cell.get_geometry_map(GeometryType.SECTORIZED) // wrap_shape(mesh) 
+        tmp_cell.show(GeometryType.TECHNOLOGICAL, PropertyType.MATERIAL)
     else:
         print(f"_build_square_water_rod_cell: built "
               f"'{water_rod_model.rod_ID}' with 3 base regions "
@@ -366,7 +395,7 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
     return tmp_cell
 
 
-def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=0.0, translation_y=0.0, windmill=False, calculation_step=None):
+def create_and_add_water_rods_to_lattice(lattice, assembly_model, windmill=False, calculation_step=None):
     """
     Create water rod cells from the assembly model and add them to the lattice at their centers.
 
@@ -377,12 +406,6 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
     assembly_model : CartesianAssemblyModel
         The assembly model containing the water rod geometry parameters
         (water_rod_type, water_rods list with center, radii, materials, etc.)
-    translation_x : float
-        Unused. Water rod centers are already in assembly coordinates (from YAML).
-        Kept for function signature consistency with pin positioning.
-    translation_y : float
-        Unused. Water rod centers are already in assembly coordinates (from YAML).
-        Kept for function signature consistency with pin positioning.
     windmill : bool
         Whether to apply windmill sectorization to the water rod coolant region.
         Ignored if ``calculation_step`` is provided.
@@ -399,6 +422,18 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
         )
 
     for water_rod_model in assembly_model.water_rods:
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            water_rod_positions = water_rod_model.placeholder_indices
+            print(f"WATER ROD POSITIONS = {water_rod_positions}")
+            print(f"water_rod_model.center = {water_rod_model.center}")
+            macro_name = calculation_step.macro_assignment[water_rod_positions[0][1]][water_rod_positions[0][0]]
+            print(f"water_rod_positions[0][0] : = {water_rod_positions[0][0]}")
+            print(f"water_rod_positions[0][1] : = {water_rod_positions[0][1]}")
+            print(calculation_step.macro_assignment)
+            print(f"MACRO NAME = {macro_name}")
+        else:
+            macro_name = f"MACRO_{water_rod_model.rod_ID}"
+
         if assembly_model.water_rod_type == "circular":
             tmp_cell = CartesianCell(
                 name=water_rod_model.rod_ID,
@@ -408,7 +443,7 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
                 ),
                 center=(0.0, 0.0, 0.0),
                 base_props={PropertyType.MATERIAL: water_rod_model.coolant_material_name,
-                            PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"},
+                            PropertyType.MACRO: macro_name},
             )
 
             # --- Determine extra moderator radii from calculation step ---
@@ -424,17 +459,19 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
 
             tmp_cell.add(Region(Circle(radius=water_rod_model.outer_radius), 
                                 properties={PropertyType.MATERIAL: water_rod_model.cladding_material_name,
-                                            PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"}))
+                                            PropertyType.MACRO: macro_name}))
             tmp_cell.add(Region(Circle(radius=water_rod_model.inner_radius), 
                                 properties={PropertyType.MATERIAL: water_rod_model.moderator_material_name,
-                                            PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"}))
+                                            PropertyType.MACRO: macro_name}))
+            tmp_cell.geometry_maps[GeometryType.TECHNOLOGICAL] = tmp_cell.geom_obj
             # Add circles: extra moderator sub-rings, then inner, then outer
             for r in extra_radii[::-1]:  # add extra moderator radii from outermost to innermost
                 tmp_cell.add(Region(Circle(radius=r), 
                                     properties={PropertyType.MATERIAL: water_rod_model.moderator_material_name,
-                                                PropertyType.MACRO: f"MACRO_{water_rod_model.rod_ID}"}))
+                                                PropertyType.MACRO: macro_name}))
 
-
+            if extra_radii:
+                tmp_cell.geometry_maps[GeometryType.SECTORIZED] = tmp_cell.geom_obj
 
             # Apply sectorization: prefer calculation_step config, fall back to windmill flag
             if wr_sectors is not None:
@@ -455,6 +492,7 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
                 tmp_cell.sectorize([1, 1, 8], [0, 0, 0], windmill=True)
             else:
                 tmp_cell.sectorize([1,1,1], [0,0,0], windmill=False)
+                #tmp_cell.geometry_maps[GeometryType.SECTORIZED] = tmp_cell.geom_obj
             split_coolant_corners = wr_sectors.subdivisions_coolant_corners if wr_sectors is not None else False
             if split_coolant_corners:
                 # circular water rods with sectorization : glow does not allow to sub mesh the coolant
@@ -511,7 +549,6 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
                     )
                     splitting_faces.append(splitting_face)
                     
-                    
                 partitioned_face = make_partition(
                     [tmp_cell],
                     splitting_faces,
@@ -523,7 +560,7 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
 
         elif assembly_model.water_rod_type == "square":
             tmp_cell = _build_square_water_rod_cell(
-                water_rod_model, calculation_step=calculation_step,
+                water_rod_model, macro_name=macro_name, calculation_step=calculation_step,
             )
 
         # water_rod_model.center is in assembly coordinates (from YAML).
@@ -536,7 +573,7 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
 
     return lattice
 
-def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, translation_y=0.0, calculation_step=None):
+def add_vanished_rods_to_lattice(lattice, assembly_model, calculation_step=None):
     """
     Create vanished rod cells from the assembly model and add them to the lattice at their centers.
 
@@ -550,14 +587,6 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
         ``default_sectorization_radius`` attributes; lattice indices may also be
         present on the model but are not used here. Vanished rod centers are
         expected to already be in assembly/YAML coordinates.
-    translation_x : float
-        Unused. Vanished rod centers are already in assembly coordinates if translation_offset_x has been defined 
-        from YAML input geometry.
-        Kept for function signature consistency with pin positioning.
-    translation_y : float
-        Unused. Vanished rod centers are already in assembly coordinates if translation_offset_x has been defined 
-        from YAML input geometry.
-        Kept for function signature consistency with pin positioning.
     calculation_step : CalculationStep or None
         CalculationStep object to retrieve vanished rod sectorization options from.
 
@@ -575,13 +604,17 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
                 f"but got {type(rod_model)}"
             )
         # RectCell replaced by CartesianCell with region and circular subregions :
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            macro_name = calculation_step.macro_assignment[rod_model.y_index][rod_model.x_index]
+        else:
+            macro_name = f"MACRO_{rod_model.rod_ID}"
 
         tmp_cell = CartesianCell(
             name=rod_model.rod_ID,
             width_height=(lattice_pin_pitch, lattice_pin_pitch),
             center=(0.0, 0.0, 0.0),
             base_props={PropertyType.MATERIAL:"COOLANT",
-                        PropertyType.MACRO: f"MACRO_{rod_model.rod_ID}"}
+                        PropertyType.MACRO: macro_name}
         )
         
         if calculation_step is not None:
@@ -595,7 +628,7 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
                 radii = vr_sector_cfg.radial_split_points
                 for radius in radii[::-1]:
                     tmp_cell.add(Region(Circle(radius=radius), properties={PropertyType.MATERIAL:"COOLANT",
-                                                              PropertyType.MACRO:f"MACRO_{rod_model.rod_ID}"}))
+                                                              PropertyType.MACRO:macro_name}))
                 if vr_sector_cfg.sector_config:
                     tmp_cell.sectorize(vr_sector_cfg.sector_config.sectors, vr_sector_cfg.sector_config.angles, windmill=vr_sector_cfg.windmill)
 
@@ -662,7 +695,7 @@ def export_glow_geom(output_path, output_file_name, assembly_universe, symmetry_
             geometry_type_to_show = GeometryType.TECHNOLOGICAL
             assembly_universe.show(property_to_show, geometry_type_to_show)
 
-        assembly_universe.show(PropertyType.MATERIAL, GeometryType.SECTORIZED) # ensure material properties are shown on technological geometry at least, as this is needed for export
+        #assembly_universe.show(PropertyType.MATERIAL, GeometryType.SECTORIZED) # ensure material properties are shown on technological geometry at least, as this is needed for export
 
     full_tdt_path = os.path.join(output_path, output_file_name)
 
@@ -761,7 +794,7 @@ def _remap_rounded_corner_indices(corner_indices, cross_corner):
     return result
 
 
-def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
+def _build_control_cross_elements(ctrl, assembly_model, ap, assembly_center=(None, None, None)):
     """
     Build the elements describing the control cross
     
@@ -769,6 +802,8 @@ def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
     ----------
     ctrl : ControlCrossModel
         The control cross model with all geometric dimensions.
+    assembly_model : CartesianAssemblyModel
+        The assembly model with additional geometric dimensions.
     ap : float
         Assembly pitch.
     assembly_center : tuple, optional
@@ -799,24 +834,10 @@ def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
     n_tubes = ctrl.number_tubes_per_wing
     r_inner = ctrl.absorber_tube_inner_radius
     r_outer = ctrl.absorber_tube_outer_radius
-    inner_w = ctrl.inner_sheath_width  # = bt - 2*st
     delta = ctrl.tube_spacing
-    first_offset = ctrl.first_tube_offset
     extra_moderator_gap = (delta - 2.0*r_outer) / 2.0
-    half_square_side = r_outer + extra_moderator_gap
-    distance_from_first_center_to_last_center = (n_tubes - 1) * 2.0 * half_square_side
-    width_controlled_section = bhs - st - cshs
-    print(f"Computed width of controlled section: {width_controlled_section} cm, distance from first center to last center: {distance_from_first_center_to_last_center} cm")
-
-    extra_distance_from_last_center_to_edge = (width_controlled_section - distance_from_first_center_to_last_center) / 2.0
 
     first_tube_offset = cshs + r_outer + extra_moderator_gap # In assembly coordinates.
-
-    print(f"Computed first tube offset: {first_tube_offset}, distance from first center to last center: {distance_from_first_center_to_last_center}, extra moderator gap: {extra_moderator_gap}, extra distance from last center to edge: {extra_distance_from_last_center_to_edge}")
-    print(f"Check: computed first tube offset : {first_tube_offset} cm, provided first tube offset: {first_offset} cm, difference: {first_tube_offset - first_offset} cm")
-    print(f"First offset: {first_offset} cm, expected first offset based on tube dimensions and extra moderator gap: {cshs + r_outer + extra_moderator_gap} cm, difference: {first_offset - (cshs + r_outer + extra_moderator_gap)} cm")
-
-    print(f"Check provided delta: {delta} cm, expected delta based on tube dimensions and extra moderator gap: {2.0 * half_square_side} cm, difference: {delta - 2.0 * half_square_side} cm")
 
     is_solid = ctrl.is_solid
     absorber_mat = ctrl.absorber_material
@@ -863,7 +884,6 @@ def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
     elements["CTRL_H_SHEATH"]["offset"] = (delta_centers_x_horizontal_wing, delta_centers_y_horizontal_wing, 0.0)
     elements["CTRL_H_SHEATH"]["macro"] = "CTRL_H"
     elements["CTRL_H_SHEATH"]["material"] = sheath_mat
-    print(f"offset is : {elements['CTRL_H_SHEATH']['offset']}")
 
     cx, cy = _corner_transform(corner, 0.0, ap - bhs/2.0, ap)
     control_cross_vertical_wing = Rectangle(
@@ -1000,8 +1020,7 @@ def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
     
     # create tip elements : intersections of a rectangle of bt / 4 by st with : moderator
     
-    #if not is_solid:
-    if False:
+    if not is_solid:
         cx, cy = _corner_transform(corner, bhs - st/2.0, ap - bt/4.0, ap)
         tip_rectangle_h = Rectangle(
             name="CTRL_H_TIP",
@@ -1055,6 +1074,39 @@ def _build_control_cross_elements(ctrl, ap, assembly_center=(None, None, None)):
         elements["CTRL_V_TIP_EXTRA_MODER"]["macro"] = macro 
         elements["CTRL_V_TIP_EXTRA_MODER"]["material"] = "MODERATOR"
         elements["CTRL_V_TIP_EXTRA_MODER"]["geometry"] = extra_moder_outside_of_tip_rectangle
+
+    ### Introduce rectangular macros in the prolongation of cross arms
+    # recover necessary dimensions from assembly_model
+    pin_pitch = assembly_model.pin_geometry_dict["pin_pitch"]
+    n_rows = len(assembly_model.lattice_description)
+    n_cols = len(assembly_model.lattice_description[0])
+    offset_x = assembly_model.translation_offset_x
+    offset_y = assembly_model.translation_offset_y
+    # horizontal :
+    cx, cy = _corner_transform(corner, bhs + ((n_cols-1)*pin_pitch+offset_x - bhs)/2, ap - bt/4.0, ap)
+    prolong_rect_h = Rectangle(
+        name = "prolong_H",
+        height=bt/2,
+        width=((n_cols-1)*pin_pitch+offset_x - bhs),
+        center=(cx, cy, 0.0)
+    )
+    elements["CTRL_PROLONG_H"] = {}
+    elements["CTRL_PROLONG_H"]["macro"] = "CTRL_H"
+    elements["CTRL_PROLONG_H"]["material"] = "MODERATOR"
+    elements["CTRL_PROLONG_H"]["geometry"] = prolong_rect_h
+
+    # vertical :
+    cx, cy = _corner_transform(corner, bt/4.0, ap - (bhs + ((n_rows-1)*pin_pitch+offset_y - bhs)/2), ap)
+    prolong_rect_v = Rectangle(
+        name = "prolong_V",
+        width=bt/2,
+        height=((n_rows-1)*pin_pitch+offset_y - bhs),
+        center=(cx, cy, 0.0)
+    )
+    elements["CTRL_PROLONG_V"] = {}
+    elements["CTRL_PROLONG_V"]["macro"] = "CTRL_V"
+    elements["CTRL_PROLONG_V"]["material"] = "MODERATOR"
+    elements["CTRL_PROLONG_V"]["geometry"] = prolong_rect_v
 
     return elements
 
@@ -1213,12 +1265,9 @@ def _compute_asymmetric_coolant_channel_box_rects(assembly_model, center):
     return  lattice_rect, coolant_rect, channel_box_rect
 
 
-# ==============================================================================
-# PHASE 1: Generate MACRO Subdivision Rectangles
-# ==============================================================================
-
 def _generate_macro_subdivision_rectangles(
     assembly_model,
+    calculation_step,
     x0, y0, x1, y1,
     center
 ):
@@ -1258,13 +1307,12 @@ def _generate_macro_subdivision_rectangles(
     macros = {}
     z_center = center[2]
 
-    # ======================================================================
-    # BOTTOM STRIP: [x0, x1] × [0, y0]
-    # Subdivided into n_cols regions (one per pin column)
-    # ======================================================================
-    strip_height = y0  # Distance from bottom edge (y=0) to lattice bottom (y=y0)
-
     for col_idx in range(n_cols):
+        # ======================================================================
+        # BOTTOM STRIP: [x0, x1] × [0, y0]
+        # Subdivided into n_cols regions (one per pin column)
+        # ======================================================================
+        strip_height = y0  # Distance from bottom edge (y=0) to lattice bottom (y=y0)
         # Rectangle spans one pin column width
         col_x_min = x0 + col_idx * pin_pitch
         col_x_max = col_x_min + pin_pitch
@@ -1273,144 +1321,181 @@ def _generate_macro_subdivision_rectangles(
         rect_center_x = (col_x_min + col_x_max) / 2.0
         rect_center_y = strip_height / 2.0  # Centered in the bottom strip
 
-        macro_name = f"BOT_{col_idx + 1}"  # 1-based indexing
-        print(f"Create rect_params for {macro_name} with center ({rect_center_x:.3f}, {rect_center_y:.3f}, {z_center:.3f}), width {pin_pitch:.3f}, height {strip_height:.3f}")
+        region_name = f"BOT_{col_idx + 1}"  # 1-based indexing
+
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            macro_name = calculation_step.macro_assignment[0][col_idx]
+            print(f"For region name : {region_name}, create macro subdivison with macro_name = {macro_name}")
+        else:
+            macro_name = region_name
+
         rect_params = (
             macro_name,                                  # name
             strip_height,                                # height (y-direction)
             pin_pitch,                                   # width (x-direction)
             (rect_center_x, rect_center_y, z_center),   # center (x, y, z)
-            None                                         # rounded_corners (None = no rounding)
+            None
         )
-        macros[macro_name] = rect_params
+        macros[region_name] = rect_params
 
-    # ======================================================================
-    # TOP STRIP: [x0, x1] × [y1, ap]
-    # Subdivided into n_cols regions (one per pin column)
-    # ======================================================================
-    strip_height = ap - y1  # Distance from lattice top (y=y1) to top edge (y=ap)
-
-    for col_idx in range(n_cols):
+        # ======================================================================
+        # TOP STRIP: [x0, x1] × [y1, ap]
+        # Subdivided into n_cols regions (one per pin column)
+        # ======================================================================
+    
+        strip_height = ap - y1  # Distance from lattice top (y=y1) to top edge (y=ap)
         col_x_min = x0 + col_idx * pin_pitch
         col_x_max = col_x_min + pin_pitch
 
         rect_center_x = (col_x_min + col_x_max) / 2.0
         rect_center_y = y1 + (ap - y1) / 2.0  # Centered in the top strip
 
-        macro_name = f"TOP_{col_idx + 1}"
-        print(f"Create rect_params for {macro_name} with center ({rect_center_x:.3f}, {rect_center_y:.3f}, {z_center:.3f}), width {pin_pitch:.3f}, height {strip_height:.3f}")
+        region_name = f"TOP_{col_idx + 1}"
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            macro_name = calculation_step.macro_assignment[-1][col_idx]
+            print(f"For region name : {region_name}, create macro subdivison with macro_name = {macro_name}")
+        else:
+            macro_name = region_name
+
         rect_params = (
             macro_name,
             strip_height,
             pin_pitch,
             (rect_center_x, rect_center_y, z_center),
-            None                                         # rounded_corners (None = no rounding)
+            None
         )
-        macros[macro_name] = rect_params
+        macros[region_name] = rect_params
 
-    # ======================================================================
-    # LEFT STRIP: [0, x0] × [y0, y1]
-    # Subdivided into n_rows regions (one per pin row)
-    # ======================================================================
-    strip_width = x0  # Distance from left edge (x=0) to lattice left (x=x0)
-    lattice_pitch_y = y1 - y0
 
     for row_idx in range(n_rows):
+        # ======================================================================
+        # LEFT STRIP: [0, x0] × [y0, y1]
+        # Subdivided into n_rows regions (one per pin row)
+        # ======================================================================
+        strip_width = x0  # Distance from left edge (x=0) to lattice left (x=x0)
+        lattice_pitch_y = y1 - y0
         row_y_min = y0 + row_idx * pin_pitch
         row_y_max = row_y_min + pin_pitch
 
         rect_center_x = strip_width / 2.0  # Centered in the left strip
         rect_center_y = (row_y_min + row_y_max) / 2.0
 
-        macro_name = f"LEFT_{row_idx + 1}"
-        print(f"Create rect_params for {macro_name} with center ({rect_center_x:.3f}, {rect_center_y:.3f}, {z_center:.3f}), width {pin_pitch:.3f}, height {strip_width:.3f}")
+        region_name = f"LEFT_{row_idx + 1}"
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            macro_name = calculation_step.macro_assignment[row_idx][0]
+            print(f"For region name : {region_name}, create macro subdivison with macro_name = {macro_name}")
+        else:
+            macro_name = region_name
+
         rect_params = (
             macro_name,
             pin_pitch,                                   # height (y-direction)
             strip_width,                                 # width (x-direction)
             (rect_center_x, rect_center_y, z_center),
-            None                                         # rounded_corners (None = no rounding)
+            None
         )
-        macros[macro_name] = rect_params
+        macros[region_name] = rect_params
 
-    # ======================================================================
-    # RIGHT STRIP: [x1, ap] × [y0, y1]
-    # Subdivided into n_rows regions (one per pin row)
-    # ======================================================================
-    strip_width = ap - x1  # Distance from lattice right (x=x1) to right edge (x=ap)
-
-    for row_idx in range(n_rows):
+        # ======================================================================
+        # RIGHT STRIP: [x1, ap] × [y0, y1]
+        # Subdivided into n_rows regions (one per pin row)
+        # ======================================================================
+        strip_width = ap - x1  # Distance from lattice right (x=x1) to right edge (x=ap)
         row_y_min = y0 + row_idx * pin_pitch
         row_y_max = row_y_min + pin_pitch
 
         rect_center_x = x1 + (ap - x1) / 2.0  # Centered in the right strip
         rect_center_y = (row_y_min + row_y_max) / 2.0
 
-        macro_name = f"RIGHT_{row_idx + 1}"
-        print(f"Create rect_params for {macro_name} with center ({rect_center_x:.3f}, {rect_center_y:.3f}, {z_center:.3f}), width {pin_pitch:.3f}, height {strip_width:.3f}")
+        region_name = f"RIGHT_{row_idx + 1}"
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            macro_name = calculation_step.macro_assignment[row_idx][-1]
+            print(f"For region name : {region_name}, create macro subdivison with macro_name = {macro_name}")
+        else:
+            macro_name = region_name
+        
         rect_params = (
             macro_name,
             pin_pitch,
             strip_width,
             (rect_center_x, rect_center_y, z_center),
-            None                                         # rounded_corners (None = no rounding)
+            None
         )
-        macros[macro_name] = rect_params
+        macros[region_name] = rect_params
 
     # ======================================================================
     # CORNERS
     # ======================================================================
     corner_width_bl = x0
     corner_height_bl = y0
-
+    corner_name = "CORNER_BL"
+    if calculation_step is not None and calculation_step.macro_assignment is not None:
+        macro_name = calculation_step.macro_assignment[0][0]
+        print(f"For corner name : {corner_name}, create macro subdivison with macro_name = {macro_name}")
+    else:
+        macro_name = corner_name
     # Bottom-Left
     macros["CORNER_BL"] = (
-        "CORNER_BL",
+        macro_name,
         corner_height_bl,
         corner_width_bl,
         (corner_width_bl / 2.0, corner_height_bl / 2.0, z_center),
-        None                                             # rounded_corners (None = no rounding)
+        None
     )
 
     # Bottom-Right
     corner_width_br = ap - x1
     corner_height_br = y0
+    corner_name = "CORNER_BR"
+    if calculation_step is not None and calculation_step.macro_assignment is not None:
+        macro_name = calculation_step.macro_assignment[0][-1]
+        print(f"For corner name : {corner_name}, create macro subdivison with macro_name = {macro_name}")
+    else:
+        macro_name = corner_name
     macros["CORNER_BR"] = (
-        "CORNER_BR",
+        macro_name,
         corner_height_br,
         corner_width_br,
         (x1 + corner_width_br / 2.0, corner_height_br / 2.0, z_center),
-        None                                             # rounded_corners (None = no rounding)
+        None
     )
 
     # Top-Left
     corner_width_tl = x0
     corner_height_tl = ap - y1
+    corner_name = "CORNER_TL"
+    if calculation_step is not None and calculation_step.macro_assignment is not None:
+        macro_name = calculation_step.macro_assignment[-1][0]
+        print(f"For corner name : {corner_name}, create macro subdivison with macro_name = {macro_name}")
+    else:
+        macro_name = corner_name
     macros["CORNER_TL"] = (
-        "CORNER_TL",
+        macro_name,
         corner_height_tl,
         corner_width_tl,
         (corner_width_tl / 2.0, y1 + corner_height_tl / 2.0, z_center),
-        None                                             # rounded_corners (None = no rounding)
+        None
     )
 
     # Top-Right
     corner_width_tr = ap - x1
     corner_height_tr = ap - y1
+    corner_name = "CORNER_TR"
+    if calculation_step is not None and calculation_step.macro_assignment is not None:
+        macro_name = calculation_step.macro_assignment[-1][-1]
+        print(f"For corner name : {corner_name}, create macro subdivison with macro_name = {macro_name}")
+    else:
+        macro_name = corner_name
     macros["CORNER_TR"] = (
-        "CORNER_TR",
+        macro_name,
         corner_height_tr,
         corner_width_tr,
         (x1 + corner_width_tr / 2.0, y1 + corner_height_tr / 2.0, z_center),
-        None                                             # rounded_corners (None = no rounding)
+        None
     )
 
     return macros
 
-
-# ==============================================================================
-# PHASE 1B: Generate Layer-Aware MACRO Region Subdivisions
-# ==============================================================================
 
 def is_degenerate(geometry):
     """
@@ -1473,11 +1558,11 @@ def _wrap_and_validate_geometry(geometry, layer_name=""):
         return None
 
 
-def _generate_macro_region_layers(macro_rect, macro_name, coolant_rect, channel_box_rect):
+def _generate_strip_region_layers(region_rect, region_name, macro_name, coolant_rect, channel_box_rect):
     """
-    Decompose a MACRO rectangle into layer-specific geometries using set operations.
+    Decompose a Rectangle into layer-specific geometries using set operations.
 
-    For each MACRO rectangle, this function computes the intersection with layer
+    For each strip rectangle, this function computes the intersection with layer
     boundaries to produce layer-specific geometries. The layers are:
     - COOLANT: Inside coolant_rect
     - CHANNEL_BOX: Between coolant_rect and channel_box_rect
@@ -1485,10 +1570,12 @@ def _generate_macro_region_layers(macro_rect, macro_name, coolant_rect, channel_
 
     Parameters
     ----------
-    macro_rect : Rectangle
-        Rectangle geometry for the MACRO region
+    region_rect : Rectangle
+        Rectangle geometry for the strip region
+    region_name : str
+        Indentifier for the region name
     macro_name : str
-        Identifier for the MACRO (e.g., "BOT_1", "CORNER_BL")
+        Identifier for the MACRO 
     coolant_rect : Rectangle
         Reference boundary for inner coolant region
     channel_box_rect : Rectangle
@@ -1513,42 +1600,42 @@ def _generate_macro_region_layers(macro_rect, macro_name, coolant_rect, channel_
 
     # Layer 1: COOLANT = macro_rect ∩ coolant_rect (intersection)
     try:
-        coolant_geom = macro_rect * coolant_rect  # intersection operator
+        coolant_geom = region_rect * coolant_rect  # intersection operator
         # Wrap geometry to handle COMPOUND types
         coolant_geom = _wrap_and_validate_geometry(coolant_geom, f"{macro_name}/COOLANT")
         if coolant_geom is not None and not is_degenerate(coolant_geom):
             result['COOLANT'] = coolant_geom
-            print(f"  {macro_name}: COOLANT geometry computed")
+            print(f"  In strip region '{region_name}' with MACRO '{macro_name}': COOLANT geometry computed")
     except Exception as e:
-        print(f"  Warning: Failed to compute COOLANT layer for {macro_name}: {e}")
+        print(f"  Warning: Failed to compute COOLANT layer for strip region '{region_name}' with MACRO '{macro_name}': {e}")
 
     # Layer 2: CHANNEL_BOX = (macro_rect ∩ channel_box_rect) - coolant_rect (intersection minus)
     try:
-        temp_geom = macro_rect * channel_box_rect  # intersection
+        temp_geom = region_rect * channel_box_rect  # intersection
         channel_box_geom = temp_geom - coolant_rect  # difference
         # Wrap geometry to handle COMPOUND types
         channel_box_geom = _wrap_and_validate_geometry(channel_box_geom, f"{macro_name}/CHANNEL_BOX")
         if channel_box_geom is not None and not is_degenerate(channel_box_geom):
             result['CHANNEL_BOX'] = channel_box_geom
-            print(f"  {macro_name}: CHANNEL_BOX geometry computed")
+            print(f"  In strip region '{region_name}' with MACRO '{macro_name}': CHANNEL_BOX geometry computed")
     except Exception as e:
-        print(f"  Warning: Failed to compute CHANNEL_BOX layer for {macro_name}: {e}")
+        print(f"  Warning: Failed to compute CHANNEL_BOX layer for for strip region '{region_name}' with MACRO '{macro_name}': {e}")
 
     # Layer 3: MODERATOR = macro_rect - channel_box_rect (difference)
     try:
-        moderator_geom = macro_rect - channel_box_rect  # difference operator
+        moderator_geom = region_rect - channel_box_rect  # difference operator
         # Wrap geometry to handle COMPOUND types
         moderator_geom = _wrap_and_validate_geometry(moderator_geom, f"{macro_name}/MODERATOR")
         if moderator_geom is not None and not is_degenerate(moderator_geom):
             result['MODERATOR'] = moderator_geom
-            print(f"  {macro_name}: MODERATOR geometry computed")
+            print(f"  In strip region '{region_name}' with MACRO '{macro_name}': MODERATOR geometry computed")
     except Exception as e:
-        print(f"  Warning: Failed to compute MODERATOR layer for {macro_name}: {e}")
+        print(f"  Warning: Failed to compute MODERATOR layer for for strip region '{region_name}' with MACRO '{macro_name}': {e}")
 
     return result
 
 
-def _generate_corner_channel_box_regions(x0, y0, x1, y1, ap, n_rows, n_cols, coolant_rect, channel_box_rect, center):
+def _generate_corner_channel_box_regions(x0, y0, x1, y1, ap, n_rows, n_cols, coolant_rect, channel_box_rect, center, calculation_step):
     """
     Generate channel box material regions at assembly corners that intersect with lattice footprint.
 
@@ -1571,6 +1658,8 @@ def _generate_corner_channel_box_regions(x0, y0, x1, y1, ap, n_rows, n_cols, coo
         Reference boundary for outer channel box region
     center : tuple
         Assembly center (x_center, y_center, z_center)
+    calculation_step : CalculationStep
+        CalculationStep object holding macro property assignement information.
 
     Returns
     -------
@@ -1623,7 +1712,10 @@ def _generate_corner_channel_box_regions(x0, y0, x1, y1, ap, n_rows, n_cols, coo
             corner_cb_geom = _wrap_and_validate_geometry(corner_cb_geom, f"CORNER_CB_{corner_id}")
 
             if corner_cb_geom is not None and not is_degenerate(corner_cb_geom):
-                macro_name = f"MACRO{macro_row}{macro_col}"
+                if calculation_step is not None and calculation_step.macro_assignment is not None:
+                    macro_name = calculation_step.macro_assignment[macro_row][macro_col]
+                else:
+                    macro_name = f"MACRO{macro_row}{macro_col}"
                 result[corner_id] = {
                     'geometry': corner_cb_geom,
                     'macro': macro_name
@@ -1638,7 +1730,10 @@ def _generate_corner_channel_box_regions(x0, y0, x1, y1, ap, n_rows, n_cols, coo
 
         except Exception as e:
             print(f"  Warning: Failed to compute channel box region for corner {corner_id}: {e}")
-            macro_name = f"MACRO{macro_row}{macro_col}"
+            if calculation_step is not None and calculation_step.macro_assignment is not None:
+                macro_name = calculation_step.macro_assignment[macro_row][macro_col]
+            else:
+                macro_name = f"MACRO{macro_row}{macro_col}"
             result[corner_id] = {
                 'geometry': None,
                 'macro': macro_name
@@ -2877,9 +2972,6 @@ def discretize_box(assembly_universe, assembly_model, box_discretization_config)
     return assembly_universe
 
 
-# ==============================================================================
-# PHASE 3: Build Assembly with MACRO Regions
-# ==============================================================================
 
 def build_assembly_with_macros(assembly_model, calculation_step, center=None):
     """
@@ -2934,7 +3026,7 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
     translation_y = assembly_model.translation_offset_y if assembly_model.translation_offset_y is not None else 0.0
 
     # ======================================================================
-    # STEP 1: Generate fuel cells with sectorization
+    # STEP 1: Generate fuel cells with or without sectorization
     # ======================================================================
     if calculation_step:
         calculation_step.apply_radii(assembly_model)
@@ -2943,9 +3035,9 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
         assembly_model, calculation_step=calculation_step
     )
 
-    # ======================================================================
-    # STEP 2: Initialize assembly (WITHOUT base regions)
-    # ======================================================================
+    # =================================================================================
+    # STEP 2: Initialize assembly_universe : container for the geometry to be exported
+    # =================================================================================
     # Create assembly container directly without detailed base regions
     # Base regions will be replaced by layer-aware MACRO subdivisions
     # Use CartesianCell with width_height and center parameters to define bounds
@@ -2976,7 +3068,6 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
     if hasattr(assembly_model, "water_rods") and assembly_model.water_rods:
         lattice = create_and_add_water_rods_to_lattice(
             lattice, assembly_model,
-            translation_x=translation_x, translation_y=translation_y,
             calculation_step=calculation_step,
         )
 
@@ -2984,7 +3075,6 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
     if hasattr(assembly_model, "vanished_rods") and assembly_model.vanished_rods:
         lattice = add_vanished_rods_to_lattice(
             lattice, assembly_model,
-            translation_x=translation_x, translation_y=translation_y,
             calculation_step=calculation_step,
         )
 
@@ -3000,32 +3090,33 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
     y1 = y0 + lattice_pitch_y
 
     # ======================================================================
-    # STEP 7: Generate MACRO rectangles
+    # STEP 7: channel box tratment : generate MACRO rectangles
     # ======================================================================
     macro_rects = _generate_macro_subdivision_rectangles(
         assembly_model,
+        calculation_step,
         x0, y0, x1, y1,
         center
     )
 
     # ======================================================================
-    # STEP 8: Get reference rectangles for layer boundary computation
+    # STEP 8: Get reference rectangles for region boundary computation
     # ======================================================================
     lattice_rect, coolant_rect, channel_box_rect = _compute_asymmetric_coolant_channel_box_rects(
         assembly_model, center
     )
 
     # ======================================================================
-    # STEP 9-10: Create layer-aware MACRO region subdivisions
+    # STEP 9-10: Create material-aware MACRO region subdivisions
     # ======================================================================
     print(f"\n=== Creating Layer-Aware MACRO Regions ===")
-    for macro_name, rect_params in macro_rects.items():
-        name, height, width, rect_center, rounded = rect_params
+    for region_name, rect_params in macro_rects.items():
+        macro_name, height, width, rect_center, rounded = rect_params
 
         # Create Rectangle geometry for this MACRO
-        print(f"\nProcessing MACRO '{macro_name}' with rect center {rect_center}, height {height}, width {width}")
-        macro_rect = Rectangle(
-            name=name,
+        print(f"\nProcessing Region '{region_name}', assiciated with MACRO '{macro_name}' with center {rect_center}, height {height}, width {width}")
+        region_rect = Rectangle(
+            name=region_name,
             height=height,
             width=width,
             center=rect_center,  # Keep center for boolean operations to work correctly
@@ -3033,8 +3124,9 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
         )
 
         # Generate layer-specific sub-regions using set operations
-        layer_geometries = _generate_macro_region_layers(
-            macro_rect,
+        layer_geometries = _generate_strip_region_layers(
+            region_rect,
+            region_name,
             macro_name,
             coolant_rect,
             channel_box_rect
@@ -3063,9 +3155,9 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
                 # actual center (computed as CDG by Region) to avoid stacking layers on top of each other.
                 layer_center = get_point_coordinates(region.o)
                 assembly_universe.add(region, position=layer_center)
-
+                print(f"Added region layer with region_name : '{region_name}, with material type : {material_type} and macro : {macro_name}")
             except Exception as e:
-                print(f"  Warning: Failed to create Region for {macro_name}/{material_type}: {e}")
+                print(f"  Warning: Failed to create Region for '{region_name}' with : MACRO '{macro_name}' / MATERIAL '{material_type}': {e}")
 
     print(f"\n=== Finished Creating Layer-Aware MACRO Regions ===\n")
 
@@ -3079,7 +3171,8 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
         x0, y0, x1, y1, ap,
         n_rows, n_cols,
         coolant_rect, channel_box_rect,
-        center
+        center,
+        calculation_step
     )
 
     for corner_id, corner_data in corner_cb_regions.items():
@@ -3137,7 +3230,8 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
                 print(f"  Warning failed to create Region for control cross element : {element_name}")
 
         assembly_universe._ctrl_cross_shapes = elements
-           
+    assembly_universe.update_hierarchical_structure(True)
+    #assembly_universe.geometry_maps[GeometryType.SECTORIZED] = assembly_universe.geom_obj       
 
     return assembly_universe
 
@@ -3178,10 +3272,6 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
     """
     from ..DDModel.DragonModel import CartesianAssemblyModel  # type check only
 
-    ap = assembly_model.assembly_pitch
-    pin_pitch = assembly_model.pin_geometry_dict["pin_pitch"]
-    n_cols = len(assembly_model.lattice_description[0])
-
     print(f"Building assembly geometry for {assembly_model.name} with {calculation_step.spatial_method} method")
 
     # ======================================================================
@@ -3214,7 +3304,6 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
     # ======================================================================
     # STEP 3: Apply symmetry
     # ======================================================================
-    assembly_universe.update_hierarchical_structure(True)
     # check for symmetries
     is_anti_diag_symmetric = assembly_model.check_anti_diagonal_symmetry()
     is_main_diag_symmetric = assembly_model.check_main_diagonal_symmetry()
@@ -3238,7 +3327,6 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
         symmetry = SymmetryType.DIAG
     elif is_anti_diag_symmetric:
         print("Assembly is symmetric across anti-diagonal; applying anti-diagonal symmetry")
-        #assembly_universe.rotate(90)  # Rotate 90 degrees to align anti-diagonal with main diagonal
         assembly_universe.apply_symmetry(SymmetryType.FULL)
         symmetry = SymmetryType.FULL
     else:
