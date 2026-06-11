@@ -936,7 +936,7 @@ class CalculationStep:
     sectorization_enabled : bool
         Whether azimuthal sectorization is applied for this step.
     fuel_sectors : SectorConfig or None
-        Default sectorization config for standard fuel pins.
+        Sectorization config for standard fuel pins.
     gd_sectors : SectorConfig or None
         Sectorization config for gadolinium-bearing fuel pins.
     water_rod_sectors : SectorConfig or None
@@ -949,6 +949,11 @@ class CalculationStep:
         Configuration for sub-meshing the assembly-box peripheral
         regions into a grid of sub-faces (for MOC tracking).  When
         ``None``, no box discretization is applied.
+    macro_assignment : 
+        List of list to assign MACRO properties to the glow model.
+        n_rows by n_cols table ordered in x-increasing, y-increasing logic with GEOM.yaml::lattice_description dimensions 
+        Entries should be strings that will be used as glow's PropertyType.MACRO property.
+        If None : by default each fuel cell, water rod and strip rectangle gets an independent macro assigned.
     """
 
     VALID_POLAR_QUADRATURES = ("GAUS", "CACA", "CACB", "LCMD", "OPP1", "OGAU")
@@ -984,6 +989,7 @@ class CalculationStep:
         number_of_polar_angles=None,
         mix_numbering_strategy="by_material",
         tdt_file_id=None,
+        macro_assignment=None
     ):
         # --- Validate step type ---
         if step_type not in VALID_STEP_TYPES:
@@ -1113,6 +1119,7 @@ class CalculationStep:
         self.number_of_polar_angles = number_of_polar_angles
         self.mix_numbering_strategy = mix_numbering_strategy
         self.tdt_file_id = tdt_file_id
+        self.macro_assignment = macro_assignment
 
     # ------------------------------------------------------------------
     # Radii application
@@ -2045,6 +2052,7 @@ class DragonCalculationScheme:
             box_discretization=box_disc,
             mix_numbering_strategy=d.get("mix_numbering_strategy", "by_material"),
             tdt_file_id=d.get("tdt_file_id", None),
+            macro_assignment = d.get("macro_assignment", None),
             **tracking_kwargs,
         )
 
@@ -2318,8 +2326,8 @@ class DragonCalculationScheme:
                     lines.append(f"  GRMAX:      {step.max_sph_group}")
                 continue
             if step.step_type == "self_shielding":
-                lines.append(f"  SH module:  {step.self_shielding_module}")
-                lines.append(f"  SH method:  {step.self_shielding_method}")
+                lines.append(f"  SSH module:  {step.self_shielding_module}")
+                lines.append(f"  SSH method:  {step.self_shielding_method}")
             lines.append(f"  Method:     {step.spatial_method}")
             lines.append(f"  Tracking:   {step.tracking}")
             if step.flux_level is not None:

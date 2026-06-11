@@ -515,7 +515,7 @@ class CartesianAssemblyModel:
         water_rod_bounding_box_side = np.sqrt(nb_dummies_per_rod) * self.pin_geometry_dict["pin_pitch"] if nb_dummies_per_rod is not None else None
         self.water_rods = []
         if not self.water_rod_centers:
-            self._reconstruct_water_rods_centers_from_placeholders(water_rod_ph_positions=water_rod_positions)
+            center_to_group = self._reconstruct_water_rods_centers_from_placeholders(water_rod_ph_positions=water_rod_positions)
         if water_rod_bounding_box_side is not None:
             for rod_nb in range(self.number_of_water_rods):
                 center = self.water_rod_centers[rod_nb]
@@ -532,6 +532,7 @@ class CartesianAssemblyModel:
                 else:
                     raise ValueError(f"Unsupported water rod geometry type: {self.water_rod_type}. Supported types are 'circular' and 'square'.")
                 water_rod_model.set_materials("MODERATOR", "CLAD", "COOLANT")
+                water_rod_model.attach_placeholders_indices_from_lattice_numbering(center_to_group[center])
                 self.water_rods.append(water_rod_model)
 
         # set number of vanished rods in the lattice :
@@ -540,10 +541,11 @@ class CartesianAssemblyModel:
     def _reconstruct_water_rods_centers_from_placeholders(self, water_rod_ph_positions):
 
         nb_dummies_per_rod = len(water_rod_ph_positions) / self.number_of_water_rods if self.number_of_water_rods > 0 else None
-        self.water_rod_centers = []        
+        self.water_rod_centers = []  
+        center_to_group = {}       
         groups = self._group_connected_positions(water_rod_ph_positions)
         for group in groups:
-            # get the center of the group in lattice corrdinates:
+            # get the center of the group in lattice coorrdinates:
             x_pos = [pos[0] for pos in group]
             y_pos = [pos[1] for pos in group]
 
@@ -553,8 +555,9 @@ class CartesianAssemblyModel:
 
             center = (self.translation_offset_x + mean_x, self.translation_offset_y + mean_y)
             self.water_rod_centers.append(center)
+            center_to_group[center] = group
 
-        return
+        return center_to_group
 
     def _group_connected_positions(self, positions):
         points = set(positions)   # fast lookup
@@ -2302,6 +2305,12 @@ class CircularWaterRodModel:
         self.cladding_material_name = cladding_material_name
         self.coolant_material_name = coolant_material_name
 
+    def attach_placeholders_indices_from_lattice_numbering(self, list_of_indices):
+        """
+        attach placeholders indicies identified from the lattice numbering
+        """
+        self.placeholder_indices = list_of_indices
+
 
 class SquareWaterRodModel:
     """
@@ -2374,6 +2383,11 @@ class SquareWaterRodModel:
         self.cladding_material_name = cladding_material_name
         self.coolant_material_name = coolant_material_name
 
+    def attach_placeholders_indices_from_lattice_numbering(self, list_of_indices):
+        """
+        attach placeholders indicies identified from the lattice numbering
+        """
+        self.placeholder_indices = list_of_indices
 
 
         
