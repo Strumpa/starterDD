@@ -19,7 +19,7 @@ VALID_SELF_SHIELDING_MODULES = ("USS", "SHI")  # USS: unresolved resonance, SHI:
 VALID_SELF_SHIELDING_METHODS = ("RSE", "PT")  # RSE: subgroup+equivalence, PT: probability tables
 VALID_SPATIAL_METHODS = ("CP", "IC", "MOC")
 VALID_TRACKING_OPTIONS = ("TISO", "TSPC")
-VALID_RADIAL_SCHEMES = ("Santamarina", "automatic", "user_defined")
+VALID_RADIAL_SCHEMES = ("Santamarina", "Santamarina_fine_Gd", "automatic", "user_defined")
 VALID_MIX_NUMBERING_STRATEGIES = ("by_material", "by_pin")
 
 
@@ -1157,6 +1157,8 @@ class CalculationStep:
 
                 if scheme == "Santamarina":
                     pin.subdivide_into_Santamarina_radii()
+                elif scheme == "Santamarina_fine_Gd":
+                    pin.subdivide_into_fine_Gd_radii()
                 elif scheme == "automatic":
                     n_zones = params.get("num_radial_zones", 1)
                     pin.subdivide_into_radial_zones(n_zones)
@@ -1205,17 +1207,14 @@ class CalculationStep:
     # Sectorization query
     # ------------------------------------------------------------------
 
-    def get_sectorization_for_pin(self, pin_or_rod_type, isGd=False):
+    def get_sectorization_for_pin(self, isGd=False):
         """
         Return the ``SectorConfig`` applicable to a given pin.
 
         Parameters
         ----------
-        pin_or_rod_type : str or FuelPinModel
-            Either a rod type string or a pin model object.
         isGd : bool
-            Whether the pin is a gadolinium-bearing pin (used when
-            ``pin_or_rod_type`` is a string).
+            Whether the pin is a gadolinium-bearing pin or not.
 
         Returns
         -------
@@ -1560,18 +1559,26 @@ class EditionBetweenLevelsStep:
     max_sph_group : int or None
         Maximum coarse group index up to which SPH is applied
         (``GRMAX`` keyword).  Required when ``sph_correction=True``.
+    max_iterations : int or None
+        Maximum number of fixed point SPH iterations to be performed.
+        ("ITER" keyword). By default, SPH: will iterate until sph factors are converged to tolerance 
+        or reaches the maximal value set in DRAGON (200).
+    tolerance : float 
+        Tolerance to test SPH factors' convergence, by default this takes the value of 1e-4.
     """
 
     step_type = "edition_between_levels"
 
     def __init__(self, name, number_of_macro_groups,
                  energy_groups_bounds, sph_correction=False,
-                 max_sph_group=None):
+                 max_sph_group=None, max_iterations = 200, tolerance = 1e-4):
         self.name = name
         self.number_of_macro_groups = number_of_macro_groups
         self.energy_groups_bounds = list(energy_groups_bounds)
         self.sph_correction = bool(sph_correction)
         self.max_sph_group = max_sph_group
+        self.max_iterations = max_iterations
+        self.tolerance = tolerance
 
         if self.sph_correction and self.max_sph_group is None:
             raise ValueError(
@@ -1584,7 +1591,9 @@ class EditionBetweenLevelsStep:
             f"EditionBetweenLevelsStep("
             f"name='{self.name}', "
             f"n_groups={self.number_of_macro_groups}, "
-            f"sph={self.sph_correction})"
+            f"sph={self.sph_correction})",
+            f"max_iterations : {self.max_iterations}",
+            f"Tolerance for convergence : {self.tolerance}"
         )
 
 
@@ -1883,6 +1892,8 @@ class DragonCalculationScheme:
                 energy_groups_bounds=d["energy_groups_bounds"],
                 sph_correction=d.get("SPH_correction", False),
                 max_sph_group=d.get("max_SPH_group", None),
+                max_iterations=d.get("max_iterations", 200),
+                tolerance=d.get("tolerance", 1e-4),
             )
 
         # --- Sectorization ---

@@ -2161,6 +2161,20 @@ class FuelPinModel:
         # subdivide the pin into radial zones for self-shielding treatment in Dragon based on the Santamarina radii definition
         self.radii = computeSantamarinaRadii(fuel_radius, gap_radius, clad_radius, gadolinium=self.isGd)
 
+    def subdivide_into_fine_Gd_radii(self):
+        # Import here to avoid circular import issues
+        from ..GeometryBuilder.helpers import computeVolumeBasedRadii
+        
+        fuel_radius = self.technological_radii[0]
+        gap_radius = self.technological_radii[1]
+        clad_radius = self.technological_radii[2]
+        # subdivide the pin into radial zones for self-shielding treatment in Dragon based on the Santamarina radii definition
+        if self.isGd:
+            fuel_volume_fractions = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0]
+        else:
+            fuel_volume_fractions = [0.5, 0.8, 0.95, 1.0]
+        self.radii = computeVolumeBasedRadii(fuel_radius, gap_radius, clad_radius, fuel_volume_fractions)
+
 
     def subdivide_into_radial_zones(self, num_radial_zones = None):
         # subdivide the pin into a given number of radial zones for self-shielding treatment in Dragon based on an automatic subdivision of the fuel region

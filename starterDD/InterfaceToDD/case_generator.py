@@ -925,7 +925,6 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(uss_line)
         )
-        print(uss_line)
         proc.add_body_line("   PASS 3")
         asm_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
         proc.add_body_line(f"    EDIT 1 {asm_keyword}")
@@ -1744,6 +1743,7 @@ class DragonCase:
             proc.add_body_line("*" * 50)
             proc.add_body_line("* SPH: equivalence correction")
             proc.add_body_line("*" * 50)
+            sph_corr.set_solution_approach(l1_asm_keyword)
             proc.add_body_block(
                 sph_corr.build_sph_call(l1_trk, l1_trkfil)
             )
@@ -2170,6 +2170,7 @@ class DragonCase:
             proc.add_body_line(
                 f"{inner_indent}* SPH: equivalence correction"
             )
+            sph_corr.set_solution_approach(l1_asm_keyword)
             proc.add_body_block(
                 _indent_block(
                     sph_corr.build_sph_call(l1_trk, l1_trkfil),

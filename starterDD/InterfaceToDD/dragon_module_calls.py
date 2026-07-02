@@ -1949,6 +1949,20 @@ class SPH_correction:
         else:
             self.lib_name = lib_name
 
+    def set_solution_approach(self, keyword):
+        """
+        Set the solution approach : 
+
+        Parameters
+        ----------
+        keyword : str
+            ARM or PIJ keyword to set solution approach :
+                ARM : iterative approach compatible with MOC and IC trackings.
+                PIJ : direct CP approach.
+        """
+
+        self.asm_keyword = keyword
+
     def build_sph_call(self, trk_ll, trkfil_ll):
         """Return the ``SPH:`` call block as a string.
 
@@ -1962,8 +1976,9 @@ class SPH_correction:
         lines = [
             f"{self.lib_name} := SPH: {self.lib_name} "
             f"{trk_ll} {trkfil_ll} ::",
-            "    EDIT 1",
-        ]
+            f"    EDIT 1 {self.asm_keyword}",
+            f"    ITER {self.step.max_iterations} {self.step.tolerance:1.1E}"
+        ]   
         if self.step.max_sph_group is not None:
             lines.append(f"    GRMAX {self.step.max_sph_group}")
         lines.append(";")
