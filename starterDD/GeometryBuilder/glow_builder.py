@@ -177,7 +177,7 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
                             
                 # Apply sectorization from calculation step if provided
                 if calculation_step is not None:
-                    sector_cfg = calculation_step.get_sectorization_for_pin(pin, isGd=pin.isGd)
+                    sector_cfg = calculation_step.get_sectorization_for_pin(isGd=pin.isGd)
                     if sector_cfg is not None:
                         print(f"Applying sectorization to cell at position ({cell_idx}, {row_idx}): sectors={sector_cfg.sectors}, angles={sector_cfg.angles}, windmill={sector_cfg.windmill}")
                         tmp_cell.sectorize(sector_cfg.sectors, sector_cfg.angles, windmill=sector_cfg.windmill)
@@ -321,7 +321,8 @@ def _build_square_water_rod_cell(water_rod_model, macro_name, calculation_step=N
 
     tmp_cell.add(inner_moderator_cell)
     tmp_cell.add(water_box_cell)
-
+    
+    tmp_cell.sectorize([4,4,4], [0,0,0], windmill=False)
     # --- 5. Optional Cartesian grid sub-meshing ---
     splits = None
     if calculation_step is not None:
@@ -358,35 +359,14 @@ def _build_square_water_rod_cell(water_rod_model, macro_name, calculation_step=N
             width=bb,
             center=center,
         )
-        #splitting_faces = make_grid_faces(bb_rect, nx, ny)
-        x_min, x_max, y_min, y_max = get_bounding_box(bb_rect)
-        print(f"bounding box x_min, x_max = {x_min}, {x_max}")
-        print(f"bounding box y_min, y_max = {y_min}, {y_max}")
-        delta_x = (x_max - x_min) / nx
-        delta_y = (y_max - y_min) / ny
-        print(f"delta_x, delta_y = {delta_x}, {delta_y}")
-        mesh_edge_x = make_edge(
-            make_vertex((x_min, y_min, 0.0)),
-            make_vertex((x_min, y_max, 0.0))
-        )
-        mesh_edge_y = make_edge(
-            make_vertex((x_min, y_min, 0.0)),
-            make_vertex((x_max, y_min, 0.0))
-        )
-        mesh_x = make_multi_translation_1d(mesh_edge_x, OX, delta_x, nx)
-        mesh_x = make_compound([mesh_x, mesh_edge_x])
-        mesh_y = make_multi_translation_1d(mesh_edge_y, OY, delta_y, ny)
-        mesh_y = make_compound([mesh_y, mesh_edge_y])
-
-        mesh = make_compound([mesh_x, mesh_y])
-        #partitioned_face = make_partition(
-        #        [tmp_cell],
-        #        splitting_faces,
-        #        shape_type=ShapeType.COMPOUND,
-        #    )
-        tmp_cell.geometry_maps[GeometryType.SECTORIZED] = wrap_shape(tmp_cell.geom_obj)
-        tmp_cell.geometry_maps[GeometryType.SECTORIZED] = tmp_cell.get_geometry_map(GeometryType.SECTORIZED) // wrap_shape(mesh) 
-        tmp_cell.show(GeometryType.TECHNOLOGICAL, PropertyType.MATERIAL)
+        splitting_faces = make_grid_faces(bb_rect, nx, ny)
+        partitioned_face = make_partition(
+                [tmp_cell],
+                splitting_faces,
+                shape_type=ShapeType.EDGE,
+            )
+        tmp_cell.geometry_maps[GeometryType.SECTORIZED] = \
+            wrap_shape(tmp_cell.get_geometry_map(GeometryType.SECTORIZED)) // wrap_shape(partitioned_face) 
     else:
         print(f"_build_square_water_rod_cell: built "
               f"'{water_rod_model.rod_ID}' with 3 base regions "
@@ -486,7 +466,7 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, windmill=False
                 tmp_cell.sectorize([1, 1, 8], [0, 0, 0], windmill=True)
             else:
                 tmp_cell.sectorize([1,1,1], [0,0,0], windmill=False)
-                #tmp_cell.geometry_maps[GeometryType.SECTORIZED] = tmp_cell.geom_obj
+
             split_coolant_corners = wr_sectors.subdivisions_coolant_corners if wr_sectors is not None else False
             if split_coolant_corners:
                 # circular water rods with sectorization : glow does not allow to sub mesh the coolant
@@ -498,7 +478,6 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, windmill=False
                 # For top right corner :
                 alpha = 360.0 / 16.0 # angle of each sector
                 adj = water_rod_model.bounding_box_side_length / 2.0
-                top_right_corner = (adj, adj, 0.0)
                 opp = adj * np.tan(np.radians(alpha))
                 base_pt_1 = (opp, adj, 0.0)
                 distance_to_split = adj - opp
@@ -546,10 +525,10 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, windmill=False
                 partitioned_face = make_partition(
                     [tmp_cell],
                     splitting_faces,
-                    shape_type=ShapeType.COMPOUND,
+                    shape_type=ShapeType.EDGE,
                 )
                 tmp_cell.geometry_maps[GeometryType.SECTORIZED] = \
-                wrap_shape(tmp_cell.get_geometry_map(GeometryType.SECTORIZED)) // wrap_shape(partitioned_face)    
+                    wrap_shape(tmp_cell.get_geometry_map(GeometryType.SECTORIZED)) // wrap_shape(partitioned_face)    
                     
 
         elif assembly_model.water_rod_type == "square":
@@ -788,14 +767,12 @@ def _remap_rounded_corner_indices(corner_indices, cross_corner):
     return result
 
 
-def _build_control_cross_elements(ctrl, assembly_model, ap, assembly_center=(None, None, None)):
+def _build_control_cross_elements(assembly_model, ap, assembly_center=(None, None, None)):
     """
     Build the elements describing the control cross
     
     Parameters
     ----------
-    ctrl : ControlCrossModel
-        The control cross model with all geometric dimensions.
     assembly_model : CartesianAssemblyModel
         The assembly model with additional geometric dimensions.
     ap : float
@@ -819,6 +796,7 @@ def _build_control_cross_elements(ctrl, assembly_model, ap, assembly_center=(Non
     if assembly_center[0] is None:
         assembly_center = (ap / 2.0, ap / 2.0, 0.0)
 
+    ctrl = assembly_model.control_cross
     corner = ctrl.center
     bt = ctrl.blade_thickness
     bhs = ctrl.blade_half_span
@@ -1491,35 +1469,27 @@ def _generate_macro_subdivision_rectangles(
     return macros
 
 
-def is_degenerate(geometry):
+def is_degenerate(geometry: GeomWrapper):
     """
-    Check if a geometry is degenerate (zero area, empty, or None).
+    Check if a geometry is degenerate (zero perimeter or area, or None).
 
     Parameters
     ----------
-    geometry : any
-        Geometry object (Rectangle, Circle, or compound geometry)
+    geometry : GeomWrapper
+        Geometry object wrapping a SALOME's GEOM_Object.
 
     Returns
     -------
     bool
-        True if geometry is None, has zero area, or is empty
+        True if geometry is None or has zero perimeter or area.
     """
     if geometry is None:
         return True
 
-    # Check for zero-area geometries
-    # Rectangles have dimensions property
-    if hasattr(geometry, 'dimensions'):
-        dims = geometry.dimensions
-        if dims[0] < 1e-10 or dims[1] < 1e-10:
-            return True
-
-    # Check for area attribute
-    if hasattr(geometry, 'area'):
-        if geometry.area < 1e-10:
-            return True
-
+    # Get perimeter and area of the geometry
+    perimeter, area, _ = get_basic_properties(geometry)
+    if perimeter <= 1e-7 or area <= 1e-7:
+        return True   
     return False
 
 
@@ -2958,7 +2928,7 @@ def discretize_box(assembly_universe, assembly_model, box_discretization_config)
     partitioned_face = make_partition(
         [assembly_universe],
         splitting_faces,
-        shape_type=ShapeType.COMPOUND,
+        shape_type=ShapeType.EDGE,
     )
     assembly_universe.geometry_maps[GeometryType.SECTORIZED] = \
     assembly_universe.get_geometry_map(GeometryType.SECTORIZED) // wrap_shape(partitioned_face)
@@ -3195,7 +3165,7 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
     # If control cross is present, build control cross shapes to assembly_universe for later use in box discretization
     if hasattr(assembly_model, "control_cross") and assembly_model.control_cross is not None:
         elements = _build_control_cross_elements(
-            ctrl=assembly_model.control_cross,
+            assembly_model=assembly_model,
             ap=ap,
             assembly_center=center
         )
@@ -3224,8 +3194,7 @@ def build_assembly_with_macros(assembly_model, calculation_step, center=None):
                 print(f"  Warning failed to create Region for control cross element : {element_name}")
 
         assembly_universe._ctrl_cross_shapes = elements
-    assembly_universe.update_hierarchical_structure(True)
-    #assembly_universe.geometry_maps[GeometryType.SECTORIZED] = assembly_universe.geom_obj       
+    assembly_universe.update_hierarchical_structure(True)   
 
     return assembly_universe
 

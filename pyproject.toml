@@ -7,7 +7,7 @@ name = "starterDD"
 version = "0.1.0"
 description = "Dragon model building and glow interoperability package"
 authors = [
-    { name = "loutre", email = "your@email.com" }
+    { name = "Raphael Guasch", email = "raphael.guasch@etud.polymtl.ca" }
 ]
 requires-python = ">=3.11"
 dependencies = [
