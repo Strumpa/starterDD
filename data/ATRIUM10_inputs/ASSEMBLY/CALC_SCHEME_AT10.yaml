@@ -40,3 +40,11 @@ DRAGON_CALCULATION_SCHEME:
           # Square water rods: Cartesian grid sub-meshing (nx, ny)
           # Material is reassigned by geometric containment against inner/outer boundaries
           splits: [3, 3]
+        vanished_rods:
+          # Vanished rods discretization options:
+          base_radius: 0.51
+          radial_splits: 4
+          # 4 sectors for inner region (0<r<base_radius) and 1 sector for outer region (r>base_radius) for a total of 5 sectors per vanished rod.
+          # The sectorization parameters will be extended in order to match the number of regions defined by the radial split parameters
+          sectors: [1, 1, 1]
+          angles:  [0, 0, 0]

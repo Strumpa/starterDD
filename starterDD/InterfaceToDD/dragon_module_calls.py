@@ -1695,8 +1695,7 @@ class TRK:
         suffix = "_MACRO" if step.export_macros else ""
         return (
             f"{self.case_name}_{step.name}"
-            f"_{step.spatial_method}"
-            f"_{step.tracking}{suffix}.dat"
+            f"_{step.spatial_method}_{step.tracking}{suffix}.dat"
         )
 
     def get_tdt_file_mapping(self):

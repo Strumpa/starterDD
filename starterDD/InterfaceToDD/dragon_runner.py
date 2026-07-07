@@ -398,7 +398,132 @@ class DragonRunner:
 
         # 2. Symlink TDT geometry files
         tdt_path = os.path.abspath(self.case.tdt_path)
-        if os.path.isdir(tdt_path):
+
+        # Check if we have tracked TDT files from procedure generation
+        if hasattr(self.case, 'tdt_files_used') and self.case.tdt_files_used:
+            # Create standardized symlinks pointing to actual full-named TDT files
+            # The x2m uses standardized names (short enough for CLE2000)
+            # but they must point to the actual full-named files in tdt_path
+            log.info(
+                f"Staging {len(self.case.tdt_files_used)} TDT file(s) "
+                f"with standardized names pointing to full names"
+            )
+            
+            # Get file mapping that was created during procedure generation
+            tdt_file_mapping = getattr(self.case, 'tdt_file_mapping', {})
+            
+            for step_name, actual_tdt_filename in self.case.tdt_files_used.items():
+                # Get the standardized filename from the mapping (computed in case_generator)
+                if step_name in tdt_file_mapping:
+                    standardized_filename = tdt_file_mapping[step_name].get('standardized')
+                else:
+                    # Fallback: try to reconstruct from step (but this may fail in tests)
+                    standardized_filename = None
+                    if (hasattr(self.case, 'scheme') and 
+                        self.case.scheme is not None and
+                        hasattr(self.case.scheme, 'get_trackable_steps')):
+                        try:
+                            for s in self.case.scheme.get_trackable_steps():
+                                if s.name == step_name:
+                                    suffix = "_MACRO" if s.export_macros else ""
+                                    standardized_filename = (
+                                        f"{self.case.case_name}_{s.name}"
+                                        f"_{s.spatial_method}_{s.tracking}{suffix}.dat"
+                                    )
+                                    break
+                        except (TypeError, AttributeError):
+                            pass
+                
+                if standardized_filename is None:
+                    log.error(
+                        f"Could not determine standardized filename for step '{step_name}'. "
+                        f"No mapping found and scheme lookup failed."
+                    )
+                    raise ValueError(
+                        f"Cannot determine standardized filename for step '{step_name}'. "
+                        f"Check that tdt_file_mapping was populated during procedure generation."
+                    )
+                
+                # Source: actual full-named file in tdt_path
+                src = os.path.join(tdt_path, actual_tdt_filename)
+                # Destination: standardized symlink in staging directory
+                dst = os.path.join(staging_dir, standardized_filename)
+                
+                # Validate source file exists before attempting to symlink
+                if not os.path.isfile(src):
+                    available_files = os.listdir(tdt_path) if os.path.isdir(tdt_path) else []
+                    log.error(
+                        f"[ERROR] TDT file not found for step '{step_name}':\n"
+                        f"  Expected: {src}\n"
+                        f"  Actual name: {actual_tdt_filename}\n"
+                        f"  TDT directory: {tdt_path}\n"
+                        f"  Available files in tdt_path: {available_files}"
+                    )
+                    raise FileNotFoundError(
+                        f"TDT file not found for step '{step_name}': {src}\n"
+                        f"Expected actual filename: {actual_tdt_filename}\n"
+                        f"Make sure the TDT file exists and tdt_path is set correctly."
+                    )
+                
+                # Create standardized symlink if destination doesn't exist
+                # Use os.path.lexists() to detect both valid and broken symlinks
+                # (os.path.exists() returns False for broken symlinks, but they
+                #  still exist as paths, causing os.symlink() to raise FileExistsError)
+                if os.path.lexists(dst):
+                    # Path exists (valid link or broken link)
+                    if os.path.islink(dst):
+                        # It's a symlink - check if it's broken or points to wrong target
+                        current_target = os.readlink(dst)
+                        if current_target == src:
+                            # Already points to correct source, skip
+                            log.debug(
+                                f"[OK] Staging symlink already correct for step '{step_name}': {dst}"
+                            )
+                        else:
+                            # Broken or points to wrong file - replace it
+                            os.remove(dst)
+                            os.symlink(src, dst)
+                            log.info(
+                                f"[REPLACED] TDT staging symlink for step '{step_name}':\n"
+                                f"  Standardized name: {standardized_filename}\n"
+                                f"  Points to actual: {actual_tdt_filename}\n"
+                                f"  Link: {dst} -> {src}"
+                            )
+                    else:
+                        # It's a regular file - this is an error, don't overwrite
+                        log.error(
+                            f"[ERROR] Staging path exists as a regular file for step '{step_name}': {dst}"
+                        )
+                        raise FileExistsError(
+                            f"Staging path is a regular file (not a symlink) for step '{step_name}': {dst}"
+                        )
+                else:
+                    # Path doesn't exist - create new symlink
+                    os.symlink(src, dst)
+                    log.info(
+                        f"[OK] Staged TDT for step '{step_name}':\n"
+                        f"  Standardized name: {standardized_filename}\n"
+                        f"  Points to actual: {actual_tdt_filename}\n"
+                        f"  Link: {dst} -> {src}"
+                    )
+                
+                # Validate that staging symlink resolves correctly
+                if os.path.islink(dst) and not os.path.exists(dst):
+                    log.error(
+                        f"[ERROR] TDT staging symlink is broken for step '{step_name}': {dst}"
+                    )
+                    raise FileNotFoundError(
+                        f"TDT staging symlink broken for step '{step_name}': {dst} -> {src}"
+                    )
+
+        elif os.path.isdir(tdt_path):
+            # Fallback: symlink all .dat files (legacy behavior)
+            log.warning(
+                "No tracked TDT files available. "
+                "Symlinking all .dat files (legacy behavior). "
+                "This may symlink unintended files if multiple TDT "
+                "generations have occurred."
+            )
             for fname in os.listdir(tdt_path):
                 if fname.endswith(".dat"):
                     src = os.path.join(tdt_path, fname)
@@ -406,7 +531,7 @@ class DragonRunner:
                     if not os.path.exists(dst):
                         os.symlink(src, dst)
         elif os.path.isfile(tdt_path):
-            # Single file
+            # Single file case (unchanged)
             dst = os.path.join(
                 staging_dir, os.path.basename(tdt_path)
             )
@@ -579,7 +704,13 @@ class DragonRunner:
     def _build_scheme_manifest(self):
         """Build a dict summarising the calculation scheme for
         the manifest."""
-        scheme = self._scheme
+        # Use _scheme if already loaded, otherwise fall back to case.scheme
+        scheme = self._scheme or getattr(self.case, 'scheme', None)
+        if scheme is None:
+            raise ValueError(
+                "Calculation scheme not available. "
+                "Either call runner.run() or case.generate_cle2000_procedures() first."
+            )
         steps_info = []
         for s in scheme.steps:
             if isinstance(s, EditionBetweenLevelsStep):
@@ -610,6 +741,17 @@ class DragonRunner:
             branches_info[b.type] = b.values
 
         outputs_info = [o.name for o in scheme.outputs]
+        
+        # Build TDT file mapping information (Phase 3: Diagnostics)
+        tdt_info = []
+        if hasattr(self.case, 'tdt_file_mapping'):
+            for step_name, mapping in self.case.tdt_file_mapping.items():
+                tdt_info.append({
+                    'step_name': step_name,
+                    'actual_filename': mapping.get('actual'),
+                    'standardized_filename': mapping.get('standardized'),
+                    'names_match': mapping.get('match'),
+                })
 
         return {
             "name": scheme.name,
@@ -618,6 +760,7 @@ class DragonRunner:
             "branches": branches_info,
             "total_statepoints": scheme.get_total_statepoints(),
             "outputs": outputs_info,
+            "tdt_files": tdt_info,
         }
 
     def _update_manifest_with_results(

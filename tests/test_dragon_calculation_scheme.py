@@ -206,12 +206,12 @@ class TestSectorConfig:
     def test_expanded_with_int_3(self):
         """N=3 → 2 extra rings; sectors[0]/angles[0] prepended twice."""
         sc = SectorConfig(
-            sectors=[8, 4, 12], angles=[10.0, 20.0, 30.0],
+            sectors=[8, 4, 16], angles=[0, 45.0, 0],
             additional_radial_splits_in_moderator=3,
         )
         s, a = sc.expanded_sectors_and_angles(1.0)
-        assert s == [8, 8, 8, 4, 12]
-        assert a == [10.0, 10.0, 10.0, 20.0, 30.0]
+        assert s == [8, 8, 8, 4, 16]
+        assert a == [0, 0, 0, 45.0, 0]
 
     def test_expanded_with_user_defined_list(self):
         """Explicit 2-radii list → 2 extra entries prepended."""
@@ -1158,8 +1158,8 @@ class TestFromYAML:
                             "enabled": True,
                             "windmill": True,
                             "fuel_pins": {
-                                "sectors": [1, 1, 1, 12],
-                                "angles": [0, 0, 0, 15.0],
+                                "sectors": [1, 1, 1, 8],
+                                "angles": [0, 0, 0, 22.5],
                             },
                         },
                         "box_discretization": {
@@ -1189,7 +1189,8 @@ class TestFromYAML:
             assert moc_step.radial_params == {"num_radial_zones": 3}
             assert moc_step.sectorization_enabled is True
             assert moc_step.fuel_sectors.windmill is True
-            assert moc_step.fuel_sectors.sectors == [1, 1, 1, 12]
+            assert moc_step.fuel_sectors.sectors == [1, 1, 1, 8]
+            assert moc_step.fuel_sectors.angles == [0, 0, 0, 22.5]
             assert moc_step.export_macros is True
             assert moc_step.box_discretization is not None
             assert moc_step.box_discretization.enabled is True
@@ -1219,8 +1220,8 @@ class TestFromYAML:
                             "enabled": True,
                             "windmill": True,
                             "fuel_pins": {
-                                "sectors": [1, 1, 1, 12],
-                                "angles": [0, 0, 0, 15.0],
+                                "sectors": [1, 1, 1, 8],
+                                "angles": [0, 0, 0, 22.5],
                             },
                         },
                         "box_discretization": {

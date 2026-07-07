@@ -751,10 +751,142 @@ class TestInputStaging:
             os.path.join(staging_dir, "endfb8r1_295")
         )
 
+    def test_custom_tdt_file_id_tracked_and_symlinked(
+        self, tmp_path, monkeypatch
+    ):
+        """TDT files tracked in tdt_files_used are symlinked (not all .dat files).
 
-# =========================================================
-# Dry run mode
-# =========================================================
+        Verifies that:
+        1. The dragon_runner only symlinks TDT files that are tracked during
+           procedure generation (not all .dat files in the directory)
+        2. When TDT files have detailed names with sectorization details, symlinks
+           are created to standardized names
+        3. The x2m will reference the standardized names (which resolve via symlink)
+
+        This is important for supporting custom tdt_file_id naming and preventing
+        unwanted symlinks to old or unused TDT files.
+        """
+        draglib = tmp_path / "draglibendfb8r1SHEM295"
+        draglib.write_text("fake draglib content")
+
+        output_dir = tmp_path / "output"
+
+        # Use existing GE14 test case with standard naming
+        case = DragonCase(
+            case_name="GE14_DOM",
+            call_glow=False,
+            draglib_name_to_alias={
+                "draglibendfb8r1SHEM295": "endfb8r1_295",
+            },
+            config_yamls={
+                "MATS": GE14_COMPOSITIONS_YAML,
+                "GEOM": GE14_DOM_GEOMETRY_YAML,
+                "CALC_SCHEME": GE14_CALC_SCHEME_1L_YAML,
+            },
+            output_path=str(output_dir),
+            tdt_path=GE14_TDT_DIR,
+            tdt_base_name="GE14_DOM",
+        )
+
+        # Generate procedures (this populates tdt_files_used with standardized names)
+        procs = case.generate_cle2000_procedures()
+
+        # Verify that tdt_files_used was populated
+        assert len(case.tdt_files_used) > 0, (
+            "tdt_files_used should be populated after procedure generation"
+        )
+
+        # Verify we have both SSH and FLUX steps tracked
+        tracked_steps = set(case.tdt_files_used.keys())
+        assert "SSH" in tracked_steps, "SSH step should be tracked"
+        assert "FLUX" in tracked_steps, "FLUX step should be tracked"
+
+        # Verify that the tracked files use standardized naming
+        ssh_file = case.tdt_files_used["SSH"]
+        flux_file = case.tdt_files_used["FLUX"]
+
+        assert "SSH" in ssh_file, f"SSH filename should contain 'SSH': {ssh_file}"
+        assert "IC_TISO" in ssh_file, f"SSH should have IC_TISO in name: {ssh_file}"
+        assert "FLUX" in flux_file, f"FLUX filename should contain 'FLUX': {flux_file}"
+        assert "MOC_TSPC" in flux_file, f"FLUX should have MOC_TSPC in name: {flux_file}"
+
+        # Verify that symlinks exist in the TDT directory for standardized names
+        # (case_generator creates these symlinks when detailed filenames exist)
+        for step_name, tracked_filename in case.tdt_files_used.items():
+            tracked_path = os.path.join(GE14_TDT_DIR, tracked_filename)
+            assert os.path.exists(tracked_path), (
+                f"Tracked file for step '{step_name}' should exist "
+                f"(either directly or as a symlink): {tracked_path}"
+            )
+
+        # Setup runner and stage inputs
+        runner = DragonRunner(
+            dragon_case=case,
+            draglib_paths={
+                "draglibendfb8r1SHEM295": str(draglib),
+            },
+            results_root=str(tmp_path / "results"),
+        )
+        runner._scheme = case.scheme
+        runner._procedure_files = procs
+        runner.draglib_paths = runner._resolve_draglib_paths({
+            "draglibendfb8r1SHEM295": str(draglib),
+        })
+
+        run_dir = runner._build_run_directory("2026-03-12T14-32-07")
+        staging_dir = str(tmp_path / "staging")
+        os.makedirs(staging_dir)
+
+        # Stage inputs
+        runner._stage_inputs(run_dir, staging_dir)
+
+        # Verify that ONLY tracked TDT files are symlinked (using standardized names)
+        staged_dat_files = set(
+            f for f in os.listdir(staging_dir) if f.endswith(".dat")
+        )
+
+        # Get the standardized filenames from the mapping
+        # (symlinks are created with standardized names, pointing to actual files)
+        expected_staged_names = set()
+        for step_name, mapping in case.tdt_file_mapping.items():
+            standardized = mapping.get('standardized')
+            if standardized:
+                expected_staged_names.add(standardized)
+
+        # Verify all expected standardized symlinks exist
+        for standardized_filename in expected_staged_names:
+            assert standardized_filename in staged_dat_files, (
+                f"Expected standardized TDT symlink '{standardized_filename}' not found in staging. "
+                f"Staged files: {staged_dat_files}"
+            )
+            
+            # Verify it's actually a symlink
+            symlink_path = os.path.join(staging_dir, standardized_filename)
+            assert os.path.islink(symlink_path), (
+                f"TDT file '{standardized_filename}' should be a symlink"
+            )
+            
+            # Verify symlink resolves correctly
+            target = os.readlink(symlink_path)
+            assert os.path.exists(target), (
+                f"Symlink '{standardized_filename}' does not resolve. Target: {target}"
+            )
+            
+            # Verify the symlink points to the correct actual file
+            # Find which step this symlink corresponds to
+            actual_filename = None
+            for step_name, mapping in case.tdt_file_mapping.items():
+                if mapping.get('standardized') == standardized_filename:
+                    actual_filename = mapping.get('actual')
+                    break
+            
+            if actual_filename:
+                expected_source = os.path.join(case.tdt_path, actual_filename)
+                assert target == expected_source, (
+                    f"Symlink '{standardized_filename}' should point to actual file. "
+                    f"Expected: {expected_source}, Got: {target}"
+                )
+
 
 class TestDryRun:
     """Tests for dry_run=True mode."""

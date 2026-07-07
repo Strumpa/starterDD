@@ -1,6 +1,6 @@
 """DragonModel module - provides Dragon model building classes."""
 
-from .DragonModel import CartesianAssemblyModel, FuelPinModel, CircularWaterRodModel
+from .DragonModel import CartesianAssemblyModel, FuelPinModel, CircularWaterRodModel, SquareWaterRodModel, VanishedRodModel
 from .DragonCalculationScheme import (
     DragonCalculationScheme,
     CalculationStep,
@@ -24,4 +24,6 @@ __all__ = [
     "CrossModeratorDiscretizationConfig",
     "ControlCrossSubmeshConfig",
     "ControlCrossModel",
+    "SquareWaterRodModel",
+    "VanishedRodModel",
 ]
