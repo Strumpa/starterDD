@@ -5,12 +5,12 @@ from shapely.geometry import box, Point, MultiLineString
 from shapely.ops import unary_union
 import math
 
-def build_global_geometry(data):
+def build_assembly_geometry(dragon_assembly_model):
     """
-    Build the full 2D reactor geometry for a single axial slice.
+    Build the full 2D assembly geometry for a single axial slice.
 
     Parameters:
-    - data: Dictionary containing the geometry information for the assembly (from YAML)
+    - dragon_assembly_model: CartesianAssemblyModel from DragonModel
 
     Returns: (inner_box, solide_total, multi_lignes_chauffantes)
     - inner_box: Polygon of the internal region (excluding the walls)
@@ -21,34 +21,52 @@ def build_global_geometry(data):
     Used during AnalyseurGeometrique initialization for each axial slice.
     """
 
-    pin_geo = data['PIN_GEOMETRY']
-    ass_geo = data['ASSEMBLY_GEOMETRY']
-    wr_geo = data['WATER_ROD_GEOMETRY']
-    lattice = ass_geo['lattice_description']
-    exclusions = set(ass_geo['non_fuel_rod_ids'])
+    data_ref = {}
+    data_ref["ASSEMBLY_GEOMETRY"] = {}
+    data_ref["PIN_GEOMETRY"] = {}
+    data_ref["WATER_ROD_GEOMETRY"] = {}
+    data_ref["WATER_ROD_GEOMETRY"]["centers"] = []
+
+    data_ref["ASSEMBLY_GEOMETRY"]["assembly_pitch"] = dragon_assembly_model.assembly_pitch
+
+    pin_geo = dragon_assembly_model.pin_geometry_dict
+    lattice = dragon_assembly_model.lattice_description
+    exclusions = set(dragon_assembly_model.non_fuel_rod_ids)
 
     d = pin_geo['pin_pitch']
+    data_ref["PIN_GEOMETRY"]["pin_pitch"] = d
     r_clad = pin_geo['clad_radius']
-    r_wr = wr_geo['outer_radius']
+    data_ref["PIN_GEOMETRY"]["clad_radius"] = r_clad
+
+    if dragon_assembly_model.water_rod_type == "circular":
+        r_wr = dragon_assembly_model.water_rod_outer_radius
+        data_ref["WATER_ROD_GEOMETRY"]["outer_radius"] = r_wr
+    else:
+        raise ValueError(f"GeometryAnalysis / geometry_analysis : Analyzer does not support water rods with type {dragon_assembly_model.water_rod_type}")
     
-    L_ext = ass_geo['assembly_pitch']
-    W_start = ass_geo['gap_wide'] + ass_geo['channel_box_thickness']
+    L_ext = dragon_assembly_model.assembly_pitch
+    data_ref['ASSEMBLY_GEOMETRY']["gap_wide"] = dragon_assembly_model.gap_wide
+    data_ref['ASSEMBLY_GEOMETRY']["channel_box_thickness"] = dragon_assembly_model.channel_box_thickness
+    data_ref['ASSEMBLY_GEOMETRY']["corner_inner_radius_of_curvature"] = dragon_assembly_model.corner_inner_radius_of_curvature
+    W_start = dragon_assembly_model.gap_wide + dragon_assembly_model.channel_box_thickness
     L_int = L_ext - 2 * W_start
-    R_c = ass_geo['corner_inner_radius_of_curvature']
+    R_c = dragon_assembly_model.corner_inner_radius_of_curvature
 
     l_gap_int = (L_int - ((len(lattice[0]) - 1) * d) - 2 * r_clad) / 2.0
 
     # Le Boitier Interne
     W_end = L_ext - W_start
-    inner_box = box(W_start + R_c, W_start + R_c, W_end - R_c, W_end - R_c).buffer(R_c, resolution=64)
+    inner_box = box(W_start + R_c, W_start + R_c, W_end - R_c, W_end - R_c).buffer(R_c, quad_segs=64)
 
     formes_solides = []
     lignes_chauffantes = []
     lignes_water = []
 
     # 2. Water Rods
-    for center in wr_geo['centers']:
-        wr_circle = Point(center[0], center[1]).buffer(r_wr, resolution=64)
+    for water_rod in dragon_assembly_model.water_rods:
+        center = water_rod.center
+        data_ref["WATER_ROD_GEOMETRY"]["centers"].append(center)
+        wr_circle = Point(center[0], center[1]).buffer(r_wr, quad_segs=64)
         formes_solides.append(wr_circle)
         lignes_water.append(wr_circle.exterior)
     
@@ -59,7 +77,7 @@ def build_global_geometry(data):
                 cx = W_start + l_gap_int + r_clad + col_idx * d
                 cy = W_start + l_gap_int + r_clad + row_idx * d
                 
-                rod_circle = Point(cx, cy).buffer(r_clad, resolution=64)
+                rod_circle = Point(cx, cy).buffer(r_clad, quad_segs=64)
                 formes_solides.append(rod_circle)
                 lignes_chauffantes.append(rod_circle.exterior)
 
@@ -68,7 +86,7 @@ def build_global_geometry(data):
     multi_lignes_chauffantes = MultiLineString(lignes_chauffantes)
     multi_lignes_water = MultiLineString(lignes_water)
 
-    return inner_box, solide_total, multi_lignes_chauffantes, multi_lignes_water
+    return inner_box, solide_total, multi_lignes_chauffantes, multi_lignes_water, data_ref
 
 def analyse_mesh(x1, y1, x2, y2, inner_box, solide_total, lignes_chauffantes, lignes_water):
     """
@@ -108,140 +126,137 @@ def analyse_mesh(x1, y1, x2, y2, inner_box, solide_total, lignes_chauffantes, li
     
     return s_tot_valide, s_m, p_m, p_h, p_box_in_cv, p_wr
 
-def analyse_3d_volume(tranches_axiales, x1, y1, x2, y2, z1, z2):
-    """
-    Calculate porosity, fluid area, hydraulic diameter, heating perimeter, inner box perimeter, and water rod perimeter for a 3D volume 
-    defined by (x1, y1, z1) to (x2, y2, z2) across multiple axial slices.
-    
-    Parameters:
-    - tranches_axiales: List of axial slices, 
-    each with its own geometry (inner_box, solide, lignes_chauffantes, lignes_water) and z_start/z_end
-    - (x1, y1): Bottom-left corner of the vertical prism
-    - (x2, y2): Top-right corner of the vertical prism
-    - z1: Starting axial coordinate of the prism
-    - z2: Ending axial coordinate of the prism      
-    
-    Returns:
-    - poro_3d: Porosity of the volume (fluid volume / total volume)
-    - a_cool: Total area of fluid in the volume (sum of fluid area across slices * slice thickness)
-    - dh_3d: Hydraulic diameter of the fluid region (4 * fluid volume / wetted perimeter)
-    - ph_moyen: Average heating perimeter in contact with the fluid across the axial height
-    - pbox_moyen: Average inner box perimeter in contact with the fluid across the axial height
-    - pwr_moyen: Average water rod perimeter in contact with the fluid across the axial height
-    """
-    v_total = 0.0
-    v_fluide = 0.0
-    s_mouillee = 0.0
-    s_chauffante = 0.0
-    s_box = 0.0
-    s_wr = 0.0
-    
-    hauteur_totale = z2 - z1
-    if hauteur_totale <= 0:
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-
-    for tranche in tranches_axiales:
-        z_min_overlap = max(z1, tranche['z_start'])
-        z_max_overlap = min(z2, tranche['z_end'])
-        dz = z_max_overlap - z_min_overlap
-        
-        if dz > 0:
-            s_tot, s_m, p_m, p_h, p_box, p_wr = analyse_mesh(
-                x1, y1, x2, y2, 
-                tranche['inner_box'], tranche['solide'], tranche['lignes_chauffantes'], tranche['lignes_water']
-            )
-            v_total += s_tot * dz
-            v_fluide += s_m * dz
-            s_mouillee += p_m * dz
-            s_chauffante += p_h * dz
-            s_box += p_box * dz
-            s_wr += p_wr * dz
-
-    if v_total <= 1e-9:
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-
-    poro_3d = v_fluide / v_total
-    a_cool = v_fluide / (z2-z1)
-    dh_3d = (4 * v_fluide) / s_mouillee if s_mouillee > 0 else 0.0
-    ph_moyen = s_chauffante / hauteur_totale
-    pbox_moyen = s_box / hauteur_totale
-    pwr_moyen = s_wr / hauteur_totale
-    
-    return round(poro_3d, 5), round(a_cool, 5), round(dh_3d, 5), round(ph_moyen, 5), round(pbox_moyen, 5), round(pwr_moyen, 5)
-
-
 class GeometricAnalyser:
     """
     Class responsible for analyzing the geometry of a nuclear reactor assembly 
     based on YAML input files. 
     It provides methods to compute porosity, hydraulic diameter, 
     and heating perimeter for specified volumes or profiles within the assembly.
+    Parameters:
+        - core_model: DonjonModel CoreModel defining the case.
+        - core_i: Row index of the assembly in the core layout (1 is bottom row)
+        - core_j: Column index of the assembly in the core layout (1 is leftmost column)
     """
-    def __init__(self, core_yaml_path, core_i=1, core_j=1):
+    def __init__(self, core_model, core_i=1, core_j=1):
         """
         Initialize the geometric analyzer by reading the core YAML file,
         extracting the relevant axial slices for the specified assembly position.
         
         Parameters:
-        - core_yaml_path: Path to the CORE YAML file containing the overall geometry
+        - core_model: DonjonModel CoreModel defining the case.
         - core_i: Row index of the assembly in the core layout (1 is bottom row)
         - core_j: Column index of the assembly in the core layout (1 is leftmost column)
         """
-        self.tranches = []
+        self.slices_data = []
         self.data_ref = None
         
-        # 1. On lit le fichier CORE maître
-        with open(core_yaml_path, 'r', encoding='utf-8') as f:
-            core_data = yaml.safe_load(f)
+        ## 1. On lit le fichier CORE maître
+        #with open(core_yaml_path, 'r', encoding='utf-8') as f:
+        #    core_data = yaml.safe_load(f)
+        # Create a CoreModel based on the 
             
         # 2. On lit la carte du cœur et on vérifie les indices
-        carte_coeur = core_data['CORE_GEOMETRY']['core_2D_layout']
-        max_i = len(carte_coeur)
-        max_j = len(carte_coeur[0])
+        core_map_2D = core_model.core_2D_layout
+        max_i = len(core_map_2D)
+        max_j = len(core_map_2D[0])
         
         if not (1 <= core_i <= max_i and 1 <= core_j <= max_j):
-            raise ValueError(f"Erreur : Assemblage ({core_i},{core_j}) hors limites. Le cœur fait {max_i}x{max_j}.")
+            raise ValueError(f"Error : Assembly ({core_i},{core_j}) out of bounds. Dimensions are {max_i}x{max_j}.")
             
-        nom_assemblage = carte_coeur[core_i - 1][core_j - 1]
-        print(f"Info : Chargement de l'assemblage '{nom_assemblage}' à la position cœur ({core_i},{core_j})")
+        assembly_id = core_map_2D[core_i - 1][core_j - 1]
+        print(f"Info : Load assembly '{assembly_id}' at position ({core_i},{core_j})")
         
         # 3. On récupère l'empilement axial pour cet assemblage précis
-        layouts = core_data['CORE_GEOMETRY']['assembly_axial_layouts']
-        regions_axiales = layouts[nom_assemblage]
+        layouts = core_model.assembly_axial_layouts
+        # retrieve assembly information from core model : 
+        fuel_assembly_bundle = core_model.assemblies[(core_i-1, core_j-1, assembly_id)]
+        axial_regions = fuel_assembly_bundle.slices_2D
+        z_bounds = fuel_assembly_bundle.z_bounds
         
-        dossier_core = os.path.dirname(os.path.abspath(core_yaml_path))
-        
-        # 4. On boucle sur les tranches (DOM, VAN, etc.)
-        for region in regions_axiales:
-            z_s, z_e = region['axial_bounds']
-            chemin_relatif = region['assembly_geometry_file']
-            
-            # Reconstitution du chemin absolu
-            chemin_absolu = os.path.abspath(os.path.join(dossier_core, chemin_relatif))
-            
-            with open(chemin_absolu, 'r', encoding='utf-8') as f:
-                data_assemblage = yaml.safe_load(f)
-                
-                if self.data_ref is None: 
-                    self.data_ref = data_assemblage
+        # 4. Iterate over 2D slices in the selected fuel bundle (DOM, VAN, etc.)
+        for region_idx in range(len(axial_regions)):
+            z_s, z_e = z_bounds[region_idx], z_bounds[region_idx+1]
+            slice_id = axial_regions[region_idx]           
                     
-                box_geom, solide, lignes_chauffantes, lignes_water = build_global_geometry(data_assemblage)
-                cylinders_de_cette_tranche = self._get_cylinders(data_assemblage)
-                
-                # On utilise les z_s et z_e lus dans le CORE (ignore AXIAL_GEOMETRY de l'assemblage)
-                self.tranches.append({
-                    'z_start': float(z_s),
-                    'z_end': float(z_e),
-                    'inner_box': box_geom,
-                    'solide': solide,
-                    'lignes_chauffantes': lignes_chauffantes,
-                    'lignes_water': lignes_water,
-                    'cylinders': cylinders_de_cette_tranche
-                })
-        
+            dragon_assembly_model = core_model.assembly_models[((core_i-1, core_j-1, assembly_id), slice_id)]
+            box_geom, solide, lignes_chauffantes, lignes_water, self.data_ref = build_assembly_geometry(dragon_assembly_model)
+            cylinders_de_cette_tranche = self._get_cylinders(dragon_assembly_model)
+
+            # Store slice information
+            self.slices_data.append({
+                'z_start': float(z_s),
+                'z_end': float(z_e),
+                'inner_box': box_geom,
+                'solide': solide,
+                'lignes_chauffantes': lignes_chauffantes,
+                'lignes_water': lignes_water,
+                'cylinders': cylinders_de_cette_tranche
+            })
         # Initialisation du cache
         self._dernier_args = None
         self._dernier_resultats = None
+
+    def analyse_3d_volume(self, x1, y1, x2, y2, z1, z2):
+        """
+        Calculate porosity, fluid area, hydraulic diameter, heating perimeter, inner box perimeter, and water rod perimeter for a 3D volume 
+        defined by (x1, y1, z1) to (x2, y2, z2) across multiple axial slices.
+        
+        Parameters:
+        - tranches_axiales: List of axial slices, 
+        each with its own geometry (inner_box, solide, lignes_chauffantes, lignes_water) and z_start/z_end
+        - (x1, y1): Bottom-left corner of the vertical prism
+        - (x2, y2): Top-right corner of the vertical prism
+        - z1: Starting axial coordinate of the prism
+        - z2: Ending axial coordinate of the prism      
+        
+        Returns:
+        - poro_3d: Porosity of the volume (fluid volume / total volume)
+        - a_cool: Total area of fluid in the volume (sum of fluid area across slices * slice thickness)
+        - dh_3d: Hydraulic diameter of the fluid region (4 * fluid volume / wetted perimeter)
+        - ph_moyen: Average heating perimeter in contact with the fluid across the axial height
+        - pbox_moyen: Average inner box perimeter in contact with the fluid across the axial height
+        - pwr_moyen: Average water rod perimeter in contact with the fluid across the axial height
+        """
+        v_total = 0.0
+        v_fluide = 0.0
+        s_mouillee = 0.0
+        s_chauffante = 0.0
+        s_box = 0.0
+        s_wr = 0.0
+        
+        hauteur_totale = z2 - z1
+        if hauteur_totale <= 0:
+            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+
+        for tranche in self.slices_data:
+            z_min_overlap = max(z1, tranche['z_start'])
+            z_max_overlap = min(z2, tranche['z_end'])
+            dz = z_max_overlap - z_min_overlap
+            
+            if dz > 0:
+                s_tot, s_m, p_m, p_h, p_box, p_wr = analyse_mesh(
+                    x1, y1, x2, y2, 
+                    tranche['inner_box'], tranche['solide'], tranche['lignes_chauffantes'], tranche['lignes_water']
+                )
+                v_total += s_tot * dz
+                v_fluide += s_m * dz
+                s_mouillee += p_m * dz
+                s_chauffante += p_h * dz
+                s_box += p_box * dz
+                s_wr += p_wr * dz
+
+        if v_total <= 1e-9:
+            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+
+        poro_3d = v_fluide / v_total
+        a_cool = v_fluide / (z2-z1)
+        dh_3d = (4 * v_fluide) / s_mouillee if s_mouillee > 0 else 0.0
+        ph_moyen = s_chauffante / hauteur_totale
+        pbox_moyen = s_box / hauteur_totale
+        pwr_moyen = s_wr / hauteur_totale
+        
+        return round(poro_3d, 5), round(a_cool, 5), round(dh_3d, 5), round(ph_moyen, 5), round(pbox_moyen, 5), round(pwr_moyen, 5)
+
 
     def _obtenir_bornes_canal(self, i, j):
         """
@@ -323,28 +338,30 @@ class GeometricAnalyser:
         if self._dernier_args == args_actuels:
             return self._dernier_resultats
             
-        p, a_cool, dh, ph, pbox, pwr = analyse_3d_volume(self.tranches, x1, y1, x2, y2, z1, z2)
+        p, a_cool, dh, ph, pbox, pwr = self.analyse_3d_volume(x1, y1, x2, y2, z1, z2)
         self._dernier_args = args_actuels
         self._dernier_resultats = (p, a_cool, dh, ph, pbox, pwr)
         return p, a_cool, dh, ph, pbox, pwr
     
-    def _get_cylinders(self, data):
+    def _get_cylinders(self, dragon_assembly_model):
         """
-        Extrait la liste des cylindres (x, y, R) pour UNE tranche axiale spécifique.
+        Extract a list of cylinders defined by (x, y, R) for ONE axial slice.
         """
         cylinders = []
-        pin_geo = data['PIN_GEOMETRY']
-        ass_geo = data['ASSEMBLY_GEOMETRY']
-        wr_geo = data['WATER_ROD_GEOMETRY']
-        lattice = ass_geo['lattice_description']
-        exclusions = set(ass_geo['non_fuel_rod_ids'])
+        pin_geo = dragon_assembly_model.pin_geometry_dict
+        lattice = dragon_assembly_model.lattice_description
+        exclusions = dragon_assembly_model.non_fuel_rod_ids
 
         d = pin_geo['pin_pitch']
         r_clad = pin_geo['clad_radius']
-        r_wr = wr_geo['outer_radius']
-        
-        W_start = ass_geo['gap_wide'] + ass_geo['channel_box_thickness']
-        L_ext = ass_geo['assembly_pitch']
+
+        if dragon_assembly_model.water_rod_type == "circular":
+            r_wr = dragon_assembly_model.water_rod_outer_radius
+        else:
+            raise ValueError(f"GeometryAnalysis / geometry_analysis : Analyzer does not support water rods with type {dragon_assembly_model.water_rod_type}")
+            
+        W_start = dragon_assembly_model.gap_wide + dragon_assembly_model.channel_box_thickness
+        L_ext = dragon_assembly_model.assembly_pitch
         L_int = L_ext - 2 * W_start
         l_gap_int = (L_int - ((len(lattice[0]) - 1) * d) - 2 * r_clad) / 2.0
 
@@ -357,7 +374,8 @@ class GeometricAnalyser:
                     cylinders.append((cx, cy, r_clad))
 
         # 2. Tubes d'eau (Water rods)
-        for center in wr_geo['centers']:
+        for wr in dragon_assembly_model.water_rods:
+            center = wr.center
             cylinders.append((center[0], center[1], r_wr))
 
         return cylinders
@@ -446,8 +464,8 @@ class GeometricAnalyser:
         - z_min: Global minimum axial coordinate
         - z_max: Global maximum axial coordinate
         """
-        z_min = min(t['z_start'] for t in self.tranches)
-        z_max = max(t['z_end'] for t in self.tranches)
+        z_min = min(t['z_start'] for t in self.slices_data)
+        z_max = max(t['z_end'] for t in self.slices_data)
         return z_min, z_max
     
     def get_x_global_bounds(self):
@@ -949,7 +967,7 @@ class GeometricAnalyser:
             return 0.0 
 
         # 3. Boucle d'intégration axiale
-        for tranche in self.tranches:
+        for tranche in self.slices_data:
             z_min_overlap = max(z1, tranche['z_start'])
             z_max_overlap = min(z2, tranche['z_end'])
             dz = z_max_overlap - z_min_overlap
@@ -1018,7 +1036,7 @@ class GeometricAnalyser:
             return 0.0
 
         # 3. Boucle d'intégration axiale
-        for tranche in self.tranches:
+        for tranche in self.slices_data:
             z_min_overlap = max(z1, tranche['z_start'])
             z_max_overlap = min(z2, tranche['z_end'])
             dz = z_max_overlap - z_min_overlap
@@ -1300,7 +1318,7 @@ class GeometricAnalyser:
         if w_tot_valide <= 1e-9:
             return 0.0
 
-        for tranche in self.tranches:
+        for tranche in self.slices_data:
             z_min_overlap = max(z1, tranche['z_start'])
             z_max_overlap = min(z2, tranche['z_end'])
             dz = z_max_overlap - z_min_overlap
@@ -1355,7 +1373,7 @@ class GeometricAnalyser:
         w_tot_valide = max_x - min_x
         if w_tot_valide <= 1e-9: return 0.0
 
-        for tranche in self.tranches:
+        for tranche in self.slices_data:
             z_min_overlap = max(z1, tranche['z_start'])
             z_max_overlap = min(z2, tranche['z_end'])
             dz = z_max_overlap - z_min_overlap

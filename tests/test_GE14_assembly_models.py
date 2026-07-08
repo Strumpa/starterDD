@@ -179,12 +179,13 @@ class TestVanishedRodAssemblyModelCreation:
 
     def test_lattice_pin_assignments(self, ge14_van_assembly_base):
         """Verify specific pins have correct rod IDs and materials."""
-        assert ge14_van_assembly_base.lattice[0][0].rod_ID == "ROD2"
-        assert ge14_van_assembly_base.lattice[0][0].fuel_material_name == "UOX28"
-        assert ge14_van_assembly_base.lattice[1][2].fuel_material_name == "UOX44Gd6"
+        assert ge14_van_assembly_base.lattice[0][0].rod_ID == "ROD1"
+        assert ge14_van_assembly_base.lattice[0][0].fuel_material_name == "UOX16"
+        assert ge14_van_assembly_base.lattice[1][2].fuel_material_name == "UOX32"
         # Verify that the vanished rod location has a VanishedRodModel (placeholder for vanished rod)
         assert isinstance(ge14_van_assembly_base.lattice[1][1], VanishedRodModel), "Expected a VanishedRodModel at the vanished rod location (1,1)" 
-        assert isinstance(ge14_van_assembly_base.lattice[5][4], VanishedRodModel), "Expected a VanishedRodModel at the vanished rod location (5,4)" 
+        assert isinstance(ge14_van_assembly_base.lattice[3][1], VanishedRodModel), "Expected a VanishedRodModel at the vanished rod location (3,1)" 
+        assert isinstance(ge14_van_assembly_base.lattice[6][8], VanishedRodModel), "Expected a VanishedRodModel at the vanished rod location (6,8)" 
         assert ge14_van_assembly_base.number_of_vanished_rods == 14, "Expected 14 vanished rods"
 
 
