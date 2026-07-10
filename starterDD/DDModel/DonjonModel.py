@@ -151,8 +151,8 @@ class CoreModel:
                     D5_assembly_model.set_rod_ID_to_material_mapping(rod_id_to_material)
                 else:
                     D5_assembly_model = CartesianAssemblyModel(name=slice_2D, tdt_file=None, geometry_description_yaml=f"{self.path_to_configs}/{geometry_file}")
+                    print(f"CoreModel: Created CartesianAssemblyModel for slice '{slice_2D}' of assembly '{assembly_id}' with geometry description from file '{geometry_file}' without material composition information.")
                 D5_assembly_model.analyze_lattice_description(build_pins=True)
-                print(f"CoreModel: Created CartesianAssemblyModel for slice '{slice_2D}' of assembly '{assembly_id}' with geometry description from file '{geometry_file}' without material composition information.")
                 self.assembly_models[(assembly_id, slice_2D)] = D5_assembly_model
                 print(f"CoreModel: after AssemblyModel geometry analysis for slice '{slice_2D}' of assembly '{assembly_id}', the model has {D5_assembly_model.count_number_of_pins()} pins.")
 

@@ -794,9 +794,9 @@ class TestSolidControlCrossModelStandalone:
 
     def test_solid_auto_tube_spacing(self):
         """Without explicit tube_spacing, a solid cross auto-computes from
-        wing_length / (n + 0.5)."""
+        wing_length / n."""
         model = self._make_solid()
-        expected = model.wing_length / (model.number_tubes_per_wing + 0.5)
+        expected = model.wing_length / model.number_tubes_per_wing
         assert model.tube_spacing == pytest.approx(expected)
 
     def test_solid_explicit_tube_spacing(self):

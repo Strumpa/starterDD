@@ -32,6 +32,7 @@ __all__ = [
     "HM_isotopes",
     "AVOGADRO",
     "CM2_TO_BARN",
+    "ISOTOPIC_MASSES"
 ]
 
 # Flag to check if iapws integration is available

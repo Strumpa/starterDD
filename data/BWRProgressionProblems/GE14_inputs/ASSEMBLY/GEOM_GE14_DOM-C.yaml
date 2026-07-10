@@ -31,12 +31,12 @@ ASSEMBLY_GEOMETRY:
 
   Gd_rod_ids: ["ROD5G", "ROD6H", "ROD6K", "ROD7G", "ROD7H"]
   non_fuel_rod_ids: ["WROD"]
+  number_of_water_rods: 2
 
 WATER_ROD_GEOMETRY:
   type: "circular"
   inner_radius : 1.170
   outer_radius : 1.245
-  centers: [[6.32, 6.32], [8.92, 8.92]]
 
 CONTROL_CROSS_GEOMETRY:
   center: "north-west"

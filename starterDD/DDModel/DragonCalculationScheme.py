@@ -19,7 +19,7 @@ VALID_SELF_SHIELDING_MODULES = ("USS", "SHI")  # USS: unresolved resonance, SHI:
 VALID_SELF_SHIELDING_METHODS = ("RSE", "PT")  # RSE: subgroup+equivalence, PT: probability tables
 VALID_SPATIAL_METHODS = ("CP", "IC", "MOC")
 VALID_TRACKING_OPTIONS = ("TISO", "TSPC")
-VALID_RADIAL_SCHEMES = ("Santamarina", "automatic", "user_defined")
+VALID_RADIAL_SCHEMES = ("Santamarina", "Santamarina_fine_Gd", "automatic", "user_defined")
 VALID_MIX_NUMBERING_STRATEGIES = ("by_material", "by_pin")
 
 
@@ -936,7 +936,7 @@ class CalculationStep:
     sectorization_enabled : bool
         Whether azimuthal sectorization is applied for this step.
     fuel_sectors : SectorConfig or None
-        Default sectorization config for standard fuel pins.
+        Sectorization config for standard fuel pins.
     gd_sectors : SectorConfig or None
         Sectorization config for gadolinium-bearing fuel pins.
     water_rod_sectors : SectorConfig or None
@@ -949,6 +949,11 @@ class CalculationStep:
         Configuration for sub-meshing the assembly-box peripheral
         regions into a grid of sub-faces (for MOC tracking).  When
         ``None``, no box discretization is applied.
+    macro_assignment : 
+        List of list to assign MACRO properties to the glow model.
+        n_rows by n_cols table ordered in x-increasing, y-increasing logic with GEOM.yaml::lattice_description dimensions 
+        Entries should be strings that will be used as glow's PropertyType.MACRO property.
+        If None : by default each fuel cell, water rod and strip rectangle gets an independent macro assigned.
     """
 
     VALID_POLAR_QUADRATURES = ("GAUS", "CACA", "CACB", "LCMD", "OPP1", "OGAU")
@@ -984,6 +989,7 @@ class CalculationStep:
         number_of_polar_angles=None,
         mix_numbering_strategy="by_material",
         tdt_file_id=None,
+        macro_assignment=None
     ):
         # --- Validate step type ---
         if step_type not in VALID_STEP_TYPES:
@@ -1113,6 +1119,7 @@ class CalculationStep:
         self.number_of_polar_angles = number_of_polar_angles
         self.mix_numbering_strategy = mix_numbering_strategy
         self.tdt_file_id = tdt_file_id
+        self.macro_assignment = macro_assignment
 
     # ------------------------------------------------------------------
     # Radii application
@@ -1150,6 +1157,8 @@ class CalculationStep:
 
                 if scheme == "Santamarina":
                     pin.subdivide_into_Santamarina_radii()
+                elif scheme == "Santamarina_fine_Gd":
+                    pin.subdivide_into_fine_Gd_radii()
                 elif scheme == "automatic":
                     n_zones = params.get("num_radial_zones", 1)
                     pin.subdivide_into_radial_zones(n_zones)
@@ -1198,17 +1207,14 @@ class CalculationStep:
     # Sectorization query
     # ------------------------------------------------------------------
 
-    def get_sectorization_for_pin(self, pin_or_rod_type, isGd=False):
+    def get_sectorization_for_pin(self, isGd=False):
         """
         Return the ``SectorConfig`` applicable to a given pin.
 
         Parameters
         ----------
-        pin_or_rod_type : str or FuelPinModel
-            Either a rod type string or a pin model object.
         isGd : bool
-            Whether the pin is a gadolinium-bearing pin (used when
-            ``pin_or_rod_type`` is a string).
+            Whether the pin is a gadolinium-bearing pin or not.
 
         Returns
         -------
@@ -1553,18 +1559,26 @@ class EditionBetweenLevelsStep:
     max_sph_group : int or None
         Maximum coarse group index up to which SPH is applied
         (``GRMAX`` keyword).  Required when ``sph_correction=True``.
+    max_iterations : int or None
+        Maximum number of fixed point SPH iterations to be performed.
+        ("ITER" keyword). By default, SPH: will iterate until sph factors are converged to tolerance 
+        or reaches the maximal value set in DRAGON (200).
+    tolerance : float 
+        Tolerance to test SPH factors' convergence, by default this takes the value of 1e-4.
     """
 
     step_type = "edition_between_levels"
 
     def __init__(self, name, number_of_macro_groups,
                  energy_groups_bounds, sph_correction=False,
-                 max_sph_group=None):
+                 max_sph_group=None, max_iterations = 200, tolerance = 1e-4):
         self.name = name
         self.number_of_macro_groups = number_of_macro_groups
         self.energy_groups_bounds = list(energy_groups_bounds)
         self.sph_correction = bool(sph_correction)
         self.max_sph_group = max_sph_group
+        self.max_iterations = max_iterations
+        self.tolerance = tolerance
 
         if self.sph_correction and self.max_sph_group is None:
             raise ValueError(
@@ -1577,7 +1591,9 @@ class EditionBetweenLevelsStep:
             f"EditionBetweenLevelsStep("
             f"name='{self.name}', "
             f"n_groups={self.number_of_macro_groups}, "
-            f"sph={self.sph_correction})"
+            f"sph={self.sph_correction})",
+            f"max_iterations : {self.max_iterations}",
+            f"Tolerance for convergence : {self.tolerance}"
         )
 
 
@@ -1876,6 +1892,8 @@ class DragonCalculationScheme:
                 energy_groups_bounds=d["energy_groups_bounds"],
                 sph_correction=d.get("SPH_correction", False),
                 max_sph_group=d.get("max_SPH_group", None),
+                max_iterations=d.get("max_iterations", 200),
+                tolerance=d.get("tolerance", 1e-4),
             )
 
         # --- Sectorization ---
@@ -2045,6 +2063,7 @@ class DragonCalculationScheme:
             box_discretization=box_disc,
             mix_numbering_strategy=d.get("mix_numbering_strategy", "by_material"),
             tdt_file_id=d.get("tdt_file_id", None),
+            macro_assignment = d.get("macro_assignment", None),
             **tracking_kwargs,
         )
 
@@ -2318,8 +2337,8 @@ class DragonCalculationScheme:
                     lines.append(f"  GRMAX:      {step.max_sph_group}")
                 continue
             if step.step_type == "self_shielding":
-                lines.append(f"  SH module:  {step.self_shielding_module}")
-                lines.append(f"  SH method:  {step.self_shielding_method}")
+                lines.append(f"  SSH module:  {step.self_shielding_module}")
+                lines.append(f"  SSH method:  {step.self_shielding_method}")
             lines.append(f"  Method:     {step.spatial_method}")
             lines.append(f"  Tracking:   {step.tracking}")
             if step.flux_level is not None:

@@ -869,8 +869,8 @@ class TestCalculationStep:
             gd_sectors=gd_sc,
             water_rod_sectors=wr_sc,
         )
-        assert step.get_sectorization_for_pin("ROD1") is fuel_sc
-        assert step.get_sectorization_for_pin("ROD5G", isGd=True) is gd_sc
+        assert step.get_sectorization_for_pin(isGd=False) is fuel_sc
+        assert step.get_sectorization_for_pin(isGd=True) is gd_sc
         assert step.get_water_rod_sectorization() is wr_sc
 
     def test_repr(self):

@@ -5,25 +5,49 @@
 # ----------------------------------------------------------------------------
 
 
-from glow.geometry_layouts.cells import RectCell
-from glow.geometry_layouts.geometries import Rectangle
-from glow.support.types import GeometryType, PropertyType, SymmetryType
-from glow.geometry_layouts.lattices import Lattice
-from glow.main import TdtSetup, analyse_and_generate_tdt
-from glow.interface.geom_interface import *
+from glow import *
+from glow.geometry_layouts.layouts import associate_colors_to_regions, build_compound_regions
 from glow.support.types import *
-from .helpers import computeSantamarinaradii
+from glow.geometry_layouts.cells import CartesianCell
+from glow.geometry_layouts.layouts import Region
+from glow.geometry_layouts.lattices import CartesianLattice
+from glow.geometry_layouts.geometries import Rectangle, Circle
+from glow.support.types import GeometryType, PropertyType, SymmetryType
+from glow.main import TdtSetup, export_layout_to_tdt
+from glow.interface.geom_interface import *
+from glow.support.types import GeometryType, LayoutGeometryType, PropertyType, \
+    SymmetryType
+from glow.interface.geom_entities import wrap_shape
 import numpy as np
 import os
 # Note: CartesianAssemblyModel and FuelPinModel are imported inside functions to avoid circular imports
 
+OX = make_vector((1, 0, 0))
+OY = make_vector((0, 1, 0))
+OZ = make_vector((0, 0, 1))
+
+SYM_TO_LAYOUT_AND_BOUNDARY = {
+    SymmetryType.FULL: {"TISO": {"layout": LayoutGeometryType.ISOTROPIC, "boundary": None},
+                        "TSPC": {"layout": LayoutGeometryType.RECTANGLE_SYM, "boundary": "AXIAL_SYMMETRY"}},
+    
+    SymmetryType.HALF: {"TISO": {"layout": LayoutGeometryType.SYMMETRIES_TWO, "boundary": "AXIAL_SYMMETRY"},
+                        "TSPC": {"layout": LayoutGeometryType.RECTANGLE_SYM, "boundary": "AXIAL_SYMMETRY"}},
+    
+    SymmetryType.DIAG: {"TISO": {"layout": LayoutGeometryType.SYMMETRIES_TWO, "boundary": "AXIAL_SYMMETRY"},
+                        "TSPC": {"layout": LayoutGeometryType.RECTANGLE_EIGHT, "boundary": "AXIAL_SYMMETRY"}},
+    
+    SymmetryType.QUARTER: {"TISO": {"layout": LayoutGeometryType.SYMMETRIES_TWO, "boundary": "AXIAL_SYMMETRY"},
+                            "TSPC": {"layout": LayoutGeometryType.RECTANGLE_SYM, "boundary": "AXIAL_SYMMETRY"}},
+
+    SymmetryType.EIGHTH: {"TISO": {"layout": LayoutGeometryType.SYMMETRIES_TWO, "boundary": "AXIAL_SYMMETRY"},
+                            "TSPC": {"layout": LayoutGeometryType.RECTANGLE_EIGHT, "boundary": "AXIAL_SYMMETRY"}},
+}
 
 def make_grid_faces(parent: Rectangle, nx: int, ny: int):
     """
     Create a regular nx by ny grid of faces within the given parent rectangle, returning a list of the created faces.
     """
-    lx = float(parent.lx) 
-    ly = float(parent.ly)  
+    lx, ly = parent.dimensions
     dx = lx / nx
     dy = ly / ny
     cx_parent, cy_parent = float(parent.o.GetParameters().split(":")[0]), float(parent.o.GetParameters().split(":")[1])
@@ -68,7 +92,7 @@ def make_grid_faces(parent: Rectangle, nx: int, ny: int):
 
 def generate_fuel_cells(assemblyModel, calculation_step=None):
     """
-    Generate RectCell objects for each individual subgeometry in the lattice.
+    Generate CartesianCell objects for each individual subgeometry in the lattice.
 
     Parameters
     ----------
@@ -84,17 +108,16 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
 
     Returns
     -------
-    lattice_components : dictionary mapping (col_idx, row_idx) tuple to [RectCell, FuelPinModel]
+    lattice_components : dictionary mapping (col_idx, row_idx) tuple to [CartesianCell, FuelPinModel]
         Allows to keep track of of the pin model describing each cell to ensure proper order of addition to the lattice in 
         ``add_cells_to_regular_lattice`` (non-generating cells are added first, then generating cells, to enforce correct mix numbering in SALOME).
     """
     # Import here to avoid circular import issues
     from ..DDModel.DragonModel import FuelPinModel
     
-    lattice_components = {} # change to a dictionaty to store cells and their pin model, at a given position. This will allow to keep track of the pin models associated with each cell.
+    lattice_components = {} # change to a dictionary to store cells and their pin model, at a given position. This will allow to keep track of the pin models associated with each cell.
     pitch = assemblyModel.pin_geometry_dict["pin_pitch"]
     
-    fuel_material_mixtures = assemblyModel.fuel_material_mixtures
     row_idx = -1
     for row in assemblyModel.lattice:
         row_idx += 1 
@@ -103,14 +126,6 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
             cell_idx += 1
             if isinstance(pin, FuelPinModel):
                 fuel_material_mixtures = pin.fuel_material_mixtures
-                radii = pin.radii
-                tmp_cell = RectCell(
-                    name=pin.fuel_material_name,
-                    height_x_width=(pitch, pitch),
-                    center=(0.0, 0.0, 0.0),
-                )
-                for radius in radii:
-                    tmp_cell.add_circle(radius)
                 # Recover FuelPinModel technologocal radii to assign materials in the correct order (from innermost to outermost regions)
                 techo_radii = pin.technological_radii
                 fuel_radius = techo_radii[0]
@@ -121,51 +136,70 @@ def generate_fuel_cells(assemblyModel, calculation_step=None):
                     list_of_cell_mats = ["GAP"] + [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures]
                     if clad_radius is not None and clad_radius > fuel_radius:
                         list_of_cell_mats.append("CLAD")
-                    list_of_cell_mats.append("COOLANT")
+                    last_mat = "COOLANT"
                 elif gap_radius is not None and gap_radius > fuel_radius and clad_radius is not None and clad_radius > fuel_radius:
                     # Fuel regions are inner most, then gap, then clad as outer most solid region, coolant is outside: fuel zones, gap, clad, coolant
-                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["GAP", "CLAD", "COOLANT"]
+                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["GAP", "CLAD"]
+                    last_mat = "COOLANT"
                 elif gap_radius is None and clad_radius is not None and clad_radius > fuel_radius:
                     # No gap, clad is outer most solid region, so the order of materials from innermost to outermost is : fuel zones, clad, coolant
-                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["CLAD", "COOLANT"]
+                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["CLAD"]
+                    last_mat = "COOLANT"
                 elif gap_radius is not None and gap_radius > fuel_radius and clad_radius is None:
                     # No clad, gap is outer most solid region, so the order of materials from innermost to outermost is : fuel zones, gap, coolant
-                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["GAP", "COOLANT"]
+                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["GAP"]
+                    last_mat = "COOLANT"
                 elif gap_radius is None and clad_radius is None:
                     # No gap, no clad, so only fuel zones and coolant, order of materials from innermost to outermost is : fuel zones, coolant
-                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures] + ["COOLANT"]
+                    list_of_cell_mats = [fuel_mat.unique_material_mixture_name for fuel_mat in fuel_material_mixtures]
+                    last_mat = "COOLANT"
                 else:
                     raise ValueError(
                         f"Invalid combination of radii: fuel_radius={fuel_radius}, gap_radius={gap_radius}, clad_radius={clad_radius}"
                     )
-
+                if calculation_step is not None and calculation_step.macro_assignment is not None:
+                        macro_name = calculation_step.macro_assignment[row_idx][cell_idx]
+                else:
+                    macro_name = f"MACRO{row_idx}{cell_idx}" # default to individual cell numbering
+                radii = pin.radii
+                tmp_cell = CartesianCell(
+                    name=pin.fuel_material_name,
+                    width_height=(pitch, pitch),
+                    center=(0.0, 0.0, 0.0),
+                    base_props={PropertyType.MATERIAL:last_mat,
+                                PropertyType.MACRO: macro_name}
+                )
+                for radius, mat in zip(radii[::-1],list_of_cell_mats[::-1]):
+                    tmp_cell.add(
+                        Region(Circle(radius=radius), properties={PropertyType.MATERIAL:mat, 
+                                                                 PropertyType.MACRO:macro_name})
+                    )
+                            
                 # Apply sectorization from calculation step if provided
                 if calculation_step is not None:
-                    sector_cfg = calculation_step.get_sectorization_for_pin(pin, isGd=pin.isGd)
+                    sector_cfg = calculation_step.get_sectorization_for_pin(isGd=pin.isGd)
                     if sector_cfg is not None:
+                        print(f"Applying sectorization to cell at position ({cell_idx}, {row_idx}): sectors={sector_cfg.sectors}, angles={sector_cfg.angles}, windmill={sector_cfg.windmill}")
                         tmp_cell.sectorize(sector_cfg.sectors, sector_cfg.angles, windmill=sector_cfg.windmill)
-
-                tmp_cell.set_properties({
-                    PropertyType.MATERIAL: list_of_cell_mats,
-                    PropertyType.MACRO: [f"MACRO{row_idx}{cell_idx}"] * len(list_of_cell_mats)
-                })
+                    else:
+                        print(f"Warning: No sectorization config found for pin at position ({cell_idx}, {row_idx}). No sectorization will be applied to this cell.")
                 # cell_idx in row : column number, ie position along the x direction,
                 # row_idx in lattice: row number, ie position along the y direction
                 lattice_components[(cell_idx, row_idx)] = [tmp_cell, pin] # store both the cell and its associated pin model for later reference
     return lattice_components
 
 
-def add_cells_to_regular_lattice(lattice, lattice_components, cell_pitch, translation_x=0.0, translation_y=0.0):
+def add_cells_to_cartesian_lattice(lattice, lattice_components, cell_pitch, translation_x=0.0, translation_y=0.0):
     """
     Add fuel cells to the lattice, skipping water rod placeholders.
     Generating cells are added last in order to enforce order of mix attribution in SALOME (cells added last are assigned first mix numbers)
 
     Parameters
     ----------
-    lattice : Lattice
+    lattice : CartesianLattice
         The lattice to which cells will be added
     lattice_components : dict
-        Dictionary mapping positions to lists of RectCell objects and their associated pin models
+        Dictionary mapping positions to lists of CartesianCell objects and their associated pin models
     cell_pitch : float
         Pitch of each cell in the lattice
     translation_x : float
@@ -180,8 +214,8 @@ def add_cells_to_regular_lattice(lattice, lattice_components, cell_pitch, transl
         cell, pin = cell_and_pin
         if pin is not None and isinstance(pin, FuelPinModel):
             if pin.isGeneratingCell is False: # add all non generating cells first
-                lattice.add_cell(
-                    cell, ((pos[0] + 0.5) * cell_pitch + translation_x,
+                lattice.add(
+                    cell, position=((pos[0] + 0.5) * cell_pitch + translation_x,
                             (pos[1] + 0.5) * cell_pitch + translation_y,
                             0.0)
                 )
@@ -189,8 +223,8 @@ def add_cells_to_regular_lattice(lattice, lattice_components, cell_pitch, transl
         cell, pin = cell_and_pin
         if pin is not None and isinstance(pin, FuelPinModel):
             if pin.isGeneratingCell: # add generating cells last
-                lattice.add_cell(
-                    cell, ((pos[0] + 0.5) * cell_pitch + translation_x,
+                lattice.add(
+                    cell, position=((pos[0] + 0.5) * cell_pitch + translation_x,
                             (pos[1] + 0.5) * cell_pitch + translation_y,
                             0.0)
                 )
@@ -198,14 +232,14 @@ def add_cells_to_regular_lattice(lattice, lattice_components, cell_pitch, transl
     return lattice
 
 
-def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
+def _build_square_water_rod_cell(water_rod_model, macro_name, calculation_step=None):
     """
-    Build a ``RectCell`` for a square water rod with 3 concentric
+    Build a square water rod (ATRIUM-10 type) with 3 concentric
     rectangular regions (moderator / cladding / coolant).
 
-    The construction follows the same pattern as ``build_assembly_box``:
-    two inner ``Rectangle`` boundaries are partitioned into the bounding
-    box cell, then materials are assigned from innermost to outermost.
+    A ``CartesianCell`` with water box bounding box dimensions is created
+    A collection of ``Region`` instances are created based on the ``water_rod_model`` 
+    attributes. 
 
     If the ``calculation_step`` provides a ``SectorConfig`` with a
     ``splits`` attribute, the cell is further sub-meshed into an
@@ -219,6 +253,8 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
         The square water rod model with ``bounding_box_side_length``,
         ``moderator_box_inner_side``, ``moderator_box_outer_side``,
         ``center``, ``rod_ID``, and material names.
+    macro_name : str
+        MACRO property name identifier
     calculation_step : CalculationStep or None
         Optional calculation step providing discretization config via
         ``get_water_rod_sectorization().splits``.
@@ -246,10 +282,12 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
         outer_rc = None
 
     # --- 1. Create bounding-box cell ---
-    tmp_cell = RectCell(
+    tmp_cell = CartesianCell(
         name=water_rod_model.rod_ID,
-        height_x_width=(bb, bb),
+        width_height=(bb, bb),
         center=center,
+        base_props={PropertyType.MATERIAL: water_rod_model.coolant_material_name,
+                    PropertyType.MACRO: macro_name}
     )
 
     # --- 2. Create inner boundary rectangles ---
@@ -268,26 +306,23 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
         rounded_corners=outer_rc,
     )
 
-    # --- 3. Partition the cell face with the two boundaries ---
-    partitioned_face = make_partition(
-        [tmp_cell.face],
-        [inner_rect.face, outer_rect.face],
-        shape_type=ShapeType.COMPOUND,
+    water_box_cell = Region(
+        name=f"{water_rod_model.rod_ID}_box",
+        geom_obj = outer_rect - inner_rect,
+        properties={PropertyType.MATERIAL: water_rod_model.cladding_material_name,
+                    PropertyType.MACRO: macro_name},
     )
-    tmp_cell.update_geometry_from_face(
-        GeometryType.TECHNOLOGICAL, partitioned_face,
+    inner_moderator_cell = Region(
+        name=f"{water_rod_model.rod_ID}_moderator",
+        geom_obj = inner_rect,
+        properties={PropertyType.MATERIAL: water_rod_model.moderator_material_name,
+                    PropertyType.MACRO: macro_name},
     )
 
-    # --- 4. Base material and MACRO assignment (3 regions) ---
-    tmp_cell.set_properties({
-        PropertyType.MATERIAL: [
-            water_rod_model.moderator_material_name,
-            water_rod_model.cladding_material_name,
-            water_rod_model.coolant_material_name,
-        ],
-        PropertyType.MACRO: [f"MACRO_{water_rod_model.rod_ID}"] * 3,
-    })
-
+    tmp_cell.add(inner_moderator_cell)
+    tmp_cell.add(water_box_cell)
+    
+    tmp_cell.sectorize([4,4,4], [0,0,0], windmill=False)
     # --- 5. Optional Cartesian grid sub-meshing ---
     splits = None
     if calculation_step is not None:
@@ -314,7 +349,9 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
                 )
 
     if splits is not None:
+        
         nx, ny = splits
+        print(f"in square water rods with splits (nx, ny) = ({nx}, {ny})")
         # Build the grid of splitting faces over the bounding box
         bb_rect = Rectangle(
             name=f"{water_rod_model.rod_ID}_grid",
@@ -323,40 +360,13 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
             center=center,
         )
         splitting_faces = make_grid_faces(bb_rect, nx, ny)
-
-        # Re-partition the (already 3-region) cell face
-        re_partitioned = make_partition(
-            [tmp_cell.face],
-            splitting_faces,
-            shape_type=ShapeType.COMPOUND,
-        )
-        tmp_cell.update_geometry_from_face(
-            GeometryType.TECHNOLOGICAL, re_partitioned,
-        )
-
-        # Reassign materials by geometric containment
-        subfaces = tmp_cell.extract_subfaces()
-        n_regions = len(subfaces)
-        materials_list = [""] * n_regions
-        macros_list = [f"MACRO_{water_rod_model.rod_ID}"] * n_regions
-
-        for i, subface in enumerate(subfaces):
-            pt = make_vertex_inside_face(subface)
-            if is_point_inside_shape(pt, inner_rect.face):
-                materials_list[i] = water_rod_model.moderator_material_name
-            elif is_point_inside_shape(pt, outer_rect.face):
-                materials_list[i] = water_rod_model.cladding_material_name
-            else:
-                materials_list[i] = water_rod_model.coolant_material_name
-
-        tmp_cell.set_properties({
-            PropertyType.MATERIAL: materials_list,
-            PropertyType.MACRO: macros_list,
-        })
-
-        print(f"_build_square_water_rod_cell: sub-meshed "
-              f"'{water_rod_model.rod_ID}' into {n_regions} sub-regions "
-              f"(splits={splits}).")
+        partitioned_face = make_partition(
+                [tmp_cell],
+                splitting_faces,
+                shape_type=ShapeType.EDGE,
+            )
+        tmp_cell.geometry_maps[GeometryType.SECTORIZED] = \
+            wrap_shape(tmp_cell.get_geometry_map(GeometryType.SECTORIZED)) // wrap_shape(partitioned_face) 
     else:
         print(f"_build_square_water_rod_cell: built "
               f"'{water_rod_model.rod_ID}' with 3 base regions "
@@ -365,7 +375,7 @@ def _build_square_water_rod_cell(water_rod_model, calculation_step=None):
     return tmp_cell
 
 
-def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=0.0, translation_y=0.0, windmill=False, calculation_step=None):
+def create_and_add_water_rods_to_lattice(lattice, assembly_model, windmill=False, calculation_step=None):
     """
     Create water rod cells from the assembly model and add them to the lattice at their centers.
 
@@ -376,12 +386,6 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
     assembly_model : CartesianAssemblyModel
         The assembly model containing the water rod geometry parameters
         (water_rod_type, water_rods list with center, radii, materials, etc.)
-    translation_x : float
-        Unused. Water rod centers are already in assembly coordinates (from YAML).
-        Kept for function signature consistency with pin positioning.
-    translation_y : float
-        Unused. Water rod centers are already in assembly coordinates (from YAML).
-        Kept for function signature consistency with pin positioning.
     windmill : bool
         Whether to apply windmill sectorization to the water rod coolant region.
         Ignored if ``calculation_step`` is provided.
@@ -398,14 +402,22 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
         )
 
     for water_rod_model in assembly_model.water_rods:
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            water_rod_positions = water_rod_model.placeholder_indices
+            macro_name = calculation_step.macro_assignment[water_rod_positions[0][1]][water_rod_positions[0][0]]
+        else:
+            macro_name = f"MACRO_{water_rod_model.rod_ID}"
+
         if assembly_model.water_rod_type == "circular":
-            tmp_cell = RectCell(
+            tmp_cell = CartesianCell(
                 name=water_rod_model.rod_ID,
-                height_x_width=(
+                width_height=(
                     water_rod_model.bounding_box_side_length,
                     water_rod_model.bounding_box_side_length,
                 ),
                 center=(0.0, 0.0, 0.0),
+                base_props={PropertyType.MATERIAL: water_rod_model.coolant_material_name,
+                            PropertyType.MACRO: macro_name},
             )
 
             # --- Determine extra moderator radii from calculation step ---
@@ -419,24 +431,21 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
                             water_rod_model.inner_radius
                         )
 
+            tmp_cell.add(Region(Circle(radius=water_rod_model.outer_radius), 
+                                properties={PropertyType.MATERIAL: water_rod_model.cladding_material_name,
+                                            PropertyType.MACRO: macro_name}))
+            tmp_cell.add(Region(Circle(radius=water_rod_model.inner_radius), 
+                                properties={PropertyType.MATERIAL: water_rod_model.moderator_material_name,
+                                            PropertyType.MACRO: macro_name}))
+            tmp_cell.geometry_maps[GeometryType.TECHNOLOGICAL] = tmp_cell.geom_obj
             # Add circles: extra moderator sub-rings, then inner, then outer
-            for r in extra_radii:
-                tmp_cell.add_circle(r)
-            tmp_cell.add_circle(water_rod_model.inner_radius)
-            tmp_cell.add_circle(water_rod_model.outer_radius)
+            for r in extra_radii[::-1]:  # add extra moderator radii from outermost to innermost
+                tmp_cell.add(Region(Circle(radius=r), 
+                                    properties={PropertyType.MATERIAL: water_rod_model.moderator_material_name,
+                                                PropertyType.MACRO: macro_name}))
 
-            # Build material list: one moderator entry per sub-ring + base 3
-            n_extra = len(extra_radii)
-            materials = (
-                [water_rod_model.moderator_material_name] * (1 + n_extra)
-                + [water_rod_model.cladding_material_name,
-                   water_rod_model.coolant_material_name]
-            )
-            n_regions = len(materials)
-            tmp_cell.set_properties({
-                PropertyType.MATERIAL: materials,
-                PropertyType.MACRO: [f"MACRO_{water_rod_model.rod_ID}"] * n_regions,
-            })
+            if extra_radii:
+                tmp_cell.geometry_maps[GeometryType.SECTORIZED] = tmp_cell.geom_obj
 
             # Apply sectorization: prefer calculation_step config, fall back to windmill flag
             if wr_sectors is not None:
@@ -455,6 +464,9 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
                 tmp_cell.sectorize(expanded_s, expanded_a, windmill=wr_sectors.windmill)
             elif windmill:
                 tmp_cell.sectorize([1, 1, 8], [0, 0, 0], windmill=True)
+            else:
+                tmp_cell.sectorize([1,1,1], [0,0,0], windmill=False)
+
             split_coolant_corners = wr_sectors.subdivisions_coolant_corners if wr_sectors is not None else False
             if split_coolant_corners:
                 # circular water rods with sectorization : glow does not allow to sub mesh the coolant
@@ -466,7 +478,6 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
                 # For top right corner :
                 alpha = 360.0 / 16.0 # angle of each sector
                 adj = water_rod_model.bounding_box_side_length / 2.0
-                top_right_corner = (adj, adj, 0.0)
                 opp = adj * np.tan(np.radians(alpha))
                 base_pt_1 = (opp, adj, 0.0)
                 distance_to_split = adj - opp
@@ -511,34 +522,31 @@ def create_and_add_water_rods_to_lattice(lattice, assembly_model, translation_x=
                     )
                     splitting_faces.append(splitting_face)
                     
-                    
-                    
-                re_partitioned = make_partition(
-                        [tmp_cell.face],
-                        splitting_faces,
-                        shape_type=ShapeType.COMPOUND,
-                    )
-                tmp_cell.update_geometry_from_face(
-                        GeometryType.TECHNOLOGICAL, re_partitioned,
-                    )
+                partitioned_face = make_partition(
+                    [tmp_cell],
+                    splitting_faces,
+                    shape_type=ShapeType.EDGE,
+                )
+                tmp_cell.geometry_maps[GeometryType.SECTORIZED] = \
+                    wrap_shape(tmp_cell.get_geometry_map(GeometryType.SECTORIZED)) // wrap_shape(partitioned_face)    
                     
 
         elif assembly_model.water_rod_type == "square":
             tmp_cell = _build_square_water_rod_cell(
-                water_rod_model, calculation_step=calculation_step,
+                water_rod_model, macro_name=macro_name, calculation_step=calculation_step,
             )
 
         # water_rod_model.center is in assembly coordinates (from YAML).
         # No translation applied - centers are already positioned within the assembly frame [0, assembly_pitch].
         cx, cy = water_rod_model.center
-        lattice.add_cell(
+        lattice.add(
             tmp_cell,
-            (cx, cy, 0.0),
+            position=(cx, cy, 0.0),
         )
 
     return lattice
 
-def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, translation_y=0.0, calculation_step=None):
+def add_vanished_rods_to_lattice(lattice, assembly_model, calculation_step=None):
     """
     Create vanished rod cells from the assembly model and add them to the lattice at their centers.
 
@@ -552,14 +560,6 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
         ``default_sectorization_radius`` attributes; lattice indices may also be
         present on the model but are not used here. Vanished rod centers are
         expected to already be in assembly/YAML coordinates.
-    translation_x : float
-        Unused. Vanished rod centers are already in assembly coordinates if translation_offset_x has been defined 
-        from YAML input geometry.
-        Kept for function signature consistency with pin positioning.
-    translation_y : float
-        Unused. Vanished rod centers are already in assembly coordinates if translation_offset_x has been defined 
-        from YAML input geometry.
-        Kept for function signature consistency with pin positioning.
     calculation_step : CalculationStep or None
         CalculationStep object to retrieve vanished rod sectorization options from.
 
@@ -576,14 +576,19 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
                 f"Expected VanishedRodModel in assembly_model.vanished_rods, "
                 f"but got {type(rod_model)}"
             )
+        # RectCell replaced by CartesianCell with region and circular subregions :
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            macro_name = calculation_step.macro_assignment[rod_model.y_index][rod_model.x_index]
+        else:
+            macro_name = f"MACRO_{rod_model.rod_ID}"
 
-        tmp_cell = RectCell(
+        tmp_cell = CartesianCell(
             name=rod_model.rod_ID,
-            height_x_width=(lattice_pin_pitch, lattice_pin_pitch),
+            width_height=(lattice_pin_pitch, lattice_pin_pitch),
             center=(0.0, 0.0, 0.0),
+            base_props={PropertyType.MATERIAL:"COOLANT",
+                        PropertyType.MACRO: macro_name}
         )
-
-        n_regions = 1 # default number of regions if no sectorization provided
         
         if calculation_step is not None:
             vr_sector_cfg = calculation_step.get_vanished_rod_sectorization()
@@ -594,16 +599,11 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
                     # If no base_radius provided, use the default sectorization radius from the rod model (set to be equal to the cladding radius)
                     vr_sector_cfg.resolve_radii_and_sectors(rod_model.default_sectorization_radius)
                 radii = vr_sector_cfg.radial_split_points
-                for radius in radii:
-                    tmp_cell.add_circle(radius)
+                for radius in radii[::-1]:
+                    tmp_cell.add(Region(Circle(radius=radius), properties={PropertyType.MATERIAL:"COOLANT",
+                                                              PropertyType.MACRO:macro_name}))
                 if vr_sector_cfg.sector_config:
                     tmp_cell.sectorize(vr_sector_cfg.sector_config.sectors, vr_sector_cfg.sector_config.angles, windmill=vr_sector_cfg.windmill)
-                n_regions = len(radii) + 1 # number of regions is number of circles + 1 (the central region inside the innermost circle)
-
-        tmp_cell.set_properties({
-            PropertyType.MATERIAL: ["COOLANT"]*n_regions,
-            PropertyType.MACRO: [f"MACRO_{rod_model.rod_ID}"]*n_regions,
-        })
 
         if rod_model.center is None:
             # compute center from lattice indices if not provided
@@ -612,15 +612,15 @@ def add_vanished_rods_to_lattice(lattice, assembly_model, translation_x=0.0, tra
             cy = (posy + 0.5) * lattice_pin_pitch
         else:
             cx, cy = rod_model.center
-        lattice.add_cell(
+        lattice.add(
             tmp_cell,
-            (cx, cy, 0.0),
+            position=(cx, cy, 0.0)
         )
 
     return lattice
 
 
-def export_glow_geom(output_path, output_file_name, lattice, tracking_option, export_macro=False):
+def export_glow_geom(output_path, output_file_name, assembly_universe, symmetry_type, tracking_option, export_macro=False):
     """
     Export the geometry of the lattice to a TDT file for GLOW simulation.
 
@@ -630,8 +630,10 @@ def export_glow_geom(output_path, output_file_name, lattice, tracking_option, ex
         Path to save the exported TDT file
     output_file_name : str
         Name of the exported TDT file
-    lattice : Lattice
-        The lattice whose geometry is to be exported
+    assembly_universe : CartesianCell filled with lattice and box components
+        The CSG assembly universe whose geometry is to be exported
+    symmetry_type : SymmetryType
+        Symmetry type of the geometry, e.g. ``SymmetryType.FULL`` or ``SymmetryType.QUARTER``.  This is used to determine the geometry type to
     tracking_option : str
         Tracking option, either ``"TISO"`` or ``"TSPC"``
     """
@@ -645,26 +647,51 @@ def export_glow_geom(output_path, output_file_name, lattice, tracking_option, ex
     if export_macro:
         properties_to_export = [PropertyType.MATERIAL, PropertyType.MACRO]
         output_file_name = f"{output_file_name}_{tracking_option}_MACRO"
+        property_to_show = PropertyType.MACRO
+        geometry_type_to_show = GeometryType.SECTORIZED
+        print(f"Attempting to show macro properties on SECTORIZED geometry for export...")
+        try:
+            assembly_universe.show(property_to_show, geometry_type_to_show)
+        except RuntimeError as e:
+            print(f"Error occurred while showing macro properties on SECTORIZED geometry: {e}, trying to show properties on TECHNOLOGICAL geometry instead")
+            geometry_type_to_show = GeometryType.TECHNOLOGICAL
+            assembly_universe.show(property_to_show, geometry_type_to_show)
     else:
         properties_to_export = [PropertyType.MATERIAL]
         output_file_name = f"{output_file_name}_{tracking_option}"
+        property_to_show = PropertyType.MATERIAL
+        geometry_type_to_show = GeometryType.SECTORIZED
+        try:
+            assembly_universe.show(property_to_show, geometry_type_to_show)
+        except RuntimeError as e:
+            print(f"Error occurred while showing material properties on SECTORIZED geometry: {e}, trying to show properties on TECHNOLOGICAL geometry instead")
+            geometry_type_to_show = GeometryType.TECHNOLOGICAL
+            assembly_universe.show(property_to_show, geometry_type_to_show)
+
+        #assembly_universe.show(PropertyType.MATERIAL, GeometryType.SECTORIZED) # ensure material properties are shown on technological geometry at least, as this is needed for export
 
     full_tdt_path = os.path.join(output_path, output_file_name)
 
+    geometry_type_to_export = geometry_type_to_show
+
     if tracking_option == "TISO":
-        lattice.type_geo = LatticeGeometryType.ISOTROPIC
-        analyse_and_generate_tdt(
-            [lattice], full_tdt_path, TdtSetup(GeometryType.SECTORIZED,
+        
+        layout_geometry_type = SYM_TO_LAYOUT_AND_BOUNDARY[symmetry_type]["TISO"]["layout"]
+        
+        export_layout_to_tdt(
+            assembly_universe, full_tdt_path, TdtSetup(geometry_type_to_export,
                                              property_types=properties_to_export,
-                                             type_geo=LatticeGeometryType.ISOTROPIC,
-                                             symmetry_type=SymmetryType.FULL))
-    elif tracking_option == "TSPC":
-        lattice.type_geo = LatticeGeometryType.RECTANGLE_SYM    
-        analyse_and_generate_tdt(
-            [lattice], full_tdt_path, TdtSetup(GeometryType.SECTORIZED,
+                                             type_geo=layout_geometry_type,
+                                             symmetry_type=symmetry_type))
+    elif tracking_option == "TSPC":  
+        
+        layout_geometry_type = SYM_TO_LAYOUT_AND_BOUNDARY[symmetry_type]["TSPC"]["layout"]
+        
+        export_layout_to_tdt(
+            assembly_universe, full_tdt_path, TdtSetup(geometry_type_to_export,
                                              property_types=properties_to_export,
-                                             type_geo=LatticeGeometryType.RECTANGLE_SYM,
-                                             symmetry_type=SymmetryType.FULL))
+                                             type_geo=layout_geometry_type,
+                                             symmetry_type=symmetry_type))
 
 
 def _corner_transform(corner, x, y, ap):
@@ -727,8 +754,8 @@ def _remap_rounded_corner_indices(corner_indices, cross_corner):
     list of (int, float)
         Remapped corner/radius pairs.
     """
-    # Mapping: NW is identity.  Mirror in x flips left↔right (0↔1, 3↔2).
-    # Mirror in y flips top↔bottom (0↔3, 1↔2).
+    # Mapping: NW is identity.  Mirror in x flips left <-> right (0 <-> 1, 3 <-> 2).
+    # Mirror in y flips top <-> bottom (0 <-> 3, 1 <-> 2).
     _mirror_x = {0: 1, 1: 0, 2: 3, 3: 2}
     _mirror_y = {0: 3, 1: 2, 2: 1, 3: 0}
 
@@ -740,45 +767,36 @@ def _remap_rounded_corner_indices(corner_indices, cross_corner):
     return result
 
 
-def _build_control_cross_shapes(ctrl, ap):
+def _build_control_cross_elements(assembly_model, ap, assembly_center=(None, None, None)):
     """
-    Build all glow geometry shapes for a control cross and return them
-    in a structured dict.
-
-    Shapes are built at the correct position for ``ctrl.center`` using
-    ``_corner_transform``.
-
+    Build the elements describing the control cross
+    
     Parameters
     ----------
-    ctrl : ControlCrossModel
-        The control cross model with all geometric dimensions.
+    assembly_model : CartesianAssemblyModel
+        The assembly model with additional geometric dimensions.
     ap : float
         Assembly pitch.
+    assembly_center : tuple, optional
+        (x, y, z) center of the assembly_universe. Defaults to (ap/2, ap/2, 0).
+        Region centers are converted from absolute assembly coords to local
+        (center-relative) coords.
 
-    Returns
+
+    Returns 
     -------
-    dict with keys:
+    control_cross_universe : CartesianCell
+        A CartesianCell containing all the Regions that define the control cross geometry, centered at 
+        either the NW or SW corner depending on the identified lattice symmetry.
 
-    - ``"sheath_rectangles"`` : list of ``Rectangle``
-        Outer sheath/structural boundary shapes (5 rectangles:
-        quarter centre, right central structure half, bottom central
-        structure half, right wing half, bottom wing half).
-    - ``"inner_sheath_rectangles"`` : list of ``Rectangle``
-        Inner sheath boundary shapes for each wing (2 rectangles).
-    - ``"absorber_tubes"`` : list of ``RectCell``
-        Absorber tube cells (2 × ``number_tubes_per_wing``), each with
-        inner and outer circle radii.
-    - ``"splitting_rectangles"`` : list of ``Rectangle``
-        Rectangles that split each wing bounding box at the boundary
-        of the last absorber tube, so the tip region is separated.
-    - ``"wing_footprints"`` : dict
-        ``{"wing_1": (x_min, y_min, x_max, y_max),
-          "wing_2": (x_min, y_min, x_max, y_max),
-          "center": (x_min, y_min, x_max, y_max)}``
-        Axis-aligned bounding boxes for the two wings and central
-        structure (in assembly coordinates), used for MACRO
-        classification.
     """
+
+    # retrieve dimensions and properties of the control cross model
+
+    if assembly_center[0] is None:
+        assembly_center = (ap / 2.0, ap / 2.0, 0.0)
+
+    ctrl = assembly_model.control_cross
     corner = ctrl.center
     bt = ctrl.blade_thickness
     bhs = ctrl.blade_half_span
@@ -788,241 +806,281 @@ def _build_control_cross_shapes(ctrl, ap):
     n_tubes = ctrl.number_tubes_per_wing
     r_inner = ctrl.absorber_tube_inner_radius
     r_outer = ctrl.absorber_tube_outer_radius
-    inner_w = ctrl.inner_sheath_width  # = bt - 2*st
     delta = ctrl.tube_spacing
-    first_offset = ctrl.first_tube_offset
+    extra_moderator_gap = (delta - 2.0*r_outer) / 2.0
 
-    def ct(x, y):
-        """Shorthand for corner transform."""
-        return _corner_transform(corner, x, y, ap)
+    first_tube_offset = cshs + r_outer + extra_moderator_gap # In assembly coordinates.
 
-    # ------------------------------------------------------------------
-    # 1. Sheath / structural rectangles (canonical NW coords)
-    # ------------------------------------------------------------------
-    sheath_rects = []
+    is_solid = ctrl.is_solid
+    absorber_mat = ctrl.absorber_material
+    sheath_mat = ctrl.sheath_material
 
-    # Quarter centre
-    cx, cy = ct(bt / 4.0, ap - bt / 4.0)
-    sheath_rects.append(Rectangle(
-        name="CTRL_CROSS_CENTER_QTR",
-        height=bt / 2.0, width=bt / 2.0,
+    assembly_bounding_rect = Rectangle(
+        height=ap,
+        width=ap,
+        center=(ap/2,ap/2,0.0)
+    )
+
+    elements = {}
+    elements["CTRL_H_SHEATH"] = {}
+    elements["CTRL_V_SHEATH"] = {}
+    # Create a universe cell for the control cross and add all regions
+    cx, cy = _corner_transform(corner, bhs/2.0, ap, ap)
+    control_cross_horizontal_wing = Rectangle(
+        name="CTRL_CROSS_H",
+        width=bhs,
+        height=bt,
+        center=(cx, cy, ap, 0.0)
+        #rounded_corners=_remap_rounded_corner_indices([(1, tr), (2, tr)], corner) if tr > 0.0 else None
+    )
+    control_cross_horizontal_wing_rounded = Rectangle(
+        name="CTRL_CROSS_H_rounded",
+        width=bhs,
+        height=bt,
+        center=(cx, cy, ap, 0.0),
+        rounded_corners=_remap_rounded_corner_indices([(1, tr), (2, tr)], corner) if tr > 0.0 else None
+    )
+
+    if not is_solid:
+        rounded_modertator_tip_h = control_cross_horizontal_wing*assembly_bounding_rect - control_cross_horizontal_wing_rounded*assembly_bounding_rect
+
+
+    # compute delta between centers of horizontal wing with rounded corners and horizontal wing without rounded corners
+    delta_centers_x_horizontal_wing = get_point_coordinates(control_cross_horizontal_wing_rounded.o)[0] - get_point_coordinates(control_cross_horizontal_wing.o)[0]
+    delta_centers_y_horizontal_wing = get_point_coordinates(control_cross_horizontal_wing_rounded.o)[1] - get_point_coordinates(control_cross_horizontal_wing.o)[1]
+    #wing_elements[(bhs/2.0 + delta_centers_x_horizontal_wing, ap + delta_centers_y_horizontal_wing, 0.0)] = control_cross_horizontal_wing_rounded
+    
+    h_wing_in_assembly_footprint = control_cross_horizontal_wing_rounded * assembly_bounding_rect
+
+    elements["CTRL_H_SHEATH"]["geometry"] = h_wing_in_assembly_footprint
+    elements["CTRL_H_SHEATH"]["offset"] = (delta_centers_x_horizontal_wing, delta_centers_y_horizontal_wing, 0.0)
+    elements["CTRL_H_SHEATH"]["macro"] = "CTRL_H"
+    elements["CTRL_H_SHEATH"]["material"] = sheath_mat
+
+    cx, cy = _corner_transform(corner, 0.0, ap - bhs/2.0, ap)
+    control_cross_vertical_wing = Rectangle(
+        name="CTRL_CROSS_V",
+        width=bt,
+        height=bhs,
+        center=(cx, cy, 0.0)
+    )
+    control_cross_vertical_wing_rounded = Rectangle(
+        name="CTRL_CROSS_V_rounded",
+        width=bt,
+        height=bhs,
         center=(cx, cy, 0.0),
-    ))
+        rounded_corners=_remap_rounded_corner_indices([(0, tr), (1, tr)], corner) if tr > 0.0 else None
+    )
 
-    # Right central structure half
-    w_rcs = cshs - bt / 2.0
-    cx, cy = ct(w_rcs / 2.0 + bt / 2.0, ap - bt / 4.0)
-    sheath_rects.append(Rectangle(
-        name="CTRL_CROSS_RIGHT_CS_HALF",
-        height=bt / 2.0, width=w_rcs,
-        center=(cx, cy, 0.0),
-    ))
+    if not is_solid:
+        rounded_modertator_tip_v = control_cross_vertical_wing*assembly_bounding_rect - control_cross_vertical_wing_rounded*assembly_bounding_rect
 
-    # Bottom central structure half
-    h_bcs = cshs - bt / 2.0
-    cx, cy = ct(bt / 4.0, ap - h_bcs / 2.0 - bt / 2.0)
-    sheath_rects.append(Rectangle(
-        name="CTRL_CROSS_BOT_CS_HALF",
-        height=h_bcs, width=bt / 2.0,
-        center=(cx, cy, 0.0),
-    ))
+    delta_centers_x_vertical_wing = get_point_coordinates(control_cross_vertical_wing_rounded.o)[0] - get_point_coordinates(control_cross_vertical_wing.o)[0]
+    delta_centers_y_vertical_wing = get_point_coordinates(control_cross_vertical_wing_rounded.o)[1] - get_point_coordinates(control_cross_vertical_wing.o)[1]
+    
+    v_wing_in_assembly_footprint = control_cross_vertical_wing_rounded * assembly_bounding_rect
+    elements["CTRL_V_SHEATH"]["geometry"] = v_wing_in_assembly_footprint
+    elements["CTRL_V_SHEATH"]["offset"] = (delta_centers_x_vertical_wing, delta_centers_y_vertical_wing, 0.0)
+    elements["CTRL_V_SHEATH"]["macro"] = "CTRL_V"
+    elements["CTRL_V_SHEATH"]["material"] = sheath_mat
 
-    # Right wing half (horizontal arm) — with tip radius
-    wing_len = bhs - cshs
-    cx, cy = ct(wing_len / 2.0 + cshs, ap)
-    # In canonical NW, tip rounded corner is at index 1
-    if tr > 0.0:
-        rc_wing_h = _remap_rounded_corner_indices([(1, tr)], corner)
-    else:
-        rc_wing_h = None
-    sheath_rects.append(Rectangle(
-        name="CTRL_CROSS_WING_H",
-        height=bt, width=wing_len,
-        center=(cx, cy, 0.0),
-        rounded_corners=rc_wing_h,
-    ))
-
-    # Bottom wing half (vertical arm) — with tip radius
-    cx, cy = ct(0.0, ap - wing_len / 2.0 - cshs)
-    if tr > 0.0:
-        rc_wing_v = _remap_rounded_corner_indices([(1, tr)], corner)
-    else:
-        rc_wing_v = None
-    sheath_rects.append(Rectangle(
-        name="CTRL_CROSS_WING_V",
-        height=wing_len, width=bt,
-        center=(cx, cy, 0.0),
-        rounded_corners=rc_wing_v,
-    ))
-
-    # ------------------------------------------------------------------
-    # 2. Inner sheath rectangles (absorber cavity boundary)
-    #    Skipped for solid crosses (st == 0): there is no hollow
-    #    cavity inside the blade — the blade material fills
-    #    everything between absorber rods.
-    # ------------------------------------------------------------------
-    inner_rects = []
-
-    if st > 0:
-        inner_wing_w = wing_len - st  # inner wing length
-        cx, cy = ct(inner_wing_w / 2.0 + cshs, ap)
-        if tr > 0.0:
-            rc_inner_h = _remap_rounded_corner_indices([(1, tr - st)], corner)
-        else:
-            rc_inner_h = None
-        inner_rects.append(Rectangle(
-            name="CTRL_CROSS_WING_H_INNER",
-            height=inner_w, width=inner_wing_w,
+    # build hollow sheath region and absorber pins 
+    if not is_solid:
+        base_material = "MODERATOR"
+        elements["CTRL_H_HOLLOW"] = {}
+        elements["CTRL_V_HOLLOW"] = {}
+    # build inner region for hollow sheath (moderator-filled cavity inside the blade)
+        cx, cy = _corner_transform(corner, cshs + (bhs - st - cshs)/2.0, ap, ap)
+        inner_sheath_horizontal_wing = Rectangle(
+            name="CTRL_CROSS_H_INNER",
+            width=(bhs - st - cshs),
+            height=(bt - 2.0*st),
+            center=(cx, cy, 0.0)
+        )
+        # get center for the horizontal wing inner sheath without rounded corners :
+        inner_sheath_horizontal_wing_rounded = Rectangle(
+            name="CTRL_CROSS_H_INNER_HOLLOW",
+            width=(bhs - st - cshs),
+            height=(bt - 2.0*st),
             center=(cx, cy, 0.0),
-            rounded_corners=rc_inner_h,
-        ))
+            rounded_corners=_remap_rounded_corner_indices([(1, tr - st), (2, tr - st)], corner) if tr > 0.0 else None
+        )
+        delta_centers_x_inner_sheath = get_point_coordinates(inner_sheath_horizontal_wing_rounded.o)[0] - get_point_coordinates(inner_sheath_horizontal_wing.o)[0]
+        delta_centers_y_inner_sheath = get_point_coordinates(inner_sheath_horizontal_wing_rounded.o)[1] - get_point_coordinates(inner_sheath_horizontal_wing.o)[1]
+        
+        intersection_with_assembly_footprint = inner_sheath_horizontal_wing_rounded * assembly_bounding_rect
+        elements["CTRL_H_HOLLOW"]["geometry"] = intersection_with_assembly_footprint
+        elements["CTRL_H_HOLLOW"]["offset"] = (delta_centers_x_inner_sheath, delta_centers_y_inner_sheath, 0.0)
+        elements["CTRL_H_HOLLOW"]["macro"] = "CTRL_H"
+        elements["CTRL_H_HOLLOW"]["material"] = base_material
+    
 
-        cx, cy = ct(0.0, ap - inner_wing_w / 2.0 - cshs)
-        if tr > 0.0:
-            rc_inner_v = _remap_rounded_corner_indices([(1, tr - st)], corner)
-        else:
-            rc_inner_v = None
-        inner_rects.append(Rectangle(
-            name="CTRL_CROSS_WING_V_INNER",
-            height=inner_wing_w, width=inner_w,
+        # inner region for hollow sheath in vertical wing :
+        cx, cy = _corner_transform(corner, 0.0, ap - (cshs + (bhs - st - cshs)/2.0), ap)
+        inner_sheath_vertical_wing = Rectangle(
+            name="CTRL_CROSS_V_INNER",
+            width=(bt - 2.0*st),
+            height=(bhs - st - cshs),
+            center=(cx, cy, 0.0)
+        )
+        inner_sheath_vertical_wing_rounded = Rectangle(
+            name="CTRL_CROSS_V_INNER_HOLLOW",
+            width=(bt - 2.0*st),
+            height=(bhs - st - cshs),
             center=(cx, cy, 0.0),
-            rounded_corners=rc_inner_v,
-        ))
+            rounded_corners=_remap_rounded_corner_indices([(0, tr - st), (1, tr - st)], corner) if tr > 0.0 else None
+        )
 
-    # ------------------------------------------------------------------
-    # 3. Absorber tubes
-    # ------------------------------------------------------------------
-    tubes = []
+        delta_centers_x_inner_sheath_vertical = get_point_coordinates(inner_sheath_vertical_wing_rounded.o)[0] - get_point_coordinates(inner_sheath_vertical_wing.o)[0]
+        delta_centers_y_inner_sheath_vertical = get_point_coordinates(inner_sheath_vertical_wing_rounded.o)[1] - get_point_coordinates(inner_sheath_vertical_wing.o)[1]
+        
+        intersection_with_assembly_footprint = inner_sheath_vertical_wing_rounded * assembly_bounding_rect
+        elements["CTRL_V_HOLLOW"]["geometry"] = intersection_with_assembly_footprint
+        elements["CTRL_V_HOLLOW"]["offset"] = (delta_centers_x_inner_sheath_vertical, delta_centers_y_inner_sheath_vertical, 0.0)
+        elements["CTRL_V_HOLLOW"]["macro"] = "CTRL_V"
+        elements["CTRL_V_HOLLOW"]["material"] = base_material
+    
     for i in range(n_tubes):
-        offset = first_offset + i * delta
-
+        elements[f"ABS_TUBE_H_{i}"] = {}
+        elements[f"ABS_TUBE_V_{i}"] = {}
+        offset = first_tube_offset + float(i * delta)
         # Horizontal wing tube (along x)
-        tx, ty = ct(offset, ap)
-        tube_h = RectCell(
-            name=f"CTRL_TUBE_H_{i}",
-            height_x_width=(inner_w, delta),
-            center=(tx, ty, 0.0),
-        )
-        if r_inner < r_outer:
-            # Hollow tube (GE-14 style): inner absorber + outer cladding
-            tube_h.add_circle(r_inner)
-            tube_h.add_circle(r_outer)
-        else:
+        tx_h, ty_h = _corner_transform(corner, offset, ap, ap)
+        tx_v, ty_v = _corner_transform(corner, 0.0, ap - offset, ap)
+        if is_solid:
             # Solid rod (AT10 style): single absorber circle
-            tube_h.add_circle(r_outer)
-        tubes.append(tube_h)
+            abs_tube_h = Circle(radius=r_outer, center=(tx_h, ty_h, 0.0))
+            h_tube_intersection_with_af = abs_tube_h * assembly_bounding_rect
+            elements[f"ABS_TUBE_H_{i}"]["geometry"] = h_tube_intersection_with_af
+            elements[f"ABS_TUBE_H_{i}"]["macro"] = "CTRL_H"
+            elements[f"ABS_TUBE_H_{i}"]["material"] = absorber_mat
 
-        # Vertical wing tube (along y)
-        tx, ty = ct(0.0, ap - offset)
-        tube_v = RectCell(
-            name=f"CTRL_TUBE_V_{i}",
-            height_x_width=(delta, inner_w),
-            center=(tx, ty, 0.0),
-        )
-        if r_inner < r_outer:
-            tube_v.add_circle(r_inner)
-            tube_v.add_circle(r_outer)
+            abs_tube_v = Circle(radius=r_outer, center=(tx_v, ty_v, 0.0))
+            v_tube_intersection_with_af = abs_tube_v * assembly_bounding_rect
+            elements[f"ABS_TUBE_V_{i}"]["geometry"] = v_tube_intersection_with_af
+            elements[f"ABS_TUBE_V_{i}"]["macro"] = "CTRL_V"
+            elements[f"ABS_TUBE_V_{i}"]["material"] = absorber_mat
+            
+
         else:
-            tube_v.add_circle(r_outer)
-        tubes.append(tube_v)
+            # Hollow tube (GE-14 style): inner absorber + outer cladding
+            abs_tube_h = Circle(radius=r_inner, center=(tx_h, ty_h, 0.0))
+            h_tube_intersection_with_af = abs_tube_h * assembly_bounding_rect
+            elements[f"ABS_TUBE_H_{i}"]["geometry"] = h_tube_intersection_with_af
+            elements[f"ABS_TUBE_H_{i}"]["macro"] = "CTRL_H"
+            elements[f"ABS_TUBE_H_{i}"]["material"] = absorber_mat
 
-    # ------------------------------------------------------------------
-    # 4. Splitting rectangles at last-tube boundary
-    # ------------------------------------------------------------------
-    last_tube_offset = first_offset + (n_tubes - 1) * delta
-    last_boundary = last_tube_offset + delta / 2.0
+            abs_tube_v = Circle(radius=r_inner, center=(tx_v, ty_v, 0.0))
+            v_tube_intersection_with_af = abs_tube_v * assembly_bounding_rect
+            elements[f"ABS_TUBE_V_{i}"]["geometry"] = v_tube_intersection_with_af
+            elements[f"ABS_TUBE_V_{i}"]["macro"] = "CTRL_V"
+            elements[f"ABS_TUBE_V_{i}"]["material"] = absorber_mat
 
-    # Horizontal wing split: full-width rectangle from x=0 to
-    # blade_half_span, height = bt/2, centered on the top edge.
-    # Split at x = last_boundary.
-    split_rects = []
+            elements[f"SHEATH_TUBE_H_{i}"] = {}
+            elements[f"SHEATH_TUBE_V_{i}"] = {}
+            sheath_tube_h = Circle(radius=r_outer, center=(tx_h, ty_h, 0.0))
+            h_tube_intersection_with_af = sheath_tube_h * assembly_bounding_rect - abs_tube_h
+            elements[f"SHEATH_TUBE_H_{i}"]["geometry"] = h_tube_intersection_with_af
+            elements[f"SHEATH_TUBE_H_{i}"]["macro"] = "CTRL_H"
+            elements[f"SHEATH_TUBE_H_{i}"]["material"] = sheath_mat
 
-    # Left part of north arm (covers tubes region)
-    lw = last_boundary
-    if lw > 1e-6:
-        cx, cy = ct(lw / 2.0, ap - bt / 4.0)
-        split_rects.append(Rectangle(
-            name="CTRL_SPLIT_H_LEFT",
-            height=bt / 2.0, width=lw,
-            center=(cx, cy, 0.0),
-        ))
+            sheath_tube_v = Circle(radius=r_outer, center=(tx_v, ty_v, 0.0))
+            v_tube_intersection_with_af = sheath_tube_v * assembly_bounding_rect - abs_tube_v
+            elements[f"SHEATH_TUBE_V_{i}"]["geometry"] = v_tube_intersection_with_af
+            elements[f"SHEATH_TUBE_V_{i}"]["macro"] = "CTRL_V"
+            elements[f"SHEATH_TUBE_V_{i}"]["material"] = sheath_mat
+    
+    # create tip elements : intersections of a rectangle of bt / 4 by st with : moderator
+    
+    if not is_solid:
+        cx, cy = _corner_transform(corner, bhs - st/2.0, ap - bt/4.0, ap)
+        tip_rectangle_h = Rectangle(
+            name="CTRL_H_TIP",
+            width=st,
+            height=bt/2,
+            center=(cx, cy, 0.0)
+        )
+        rounded_sheath_tip = tip_rectangle_h*h_wing_in_assembly_footprint
+        moder_around_tip = tip_rectangle_h - h_wing_in_assembly_footprint
+        extra_moder_outside_of_tip_rectangle = rounded_modertator_tip_h - tip_rectangle_h
+        # build regions information and store in elements
+        macro = "CTRL_H"
+        elements["CTRL_H_TIP_SHEATH"] = {}
+        elements["CTRL_H_TIP_SHEATH"]["macro"] = macro
+        elements["CTRL_H_TIP_SHEATH"]["material"] = sheath_mat
+        elements["CTRL_H_TIP_SHEATH"]["geometry"] = rounded_sheath_tip
 
-    # Right part of north arm (tip region beyond last tube)
-    rw = bhs - last_boundary
-    cx, cy = ct(last_boundary + rw / 2.0, ap - bt / 4.0)
-    if rw>1e-6:
-        split_rects.append(Rectangle(
-            name="CTRL_SPLIT_H_RIGHT",
-            height=bt / 2.0, width=rw,
-            center=(cx, cy, 0.0),
-        ))
+        elements["CTRL_H_TIP_MODER"] = {}
+        elements["CTRL_H_TIP_MODER"]["macro"] = macro 
+        elements["CTRL_H_TIP_MODER"]["material"] = "MODERATOR"
+        elements["CTRL_H_TIP_MODER"]["geometry"] = moder_around_tip
 
-    # Bottom part of west arm (covers tubes region)
-    bh = last_boundary
-    cx, cy = ct(bt / 4.0, ap - lw / 2.0)
-    if bh>1e-6:
-        split_rects.append(Rectangle(
-            name="CTRL_SPLIT_V_BOT",
-            height=bh, width=bt / 2.0,
-            center=(cx, cy, 0.0),
-        ))
+        elements["CTRL_H_TIP_EXTRA_MODER"] = {}
+        elements["CTRL_H_TIP_EXTRA_MODER"]["macro"] = macro 
+        elements["CTRL_H_TIP_EXTRA_MODER"]["material"] = "MODERATOR"
+        elements["CTRL_H_TIP_EXTRA_MODER"]["geometry"] = extra_moder_outside_of_tip_rectangle
 
-    # Top part of west arm (tip region beyond last tube)
-    th = bhs - last_boundary
-    cx, cy = ct(bt / 4.0, ap - last_boundary - th / 2.0)
-    if th>1e-6:
-        split_rects.append(Rectangle(
-            name="CTRL_SPLIT_V_TOP",
-            height=th, width=bt / 2.0,
-            center=(cx, cy, 0.0),
-        ))
+        cx, cy = _corner_transform(corner, bt/4.0, ap - (bhs - st/2.0), ap)
+        tip_rectangle_v = Rectangle(
+            name="CTRL_V_TIP",
+            height=st,
+            width=bt/2,
+            center=(cx, cy, 0.0)
+        )
+        rounded_sheath_tip = tip_rectangle_v*v_wing_in_assembly_footprint
+        moder_around_tip = tip_rectangle_v - v_wing_in_assembly_footprint
+        extra_moder_outside_of_tip_rectangle = rounded_modertator_tip_v - tip_rectangle_v
+        # build regions information and store in elements
+        macro = "CTRL_V"
+        elements["CTRL_V_TIP_SHEATH"] = {}
+        elements["CTRL_V_TIP_SHEATH"]["macro"] = macro
+        elements["CTRL_V_TIP_SHEATH"]["material"] = sheath_mat
+        elements["CTRL_V_TIP_SHEATH"]["geometry"] = rounded_sheath_tip
 
-    # ------------------------------------------------------------------
-    # 5. Wing footprints (tight AABBs in assembly coordinates)
-    # ------------------------------------------------------------------
-    # Build one tight AABB per sheath structural region, clamped to the
-    # assembly domain [0, ap]^2, so that the L-shaped central structure
-    # does not produce an over-sized bounding box that would swallow
-    # adjacent gap regions.
-    def _tight_aabb(corners_canon):
-        pts = [ct(cx_, cy_) for cx_, cy_ in corners_canon]
-        xs = [p[0] for p in pts]
-        ys = [p[1] for p in pts]
-        return (max(0.0, min(xs)), max(0.0, min(ys)),
-                min(ap, max(xs)), min(ap, max(ys)))
+        elements["CTRL_V_TIP_MODER"] = {}
+        elements["CTRL_V_TIP_MODER"]["macro"] = macro 
+        elements["CTRL_V_TIP_MODER"]["material"] = "MODERATOR"
+        elements["CTRL_V_TIP_MODER"]["geometry"] = moder_around_tip
 
-    # Each MACRO region must be convex.  The central structure is an
-    # L-shape, so we decompose it: the quarter-centre square stays as
-    # CROSS_CENTER; the right CS half is merged into CROSS_WING_1
-    # (together they form the convex rectangle [bt/2, bhs] × blade-y);
-    # the bottom CS half is merged into CROSS_WING_2.
-    wing_footprints = [
-        # Quarter centre — convex square
-        (_tight_aabb([(0, ap - bt / 2.0), (bt / 2.0, ap - bt / 2.0),
-                       (bt / 2.0, ap), (0, ap)]),
-         "CROSS_CENTER"),
-        # Horizontal wing + right CS half — convex rectangle
-        (_tight_aabb([(bt / 2.0, ap - bt / 2.0), (bhs, ap - bt / 2.0),
-                       (bhs, ap + bt / 2.0), (bt / 2.0, ap + bt / 2.0)]),
-         "CROSS_WING_1"),
-        # Vertical wing + bottom CS half — convex rectangle
-        (_tight_aabb([(-bt / 2.0, ap - bhs), (bt / 2.0, ap - bhs),
-                       (bt / 2.0, ap - bt / 2.0), (-bt / 2.0, ap - bt / 2.0)]),
-         "CROSS_WING_2"),
-    ]
+        elements["CTRL_V_TIP_EXTRA_MODER"] = {}
+        elements["CTRL_V_TIP_EXTRA_MODER"]["macro"] = macro 
+        elements["CTRL_V_TIP_EXTRA_MODER"]["material"] = "MODERATOR"
+        elements["CTRL_V_TIP_EXTRA_MODER"]["geometry"] = extra_moder_outside_of_tip_rectangle
 
-    print(f"[control cross] Built {len(sheath_rects)} sheath rects, "
-          f"{len(inner_rects)} inner rects, {len(tubes)} tubes, "
-          f"{len(split_rects)} split rects for corner '{corner}'.")
+    ### Introduce rectangular macros in the prolongation of cross arms
+    # recover necessary dimensions from assembly_model
+    pin_pitch = assembly_model.pin_geometry_dict["pin_pitch"]
+    n_rows = len(assembly_model.lattice_description)
+    n_cols = len(assembly_model.lattice_description[0])
+    offset_x = assembly_model.translation_offset_x
+    offset_y = assembly_model.translation_offset_y
+    # horizontal :
+    cx, cy = _corner_transform(corner, bhs + ((n_cols-1)*pin_pitch+offset_x - bhs)/2, ap - bt/4.0, ap)
+    prolong_rect_h = Rectangle(
+        name = "prolong_H",
+        height=bt/2,
+        width=((n_cols-1)*pin_pitch+offset_x - bhs),
+        center=(cx, cy, 0.0)
+    )
+    elements["CTRL_PROLONG_H"] = {}
+    elements["CTRL_PROLONG_H"]["macro"] = "CTRL_H"
+    elements["CTRL_PROLONG_H"]["material"] = "MODERATOR"
+    elements["CTRL_PROLONG_H"]["geometry"] = prolong_rect_h
 
-    return {
-        "sheath_rectangles": sheath_rects,
-        "inner_sheath_rectangles": inner_rects,
-        "absorber_tubes": tubes,
-        "splitting_rectangles": split_rects,
-        "wing_footprints": wing_footprints,
-    }
+    # vertical :
+    cx, cy = _corner_transform(corner, bt/4.0, ap - (bhs + ((n_rows-1)*pin_pitch+offset_y - bhs)/2), ap)
+    prolong_rect_v = Rectangle(
+        name = "prolong_V",
+        width=bt/2,
+        height=((n_rows-1)*pin_pitch+offset_y - bhs),
+        center=(cx, cy, 0.0)
+    )
+    elements["CTRL_PROLONG_V"] = {}
+    elements["CTRL_PROLONG_V"]["macro"] = "CTRL_V"
+    elements["CTRL_PROLONG_V"]["material"] = "MODERATOR"
+    elements["CTRL_PROLONG_V"]["geometry"] = prolong_rect_v
 
+    return elements
 
 def _compute_asymmetric_coolant_channel_box_rects(assembly_model, center):
     """
@@ -1062,12 +1120,19 @@ def _compute_asymmetric_coolant_channel_box_rects(assembly_model, center):
         Outer channel box boundary with proper centering for asymmetric gaps
     """
     from glow.geometry_layouts.geometries import Rectangle
+    from glow.geometry_layouts.layouts import Region
 
     ap = assembly_model.assembly_pitch
     cbt = assembly_model.channel_box_thickness
     gap_wide = assembly_model.gap_wide
     gap_narrow = assembly_model.gap_narrow
     corner_r_inner = assembly_model.corner_inner_radius_of_curvature
+    pin_pitch = assembly_model.pin_geometry_dict["pin_pitch"]
+    n_rows = len(assembly_model.lattice_description)
+    n_cols = len(assembly_model.lattice_description[0])
+
+    lattice_pitch_x = n_cols * pin_pitch
+    lattice_pitch_y = n_rows * pin_pitch
 
     # Detect lattice symmetry to determine offset strategy
     sym_type = assembly_model.check_diagonal_symmetry()
@@ -1098,13 +1163,15 @@ def _compute_asymmetric_coolant_channel_box_rects(assembly_model, center):
 
     elif sym_type == "main-diagonal":
         # Symmetric on both axes (both use gap_wide due to symmetry)
-        channel_box_outer_x = ap - 2.0 * gap_wide
-        channel_box_outer_y = ap - 2.0 * gap_wide
+        channel_box_outer_x = ap - gap_wide - gap_narrow
+        channel_box_outer_y = ap - gap_narrow - gap_wide 
 
         channel_box_inner_x = channel_box_outer_x - 2.0 * cbt
         channel_box_inner_y = channel_box_outer_y - 2.0 * cbt
 
-        rect_center = center
+        offset = (gap_wide - gap_narrow) / 2.0
+
+        rect_center = (center[0] + offset, center[1] + offset, center[2])
 
     else:
         # No symmetry or quarter/eighth symmetry
@@ -1144,6 +1211,7 @@ def _compute_asymmetric_coolant_channel_box_rects(assembly_model, center):
         center=rect_center,
         rounded_corners=rounded_corners_coolant,
     )
+    print(f"Created coolant rectangle with width {channel_box_inner_x:.3f} and height {channel_box_inner_y:.3f} at center {rect_center} with rounded corners {rounded_corners_coolant}")
 
     channel_box_rect = Rectangle(
         name="channel_box",
@@ -1152,462 +1220,490 @@ def _compute_asymmetric_coolant_channel_box_rects(assembly_model, center):
         center=rect_center,
         rounded_corners=rounded_corners_chanbox,
     )
-
-    return coolant_rect, channel_box_rect
-
-
-def build_assembly_box(assembly_model, center=None):
-    """
-    Build the assembly box cell from the assembly model dimensions.
-
-    Supports both symmetric and asymmetric gap configurations. With asymmetric
-    gaps (gap_wide ≠ gap_narrow), the coolant and channel box rectangles are
-    automatically off-centered to account for different moderator widths on
-    different sides, based on the detected lattice symmetry.
-
-    Without a control cross the result is a 3-region cell (intra-assembly
-    coolant / channel box / inter-assembly moderator).
-
-    When ``assembly_model.has_control_cross`` is ``True`` the control
-    cross shapes (sheath, inner cavity, absorber tubes) are also
-    included in the partition and materials are assigned by geometric
-    containment against all reference shapes.
-
-    Parameters
-    ----------
-    assembly_model : CartesianAssemblyModel
-        Assembly model providing ``assembly_pitch``, ``gap_wide``, ``gap_narrow``,
-        ``channel_box_thickness``, ``corner_inner_radius_of_curvature``,
-        and optionally ``control_cross``.
-    center : tuple or None
-        ``(x, y, z)`` centre of the box.  Defaults to
-        ``(assembly_pitch / 2, assembly_pitch / 2, 0)``.
-
-    Returns
-    -------
-    assembly_box_cell : RectCell
-        The partitioned assembly box cell with material properties set
-        on every sub-face.
-    """
-    ap = assembly_model.assembly_pitch
-    cbt = assembly_model.channel_box_thickness
-
-    if center is None:
-        center = (ap / 2.0, ap / 2.0, 0.0)
-
-    # Compute asymmetry-aware coolant and channel box rectangles
-    # This handles both symmetric (backward compatible) and asymmetric gap configurations
-    coolant_rect, channel_box_rect = _compute_asymmetric_coolant_channel_box_rects(
-        assembly_model, center
-    )
-
-    # Outer moderator cell
-    assembly_box_cell = RectCell(
-        name="assembly_box",
-        height_x_width=(ap, ap),
-        center=center,
-    )
-
-    # ------------------------------------------------------------------
-    # Build partition shapes list
-    # ------------------------------------------------------------------
-    partition_shapes = [channel_box_rect.face, coolant_rect.face]
-
-    ctrl_shapes = None
-    has_cross = getattr(assembly_model, "has_control_cross", False)
-    if has_cross:
-        ctrl = assembly_model.control_cross
-        ctrl_shapes = _build_control_cross_shapes(ctrl, ap)
-        for r in ctrl_shapes["sheath_rectangles"]:
-            partition_shapes.append(r.face)
-        for r in ctrl_shapes["inner_sheath_rectangles"]:
-            partition_shapes.append(r.face)
-        for t in ctrl_shapes["absorber_tubes"]:
-            partition_shapes.append(t.face)
-        for r in ctrl_shapes["splitting_rectangles"]:
-            partition_shapes.append(r.face)
-
-    # ------------------------------------------------------------------
-    # Single partition call
-    # ------------------------------------------------------------------
-    partitioned_face = make_partition(
-        [assembly_box_cell.face],
-        partition_shapes,
-        shape_type=ShapeType.COMPOUND,
-    )
-    assembly_box_cell.update_geometry_from_face(
-        GeometryType.TECHNOLOGICAL, partitioned_face,
-    )
-
-    # ------------------------------------------------------------------
-    # Assign materials
-    # ------------------------------------------------------------------
-    if not has_cross:
-        # Simple 3-region case (backward compatible)
-        assembly_box_cell.set_properties({
-            PropertyType.MATERIAL: ["COOLANT", "CHANNEL_BOX", "MODERATOR"],
-        })
-    else:
-        # Classify every sub-face by geometric containment
-        _assign_materials_with_control_cross(
-            assembly_box_cell,
-            coolant_rect,
-            channel_box_rect,
-            ctrl_shapes,
-            ctrl,
+    print(f"Created channel box rectangle with width {channel_box_outer_x:.3f} and height {channel_box_outer_y:.3f} at center {rect_center} with rounded corners {rounded_corners_chanbox}")
+    
+    if lattice_pitch_x < channel_box_inner_x and lattice_pitch_y < channel_box_inner_y:
+        lattice_rect = Rectangle(
+            name="lattice_bounding_rectangular_box",
+            height=lattice_pitch_y,
+            width=lattice_pitch_x,
+            center=rect_center
         )
-        # Attach cross metadata for downstream use by
-        # subdivide_box_into_macros
-        assembly_box_cell._ctrl_cross_shapes = ctrl_shapes
+        print(f"Created lattice bounding rectangle with width {lattice_pitch_x:.3f} and height {lattice_pitch_y:.3f} at center {rect_center}")
+    else:
+        lattice_rect = None
+        print(f"Warning: Lattice pitch ({lattice_pitch_x:.3f}, {lattice_pitch_y:.3f}) is greater or equal to channel box dimensions ({channel_box_inner_x:.3f}, {channel_box_inner_y:.3f}). Skipping lattice bounding rectangle.")
 
-    return assembly_box_cell
+    return  lattice_rect, coolant_rect, channel_box_rect
 
 
-def _assign_materials_with_control_cross(
-    assembly_box_cell, coolant_rect, channel_box_rect, ctrl_shapes, ctrl
+def _generate_macro_subdivision_rectangles(
+    assembly_model,
+    calculation_step,
+    x0, y0, x1, y1,
+    center
 ):
     """
-    Assign MATERIAL properties to every sub-face of the assembly box
-    cell using geometric containment against reference shapes.
+    Generate rectangles for all MACRO regions surrounding the pin lattice.
 
-    Priority order (innermost first):
-
-    1. Absorber tube inner circle → absorber material
-    2. Absorber tube outer circle → sheath material (tube cladding)
-    3. Inside inner-sheath rectangle but outside tubes → MODERATOR
-       (inter-tube gap)
-    4. Inside outer-sheath / structure rectangle → sheath material
-    5. Inside coolant boundary → COOLANT
-    6. Inside channel-box boundary → CHANNEL_BOX
-    7. Otherwise → MODERATOR
-    """
-    subfaces = assembly_box_cell.extract_subfaces()
-    n = len(subfaces)
-    materials = [""] * n
-
-    # Collect reference faces for containment tests
-    tube_cells = ctrl_shapes["absorber_tubes"]
-    inner_rects = ctrl_shapes["inner_sheath_rectangles"]
-    sheath_rects = ctrl_shapes["sheath_rectangles"]
-
-    solid = ctrl.is_solid  # AT10-style (no sheath cavity)
-
-    # Pre-extract absorber tube circle faces for containment.
-    # Hollow tubes (GE-14): 2 circles per tube (inner absorber, outer cladding).
-    # Solid rods  (AT10):   1 circle per tube (absorber only).
-    if solid:
-        tube_circle_faces = [t.inner_circles[0].face for t in tube_cells]
-    else:
-        tube_inner_faces = []
-        tube_outer_faces = []
-        for t in tube_cells:
-            # inner_circles[0] is the smaller (absorber inner) circle
-            # inner_circles[1] is the larger (absorber outer) circle
-            tube_inner_faces.append(t.inner_circles[0].face)
-            tube_outer_faces.append(t.inner_circles[1].face)
-
-    inner_rect_faces = [r.face for r in inner_rects]
-    sheath_rect_faces = [r.face for r in sheath_rects]
-
-    absorber_mat = ctrl.absorber_material
-    sheath_mat = ctrl.sheath_material
-
-    for i, subface in enumerate(subfaces):
-        pt = make_vertex_inside_face(subface)
-
-        # 1–2. Absorber tubes
-        found_tube = False
-        if solid:
-            # Solid rod: single circle → absorber material
-            for j, cf in enumerate(tube_circle_faces):
-                if is_point_inside_shape(pt, cf):
-                    materials[i] = absorber_mat
-                    found_tube = True
-                    break
-        else:
-            # Hollow tube: inner circle → absorber, outer annulus → sheath
-            for j in range(len(tube_cells)):
-                if is_point_inside_shape(pt, tube_inner_faces[j]):
-                    materials[i] = absorber_mat
-                    found_tube = True
-                    break
-                if is_point_inside_shape(pt, tube_outer_faces[j]):
-                    materials[i] = sheath_mat
-                    found_tube = True
-                    break
-        if found_tube:
-            continue
-
-        # 3. Inner sheath cavity (inter-tube moderator)
-        #    Only applies to sheathed crosses — for solid crosses the
-        #    inner_rects list is empty and this block is skipped.
-        in_inner = False
-        for irf in inner_rect_faces:
-            if is_point_inside_shape(pt, irf):
-                materials[i] = "MODERATOR"
-                in_inner = True
-                break
-        if in_inner:
-            continue
-
-        # 4. Outer sheath / structural rectangles
-        in_sheath = False
-        for srf in sheath_rect_faces:
-            if is_point_inside_shape(pt, srf):
-                materials[i] = sheath_mat
-                in_sheath = True
-                break
-        if in_sheath:
-            continue
-
-        # 5–7. Standard box regions
-        if is_point_inside_shape(pt, coolant_rect.face):
-            materials[i] = "COOLANT"
-        elif is_point_inside_shape(pt, channel_box_rect.face):
-            materials[i] = "CHANNEL_BOX"
-        else:
-            materials[i] = "MODERATOR"
-
-    assembly_box_cell.set_properties({
-        PropertyType.MATERIAL: materials,
-    })
-
-    # Summary
-    from collections import Counter
-    counts = Counter(materials)
-    print(f"[control cross] Assigned materials to {n} sub-faces: "
-          f"{dict(counts)}")
-
-
-def _reassign_materials_by_containment(assembly_box_cell, assembly_model):
-    """
-    Reassign MATERIAL properties to every sub-face of the assembly box
-    cell using geometric containment against freshly built reference
-    shapes.
-
-    This function is intended to be called **after** a discretization
-    partition (e.g. in ``discretize_box``) to guarantee correct
-    material assignments regardless of how glow's internal
-    ``update_geometry_from_face`` propagates properties across
-    successive partitions.
-
-    The classification logic mirrors ``_assign_materials_with_control_cross``
-    and the material loop in ``subdivide_box_into_macros``:
-
-    Priority order (innermost first):
-
-    1. Absorber tube inner circle → absorber material
-    2. Absorber tube outer circle → sheath material (tube cladding)
-    3. Inside inner-sheath rectangle but outside tubes → MODERATOR
-       (inter-tube gap; sheath material for solid crosses)
-    4. Inside outer-sheath / structure rectangle → sheath material
-    5. Inside coolant boundary → COOLANT
-    6. Inside channel-box boundary → CHANNEL_BOX
-    7. Otherwise → MODERATOR
+    Handles symmetric and asymmetric gap configurations. The lattice footprint
+    (x0, y0, x1, y1) already incorporates asymmetric offsets from translation_offset_x/y.
 
     Parameters
     ----------
-    assembly_box_cell : RectCell
-        The assembly box cell whose sub-faces need material
-        re-classification.
     assembly_model : CartesianAssemblyModel
-        Assembly model providing dimensional information and optional
-        control cross data.
-    """
-    from collections import Counter
-
-    ap = assembly_model.assembly_pitch
-    center = (ap / 2.0, ap / 2.0, 0.0)
-
-    # Use the asymmetry-aware helper to build reference rectangles
-    # This ensures material classification matches the actual geometry
-    # (which may be off-centered with asymmetric gaps)
-    coolant_boundary, channel_box_boundary = _compute_asymmetric_coolant_channel_box_rects(
-        assembly_model, center
-    )
-
-    # ------------------------------------------------------------------
-    # Control cross reference shapes (if present)
-    # ------------------------------------------------------------------
-    has_cross = getattr(assembly_model, "has_control_cross", False)
-    ctrl_tube_inner_faces = []
-    ctrl_tube_outer_faces = []
-    ctrl_inner_rect_faces = []
-    ctrl_sheath_rect_faces = []
-    ctrl_absorber_mat = None
-    ctrl_sheath_mat = None
-    solid = False
-
-    if has_cross:
-        ctrl = assembly_model.control_cross
-        ctrl_shapes_ref = getattr(
-            assembly_box_cell, "_ctrl_cross_shapes", None
-        )
-        if ctrl_shapes_ref is None:
-            ctrl_shapes_ref = _build_control_cross_shapes(ctrl, ap)
-        ctrl_absorber_mat = ctrl.absorber_material
-        ctrl_sheath_mat = ctrl.sheath_material
-        solid = ctrl.is_solid
-
-        # Pre-extract absorber tube circle faces
-        for t in ctrl_shapes_ref["absorber_tubes"]:
-            ctrl_tube_inner_faces.append(t.inner_circles[0].face)
-            if not solid:
-                ctrl_tube_outer_faces.append(t.inner_circles[1].face)
-        ctrl_inner_rect_faces = [
-            r.face for r in ctrl_shapes_ref["inner_sheath_rectangles"]
-        ]
-        ctrl_sheath_rect_faces = [
-            r.face for r in ctrl_shapes_ref["sheath_rectangles"]
-        ]
-
-    # ------------------------------------------------------------------
-    # Classify every sub-face
-    # ------------------------------------------------------------------
-    subfaces = assembly_box_cell.extract_subfaces()
-    n = len(subfaces)
-    materials = [""] * n
-
-    for i, subface in enumerate(subfaces):
-        pt = make_vertex_inside_face(subface)
-
-        mat_assigned = False
-        if has_cross:
-            # 1–2. Absorber tubes
-            if solid:
-                for cf in ctrl_tube_inner_faces:
-                    if is_point_inside_shape(pt, cf):
-                        materials[i] = ctrl_absorber_mat
-                        mat_assigned = True
-                        break
-            else:
-                for j in range(len(ctrl_tube_inner_faces)):
-                    if is_point_inside_shape(pt, ctrl_tube_inner_faces[j]):
-                        materials[i] = ctrl_absorber_mat
-                        mat_assigned = True
-                        break
-                    if is_point_inside_shape(pt, ctrl_tube_outer_faces[j]):
-                        materials[i] = ctrl_sheath_mat
-                        mat_assigned = True
-                        break
-
-            if not mat_assigned:
-                # 3. Inner sheath cavity (inter-tube moderator) or
-                #    solid cross sheath material
-                for irf in ctrl_inner_rect_faces:
-                    if is_point_inside_shape(pt, irf):
-                        if solid:
-                            materials[i] = ctrl_sheath_mat
-                        else:
-                            materials[i] = "MODERATOR"
-                        mat_assigned = True
-                        break
-
-            if not mat_assigned:
-                # 4. Outer sheath / structural rectangles
-                for srf in ctrl_sheath_rect_faces:
-                    if is_point_inside_shape(pt, srf):
-                        materials[i] = ctrl_sheath_mat
-                        mat_assigned = True
-                        break
-
-        if not mat_assigned:
-            # 5–7. Standard box regions
-            if is_point_inside_shape(pt, coolant_boundary.face):
-                materials[i] = "COOLANT"
-            elif is_point_inside_shape(pt, channel_box_boundary.face):
-                materials[i] = "CHANNEL_BOX"
-            else:
-                materials[i] = "MODERATOR"
-
-    assembly_box_cell.set_properties({
-        PropertyType.MATERIAL: materials,
-    })
-
-    counts = Counter(materials)
-    print(f"[reassign_materials] Re-assigned materials to {n} sub-faces: "
-          f"{dict(counts)}")
-
-
-def _classify_point_to_macro(x, y, x0, y0, x1, y1, pin_pitch, n_cols, n_rows,
-                             wing_footprints=None):
-    """
-    Classify an (x, y) coordinate into a MACRO name based on its position
-    relative to the pin-lattice footprint and, optionally, the control
-    cross wing footprints.
-
-    The pin lattice occupies the rectangle ``[x0, x1] × [y0, y1]``.
-    Side strips are subdivided into per-pin-row/column regions.
-
-    Parameters
-    ----------
-    x, y : float
-        Coordinates of the point.
-    x0, y0 : float
-        Lower-left corner of the pin-lattice footprint.
-    x1, y1 : float
-        Upper-right corner of the pin-lattice footprint.
-    pin_pitch : float
-        Pin pitch (used to identify column/row index).
-    n_cols, n_rows : int
-        Number of pin columns and rows.
-    wing_footprints : dict or None
-        If provided, a dict with keys ``"wing_1"``, ``"wing_2"``,
-        ``"center"`` each mapping to an ``(x_min, y_min, x_max, y_max)``
-        axis-aligned bounding box.  Points inside these boxes are
-        classified as ``"CROSS_WING_1"``, ``"CROSS_WING_2"``, or
-        ``"CROSS_CENTER"`` instead of the standard MACRO names.
+        Assembly model with pin_pitch, lattice_description, etc.
+    x0, y0, x1, y1 : float
+        Lattice footprint bounds (already include asymmetric gap handling)
+    center : tuple
+        Assembly center (x_center, y_center, z_center)
 
     Returns
     -------
-    str
-        MACRO name (e.g. ``"LEFT_3"``, ``"CORNER_BL"``, ``"BASE_CELL"``,
-        ``"CROSS_WING_1"``).
+    Dict[str, tuple]
+        Maps MACRO name → (name, height, width, (x, y, z), rounded_corners)
+
+        Example:
+        {
+            "LEFT_1": ("LEFT_1", strip_width, lattice_pitch_y, (x, y, 0), False),
+            "BOT_1": ("BOT_1", strip_height, pin_pitch, (x, y, 0), False),
+            "CORNER_BL": ("CORNER_BL", y0, x0, (x0/2, y0/2, 0), False),
+            ...
+        }
     """
-    eps = 1e-6  # tolerance for boundary checks
+    ap = assembly_model.assembly_pitch
+    pin_pitch = assembly_model.pin_geometry_dict["pin_pitch"]
+    n_rows = len(assembly_model.lattice_description)
+    n_cols = len(assembly_model.lattice_description[0])
 
-    # --- Control cross test (highest priority) ---
-    if wing_footprints is not None:
-        for (xmin, ymin, xmax, ymax), label in wing_footprints:
-            if (xmin - eps) <= x <= (xmax + eps) and (ymin - eps) <= y <= (ymax + eps):
-                return label
+    macros = {}
+    z_center = center[2]
 
-    in_x_band = (x0 - eps) <= x <= (x1 + eps)
-    in_y_band = (y0 - eps) <= y <= (y1 + eps)
+    for col_idx in range(n_cols):
+        # ======================================================================
+        # BOTTOM STRIP: [x0, x1] × [0, y0]
+        # Subdivided into n_cols regions (one per pin column)
+        # ======================================================================
+        strip_height = y0  # Distance from bottom edge (y=0) to lattice bottom (y=y0)
+        # Rectangle spans one pin column width
+        col_x_min = x0 + col_idx * pin_pitch
+        col_x_max = col_x_min + pin_pitch
 
-    if in_x_band and in_y_band:
-        # Inside the pin-lattice footprint (residual coolant region)
-        return "BASE_CELL"
+        # Center of this bottom strip rectangle
+        rect_center_x = (col_x_min + col_x_max) / 2.0
+        rect_center_y = strip_height / 2.0  # Centered in the bottom strip
 
-    if in_x_band:
-        # Top or bottom strip — index by column
-        col = int((x - x0) / pin_pitch)
-        col = max(0, min(col, n_cols - 1))
-        col_label = col + 1  # 1-based
-        if y < y0:
-            return f"BOT_{col_label}"
+        region_name = f"BOT_{col_idx + 1}"  # 1-based indexing
+
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            macro_name = calculation_step.macro_assignment[0][col_idx]
+            print(f"For region name : {region_name}, create macro subdivison with macro_name = {macro_name}")
         else:
-            return f"TOP_{col_label}"
+            macro_name = region_name
 
-    if in_y_band:
-        # Left or right strip — index by row
-        row = int((y - y0) / pin_pitch)
-        row = max(0, min(row, n_rows - 1))
-        row_label = row + 1  # 1-based
-        if x < x0:
-            return f"LEFT_{row_label}"
+        rect_params = (
+            macro_name,                                  # name
+            strip_height,                                # height (y-direction)
+            pin_pitch,                                   # width (x-direction)
+            (rect_center_x, rect_center_y, z_center),   # center (x, y, z)
+            None
+        )
+        macros[region_name] = rect_params
+
+        # ======================================================================
+        # TOP STRIP: [x0, x1] × [y1, ap]
+        # Subdivided into n_cols regions (one per pin column)
+        # ======================================================================
+    
+        strip_height = ap - y1  # Distance from lattice top (y=y1) to top edge (y=ap)
+        col_x_min = x0 + col_idx * pin_pitch
+        col_x_max = col_x_min + pin_pitch
+
+        rect_center_x = (col_x_min + col_x_max) / 2.0
+        rect_center_y = y1 + (ap - y1) / 2.0  # Centered in the top strip
+
+        region_name = f"TOP_{col_idx + 1}"
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            macro_name = calculation_step.macro_assignment[-1][col_idx]
+            print(f"For region name : {region_name}, create macro subdivison with macro_name = {macro_name}")
         else:
-            return f"RIGHT_{row_label}"
+            macro_name = region_name
 
-    # Corner regions
-    if x < x0 and y < y0:
-        return "CORNER_BL"
-    elif x >= x1 and y < y0:
-        return "CORNER_BR"
-    elif x < x0 and y >= y1:
-        return "CORNER_TL"
+        rect_params = (
+            macro_name,
+            strip_height,
+            pin_pitch,
+            (rect_center_x, rect_center_y, z_center),
+            None
+        )
+        macros[region_name] = rect_params
+
+
+    for row_idx in range(n_rows):
+        # ======================================================================
+        # LEFT STRIP: [0, x0] × [y0, y1]
+        # Subdivided into n_rows regions (one per pin row)
+        # ======================================================================
+        strip_width = x0  # Distance from left edge (x=0) to lattice left (x=x0)
+        lattice_pitch_y = y1 - y0
+        row_y_min = y0 + row_idx * pin_pitch
+        row_y_max = row_y_min + pin_pitch
+
+        rect_center_x = strip_width / 2.0  # Centered in the left strip
+        rect_center_y = (row_y_min + row_y_max) / 2.0
+
+        region_name = f"LEFT_{row_idx + 1}"
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            macro_name = calculation_step.macro_assignment[row_idx][0]
+            print(f"For region name : {region_name}, create macro subdivison with macro_name = {macro_name}")
+        else:
+            macro_name = region_name
+
+        rect_params = (
+            macro_name,
+            pin_pitch,                                   # height (y-direction)
+            strip_width,                                 # width (x-direction)
+            (rect_center_x, rect_center_y, z_center),
+            None
+        )
+        macros[region_name] = rect_params
+
+        # ======================================================================
+        # RIGHT STRIP: [x1, ap] × [y0, y1]
+        # Subdivided into n_rows regions (one per pin row)
+        # ======================================================================
+        strip_width = ap - x1  # Distance from lattice right (x=x1) to right edge (x=ap)
+        row_y_min = y0 + row_idx * pin_pitch
+        row_y_max = row_y_min + pin_pitch
+
+        rect_center_x = x1 + (ap - x1) / 2.0  # Centered in the right strip
+        rect_center_y = (row_y_min + row_y_max) / 2.0
+
+        region_name = f"RIGHT_{row_idx + 1}"
+        if calculation_step is not None and calculation_step.macro_assignment is not None:
+            macro_name = calculation_step.macro_assignment[row_idx][-1]
+            print(f"For region name : {region_name}, create macro subdivison with macro_name = {macro_name}")
+        else:
+            macro_name = region_name
+        
+        rect_params = (
+            macro_name,
+            pin_pitch,
+            strip_width,
+            (rect_center_x, rect_center_y, z_center),
+            None
+        )
+        macros[region_name] = rect_params
+
+    # ======================================================================
+    # CORNERS
+    # ======================================================================
+    corner_width_bl = x0
+    corner_height_bl = y0
+    corner_name = "CORNER_BL"
+    if calculation_step is not None and calculation_step.macro_assignment is not None:
+        macro_name = calculation_step.macro_assignment[0][0]
+        print(f"For corner name : {corner_name}, create macro subdivison with macro_name = {macro_name}")
     else:
-        return "CORNER_TR"
+        macro_name = corner_name
+    # Bottom-Left
+    macros["CORNER_BL"] = (
+        macro_name,
+        corner_height_bl,
+        corner_width_bl,
+        (corner_width_bl / 2.0, corner_height_bl / 2.0, z_center),
+        None
+    )
+
+    # Bottom-Right
+    corner_width_br = ap - x1
+    corner_height_br = y0
+    corner_name = "CORNER_BR"
+    if calculation_step is not None and calculation_step.macro_assignment is not None:
+        macro_name = calculation_step.macro_assignment[0][-1]
+        print(f"For corner name : {corner_name}, create macro subdivison with macro_name = {macro_name}")
+    else:
+        macro_name = corner_name
+    macros["CORNER_BR"] = (
+        macro_name,
+        corner_height_br,
+        corner_width_br,
+        (x1 + corner_width_br / 2.0, corner_height_br / 2.0, z_center),
+        None
+    )
+
+    # Top-Left
+    corner_width_tl = x0
+    corner_height_tl = ap - y1
+    corner_name = "CORNER_TL"
+    if calculation_step is not None and calculation_step.macro_assignment is not None:
+        macro_name = calculation_step.macro_assignment[-1][0]
+        print(f"For corner name : {corner_name}, create macro subdivison with macro_name = {macro_name}")
+    else:
+        macro_name = corner_name
+    macros["CORNER_TL"] = (
+        macro_name,
+        corner_height_tl,
+        corner_width_tl,
+        (corner_width_tl / 2.0, y1 + corner_height_tl / 2.0, z_center),
+        None
+    )
+
+    # Top-Right
+    corner_width_tr = ap - x1
+    corner_height_tr = ap - y1
+    corner_name = "CORNER_TR"
+    if calculation_step is not None and calculation_step.macro_assignment is not None:
+        macro_name = calculation_step.macro_assignment[-1][-1]
+        print(f"For corner name : {corner_name}, create macro subdivison with macro_name = {macro_name}")
+    else:
+        macro_name = corner_name
+    macros["CORNER_TR"] = (
+        macro_name,
+        corner_height_tr,
+        corner_width_tr,
+        (x1 + corner_width_tr / 2.0, y1 + corner_height_tr / 2.0, z_center),
+        None
+    )
+
+    return macros
+
+
+def is_degenerate(geometry: GeomWrapper):
+    """
+    Check if a geometry is degenerate (zero perimeter or area, or None).
+
+    Parameters
+    ----------
+    geometry : GeomWrapper
+        Geometry object wrapping a SALOME's GEOM_Object.
+
+    Returns
+    -------
+    bool
+        True if geometry is None or has zero perimeter or area.
+    """
+    if geometry is None:
+        return True
+
+    # Get perimeter and area of the geometry
+    perimeter, area, _ = get_basic_properties(geometry)
+    if perimeter <= 1e-7 or area <= 1e-7:
+        return True   
+    return False
+
+
+def _wrap_and_validate_geometry(geometry, layer_name=""):
+    """
+    Wrap geometry to ensure it's valid for Region creation.
+    Handles COMPOUND geometries by wrapping with wrap_shape.
+
+    Parameters
+    ----------
+    geometry : any
+        Geometry object from set operations
+    layer_name : str
+        Name for logging purposes
+
+    Returns
+    -------
+    geometry or None
+        Wrapped geometry or None if invalid
+    """
+    if geometry is None:
+        return None
+
+    try:
+        # Try wrapping the geometry to ensure it's a valid FACE
+        wrapped = wrap_shape(geometry)
+        return wrapped
+    except Exception as e:
+        print(f"    Warning: Could not wrap {layer_name} geometry: {e}")
+        return None
+
+
+def _generate_strip_region_layers(region_rect, region_name, macro_name, coolant_rect, channel_box_rect):
+    """
+    Decompose a Rectangle into layer-specific geometries using set operations.
+
+    For each strip rectangle, this function computes the intersection with layer
+    boundaries to produce layer-specific geometries. The layers are:
+    - COOLANT: Inside coolant_rect
+    - CHANNEL_BOX: Between coolant_rect and channel_box_rect
+    - MODERATOR: Outside channel_box_rect
+
+    Parameters
+    ----------
+    region_rect : Rectangle
+        Rectangle geometry for the strip region
+    region_name : str
+        Indentifier for the region name
+    macro_name : str
+        Identifier for the MACRO 
+    coolant_rect : Rectangle
+        Reference boundary for inner coolant region
+    channel_box_rect : Rectangle
+        Reference boundary for outer channel box region
+
+    Returns
+    -------
+    dict
+        Maps layer type to geometry:
+        {
+            'COOLANT': geometry or None,
+            'CHANNEL_BOX': geometry or None,
+            'MODERATOR': geometry or None
+        }
+
+        Each geometry may be:
+        - Rectangle: if layer aligns with MACRO bounds
+        - Wrapped compound geometry: if MACRO spans layer boundary
+        - None: if layer doesn't exist for this MACRO
+    """
+    result = {}
+
+    # Layer 1: COOLANT = macro_rect ∩ coolant_rect (intersection)
+    try:
+        coolant_geom = region_rect * coolant_rect  # intersection operator
+        # Wrap geometry to handle COMPOUND types
+        coolant_geom = _wrap_and_validate_geometry(coolant_geom, f"{macro_name}/COOLANT")
+        if coolant_geom is not None and not is_degenerate(coolant_geom):
+            result['COOLANT'] = coolant_geom
+            print(f"  In strip region '{region_name}' with MACRO '{macro_name}': COOLANT geometry computed")
+    except Exception as e:
+        print(f"  Warning: Failed to compute COOLANT layer for strip region '{region_name}' with MACRO '{macro_name}': {e}")
+
+    # Layer 2: CHANNEL_BOX = (macro_rect ∩ channel_box_rect) - coolant_rect (intersection minus)
+    try:
+        temp_geom = region_rect * channel_box_rect  # intersection
+        channel_box_geom = temp_geom - coolant_rect  # difference
+        # Wrap geometry to handle COMPOUND types
+        channel_box_geom = _wrap_and_validate_geometry(channel_box_geom, f"{macro_name}/CHANNEL_BOX")
+        if channel_box_geom is not None and not is_degenerate(channel_box_geom):
+            result['CHANNEL_BOX'] = channel_box_geom
+            print(f"  In strip region '{region_name}' with MACRO '{macro_name}': CHANNEL_BOX geometry computed")
+    except Exception as e:
+        print(f"  Warning: Failed to compute CHANNEL_BOX layer for for strip region '{region_name}' with MACRO '{macro_name}': {e}")
+
+    # Layer 3: MODERATOR = macro_rect - channel_box_rect (difference)
+    try:
+        moderator_geom = region_rect - channel_box_rect  # difference operator
+        # Wrap geometry to handle COMPOUND types
+        moderator_geom = _wrap_and_validate_geometry(moderator_geom, f"{macro_name}/MODERATOR")
+        if moderator_geom is not None and not is_degenerate(moderator_geom):
+            result['MODERATOR'] = moderator_geom
+            print(f"  In strip region '{region_name}' with MACRO '{macro_name}': MODERATOR geometry computed")
+    except Exception as e:
+        print(f"  Warning: Failed to compute MODERATOR layer for for strip region '{region_name}' with MACRO '{macro_name}': {e}")
+
+    return result
+
+
+def _generate_corner_channel_box_regions(x0, y0, x1, y1, ap, n_rows, n_cols, coolant_rect, channel_box_rect, center, calculation_step):
+    """
+    Generate channel box material regions at assembly corners that intersect with lattice footprint.
+
+    These are the 4 corner regions where:
+    - The channel box extends into the lattice footprint
+    - They are OUTSIDE coolant_rect, INSIDE channel_box_rect, INSIDE lattice footprint
+    - They should be assigned to the corner fuel pin macros (MACRO00, MACRO0{n_cols-1}, etc.)
+
+    Parameters
+    ----------
+    x0, y0, x1, y1 : float
+        Lattice footprint bounds
+    ap : float
+        Assembly pitch
+    n_rows, n_cols : int
+        Number of rows and columns in lattice
+    coolant_rect : Rectangle
+        Reference boundary for inner coolant region
+    channel_box_rect : Rectangle
+        Reference boundary for outer channel box region
+    center : tuple
+        Assembly center (x_center, y_center, z_center)
+    calculation_step : CalculationStep
+        CalculationStep object holding macro property assignement information.
+
+    Returns
+    -------
+    dict
+        Maps corner identifier to dict with geometry and macro name:
+        {
+            'BL': {'geometry': Rectangle or None, 'macro': 'MACRO00'},
+            'BR': {'geometry': Rectangle or None, 'macro': 'MACRO0{n_cols-1}'},
+            'TL': {'geometry': Rectangle or None, 'macro': 'MACRO{n_rows-1}0'},
+            'TR': {'geometry': Rectangle or None, 'macro': 'MACRO{n_rows-1}{n_cols-1}'}
+        }
+    """
+    z_center = center[2]
+    result = {}
+    pin_pitch_x = (x1 - x0) / n_cols  # Assuming uniform pin pitch in x
+    pin_pitch_y = (y1 - y0) / n_rows  # Assuming uniform pin pitch in y
+    # Define the 4 corner regions in assembly space
+    corners = {
+        'BL': {'x_min': x0, 'x_max': x0 + pin_pitch_x, 'y_min': y0, 'y_max': y0 + pin_pitch_y, 'macro_row': 0, 'macro_col': 0},
+        'BR': {'x_min': x1 - pin_pitch_x, 'x_max': x1, 'y_min': y0, 'y_max': y0 + pin_pitch_y, 'macro_row': 0, 'macro_col': n_cols - 1},
+        'TL': {'x_min': x0, 'x_max': x0 + pin_pitch_x, 'y_min': y1 - pin_pitch_y, 'y_max': y1, 'macro_row': n_rows - 1, 'macro_col': 0},
+        'TR': {'x_min': x1 - pin_pitch_x, 'x_max': x1, 'y_min': y1 - pin_pitch_y, 'y_max': y1, 'macro_row': n_rows - 1, 'macro_col': n_cols - 1}
+    }
+
+    for corner_id, corner_def in corners.items():
+        x_min, x_max = corner_def['x_min'], corner_def['x_max']
+        y_min, y_max = corner_def['y_min'], corner_def['y_max']
+        macro_row = corner_def['macro_row']
+        macro_col = corner_def['macro_col']
+
+        try:
+            # Create corner rectangle in assembly coordinates
+            width = x_max - x_min
+            height = y_max - y_min
+            corner_center_x = (x_min + x_max) / 2.0
+            corner_center_y = (y_min + y_max) / 2.0
+
+            corner_rect = Rectangle(
+                name=f"CORNER_CB_{corner_id}",
+                height=height,
+                width=width,
+                center=(corner_center_x, corner_center_y, z_center)
+            )
+
+            # Compute channel box material portion: corner_rect ∩ channel_box_rect - coolant_rect
+            temp_geom = corner_rect * channel_box_rect  # intersection
+            corner_cb_geom = temp_geom - coolant_rect   # difference (remove coolant)
+
+            # Wrap and validate
+            corner_cb_geom = _wrap_and_validate_geometry(corner_cb_geom, f"CORNER_CB_{corner_id}")
+
+            if corner_cb_geom is not None and not is_degenerate(corner_cb_geom):
+                if calculation_step is not None and calculation_step.macro_assignment is not None:
+                    macro_name = calculation_step.macro_assignment[macro_row][macro_col]
+                else:
+                    macro_name = f"MACRO{macro_row}{macro_col}"
+                result[corner_id] = {
+                    'geometry': corner_cb_geom,
+                    'macro': macro_name
+                }
+                print(f"  Corner {corner_id}: Channel box geometry computed for {macro_name}")
+            else:
+                result[corner_id] = {
+                    'geometry': None,
+                    'macro': f"MACRO{macro_row}{macro_col}"
+                }
+                print(f"  Corner {corner_id}: No channel box geometry (degenerate or absent)")
+
+        except Exception as e:
+            print(f"  Warning: Failed to compute channel box region for corner {corner_id}: {e}")
+            if calculation_step is not None and calculation_step.macro_assignment is not None:
+                macro_name = calculation_step.macro_assignment[macro_row][macro_col]
+            else:
+                macro_name = f"MACRO{macro_row}{macro_col}"
+            result[corner_id] = {
+                'geometry': None,
+                'macro': macro_name
+            }
+
+    return result
 
 
 def _build_cross_aware_splitting_rects(
@@ -1918,368 +2014,6 @@ def _build_cross_aware_splitting_rects(
 
     return rects
 
-
-def subdivide_box_into_macros(assembly_box_cell, assembly_model):
-    """
-    Partition the assembly box cell into per-pin-row/column MACRO regions
-    required for the IC spatial method in DRAGON.
-
-    The algorithm:
-
-    1. Compute the pin-lattice footprint from the assembly dimensions.
-    2. Create splitting rectangles for the 8 strips surrounding the
-       lattice (4 sides + 4 corners), with side strips further divided
-       into ``n_cols`` or ``n_rows`` sub-strips.  When a control cross
-       is present, strips adjacent to the cross wings are trimmed so
-       they do not extend into the wing footprint.
-    3. Partition the box cell face with these splitting faces.
-    4. Rebuild material + MACRO properties for every resulting sub-face
-       by geometric containment (materials) and coordinate classification
-       (MACROs).
-
-    MACRO naming convention:
-
-    - ``BOT_k``  / ``TOP_k``  — bottom / top strip at pin column *k*
-    - ``LEFT_k`` / ``RIGHT_k`` — left / right strip at pin row *k*
-    - ``CORNER_BL``, ``CORNER_BR``, ``CORNER_TL``, ``CORNER_TR``
-    - ``BASE_CELL`` — residual intra-assembly coolant inside the
-      pin-lattice footprint
-    - ``CROSS_WING_1`` / ``CROSS_WING_2`` / ``CROSS_CENTER`` — control
-      cross regions (when present)
-
-    Parameters
-    ----------
-    assembly_box_cell : RectCell
-        The assembly box cell (as returned by ``build_assembly_box``),
-        already partitioned and with MATERIAL properties assigned.
-    assembly_model : CartesianAssemblyModel
-        Assembly model providing dimensional information.
-
-    Returns
-    -------
-    assembly_box_cell : RectCell
-        The updated cell with MACRO and MATERIAL properties set on all
-        sub-regions.
-    """
-    ap = assembly_model.assembly_pitch
-    pin_pitch = assembly_model.pin_geometry_dict["pin_pitch"]
-    n_rows = len(assembly_model.lattice_description)
-    n_cols = len(assembly_model.lattice_description[0])
-
-    lattice_pitch_x = n_cols * pin_pitch
-    lattice_pitch_y = n_rows * pin_pitch
-
-    # Pin-lattice footprint corners
-    # Use translation offsets instead of centered assumption to support asymmetric gaps
-    x0 = assembly_model.translation_offset_x if assembly_model.translation_offset_x is not None else (ap - lattice_pitch_x) / 2.0
-    y0 = assembly_model.translation_offset_y if assembly_model.translation_offset_y is not None else (ap - lattice_pitch_y) / 2.0
-    x1 = x0 + lattice_pitch_x
-    y1 = y0 + lattice_pitch_y
-
-    # ------------------------------------------------------------------
-    # Build splitting rectangles
-    # ------------------------------------------------------------------
-    has_cross = getattr(assembly_model, "has_control_cross", False)
-    wing_footprints = None
-
-    if has_cross:
-        ctrl = assembly_model.control_cross
-        rectangles_and_splits = _build_cross_aware_splitting_rects(
-            ap, x0, y0, x1, y1,
-            lattice_pitch_x, lattice_pitch_y,
-            n_cols, n_rows,
-            ctrl.center, ctrl,
-        )
-        # Recover wing footprints from build_assembly_box
-        ctrl_shapes = getattr(assembly_box_cell, "_ctrl_cross_shapes", None)
-        if ctrl_shapes is not None:
-            wing_footprints = list(ctrl_shapes["wing_footprints"])
-
-        # Compute stub footprints — moderator rectangles in the blade region but outside the arm extent. 
-        # These must get their own MACRO so they are not merged with the gap column/row MACROs.
-        bt = ctrl.blade_thickness
-        bhs = ctrl.blade_half_span
-        bt2 = bt / 2.0
-        corner = ctrl.center
-
-        # Blade edge positions (secondary axis)
-        xv0, _ = _corner_transform(corner, 0.0, 0.0, ap)
-        xv1, _ = _corner_transform(corner, bt2, 0.0, ap)
-        x_blade_lo = min(xv0, xv1)
-        x_blade_hi = max(xv0, xv1)
-        _, yh0 = _corner_transform(corner, 0.0, ap - bt2, ap)
-        _, yh1 = _corner_transform(corner, 0.0, ap, ap)
-        y_blade_lo = min(yh0, yh1)
-        y_blade_hi = max(yh0, yh1)
-
-        # Arm tip positions (primary axis)
-        _, yv_tip = _corner_transform(corner, 0.0, ap - bhs, ap)
-        _, yv_ctr = _corner_transform(corner, 0.0, ap, ap)
-        y_arm_lo = min(yv_tip, yv_ctr)
-        y_arm_hi = max(yv_tip, yv_ctr)
-        xh_ctr, _ = _corner_transform(corner, 0.0, 0.0, ap)
-        xh_tip, _ = _corner_transform(corner, bhs, 0.0, ap)
-        x_arm_lo = min(xh_ctr, xh_tip)
-        x_arm_hi = max(xh_ctr, xh_tip)
-
-        eps_s = 1e-8
-        cross_on_left = corner in ("north-west", "south-west")
-        cross_on_right = corner in ("north-east", "south-east")
-        cross_on_top = corner in ("north-west", "north-east")
-        cross_on_bottom = corner in ("south-west", "south-east")
-
-        # Left-side stubs (below/above vertical arm tip)
-        if cross_on_left:
-            blade_w = x_blade_hi - x_blade_lo
-            arm_lo_c = max(y_arm_lo, y0)
-            arm_hi_c = min(y_arm_hi, y1)
-            stub_h = arm_lo_c - y0
-            if stub_h > eps_s and blade_w > eps_s:
-                wing_footprints.append((
-                    (x_blade_lo, y0, x_blade_hi, arm_lo_c),
-                    "CROSS_WING_2_STUB",
-                ))
-            stub_h = y1 - arm_hi_c
-            if stub_h > eps_s and blade_w > eps_s:
-                wing_footprints.append((
-                    (x_blade_lo, arm_hi_c, x_blade_hi, y1),
-                    "CROSS_WING_2_STUB",
-                ))
-
-        # Right-side stubs
-        if cross_on_right:
-            blade_w = x_blade_hi - x_blade_lo
-            arm_lo_c = max(y_arm_lo, y0)
-            arm_hi_c = min(y_arm_hi, y1)
-            stub_h = arm_lo_c - y0
-            if stub_h > eps_s and blade_w > eps_s:
-                wing_footprints.append((
-                    (x_blade_lo, y0, x_blade_hi, arm_lo_c),
-                    "CROSS_WING_2_STUB",
-                ))
-            stub_h = y1 - arm_hi_c
-            if stub_h > eps_s and blade_w > eps_s:
-                wing_footprints.append((
-                    (x_blade_lo, arm_hi_c, x_blade_hi, y1),
-                    "CROSS_WING_2_STUB",
-                ))
-
-        # Top-side stubs (left/right of horizontal arm tip)
-        if cross_on_top:
-            blade_h = y_blade_hi - y_blade_lo
-            arm_lo_c = max(x_arm_lo, x0)
-            arm_hi_c = min(x_arm_hi, x1)
-            stub_w = arm_lo_c - x0
-            if stub_w > eps_s and blade_h > eps_s:
-                wing_footprints.append((
-                    (x0, y_blade_lo, arm_lo_c, y_blade_hi),
-                    "CROSS_WING_1_STUB",
-                ))
-            stub_w = x1 - arm_hi_c
-            if stub_w > eps_s and blade_h > eps_s:
-                wing_footprints.append((
-                    (arm_hi_c, y_blade_lo, x1, y_blade_hi),
-                    "CROSS_WING_1_STUB",
-                ))
-
-        # Bottom-side stubs
-        if cross_on_bottom:
-            blade_h = y_blade_hi - y_blade_lo
-            arm_lo_c = max(x_arm_lo, x0)
-            arm_hi_c = min(x_arm_hi, x1)
-            stub_w = arm_lo_c - x0
-            if stub_w > eps_s and blade_h > eps_s:
-                wing_footprints.append((
-                    (x0, y_blade_lo, arm_lo_c, y_blade_hi),
-                    "CROSS_WING_1_STUB",
-                ))
-            stub_w = x1 - arm_hi_c
-            if stub_w > eps_s and blade_h > eps_s:
-                wing_footprints.append((
-                    (arm_hi_c, y_blade_lo, x1, y_blade_hi),
-                    "CROSS_WING_1_STUB",
-                ))
-    else:
-        rectangles_and_splits = [
-            # Bottom-left corner
-            (Rectangle(height=y0, width=x0,
-                       center=(x0 / 2.0, y0 / 2.0, 0.0)),
-             (1, 1)),
-            # Bottom-middle strip
-            (Rectangle(height=y0, width=lattice_pitch_x,
-                       center=((x0 + x1) / 2.0, y0 / 2.0, 0.0)),
-             (n_cols, 1)),
-            # Bottom-right corner
-            (Rectangle(height=y0, width=(ap - x1),
-                       center=((x1 + ap) / 2.0, y0 / 2.0, 0.0)),
-             (1, 1)),
-            # Middle-left strip
-            (Rectangle(height=lattice_pitch_y, width=x0,
-                       center=(x0 / 2.0, (y0 + y1) / 2.0, 0.0)),
-             (1, n_rows)),
-            # Middle-right strip
-            (Rectangle(height=lattice_pitch_y, width=(ap - x1),
-                       center=((x1 + ap) / 2.0, (y0 + y1) / 2.0, 0.0)),
-             (1, n_rows)),
-            # Top-left corner
-            (Rectangle(height=(ap - y1), width=x0,
-                       center=(x0 / 2.0, (y1 + ap) / 2.0, 0.0)),
-             (1, 1)),
-            # Top-middle strip
-            (Rectangle(height=(ap - y1), width=lattice_pitch_x,
-                       center=((x0 + x1) / 2.0, (y1 + ap) / 2.0, 0.0)),
-             (n_cols, 1)),
-            # Top-right corner
-            (Rectangle(height=(ap - y1), width=(ap - x1),
-                       center=((x1 + ap) / 2.0, (y1 + ap) / 2.0, 0.0)),
-             (1, 1)),
-        ]
-
-    splitting_faces = []
-    for rect, (nx, ny) in rectangles_and_splits:
-        splitting_faces.extend(make_grid_faces(rect, nx, ny))
-
-    # ------------------------------------------------------------------
-    # Partition the box cell face
-    # ------------------------------------------------------------------
-    partitioned_face = make_partition(
-        [assembly_box_cell.face],
-        splitting_faces,
-        shape_type=ShapeType.COMPOUND,
-    )
-    assembly_box_cell.update_geometry_from_face(
-        GeometryType.TECHNOLOGICAL, partitioned_face
-    )
-
-    # ------------------------------------------------------------------
-    # Build reference boundary faces for material classification.
-    # ------------------------------------------------------------------
-    center = (ap / 2.0, ap / 2.0, 0.0)
-
-    # Use the asymmetry-aware helper to build reference rectangles
-    # This ensures material classification matches the actual geometry
-    # (which may be off-centered with asymmetric gaps)
-    coolant_boundary, channel_box_boundary = _compute_asymmetric_coolant_channel_box_rects(
-        assembly_model, center
-    )
-
-    # If control cross present, rebuild tube/sheath reference faces for
-    # material classification after the MACRO partition.
-    ctrl_tube_inner_faces = []
-    ctrl_tube_outer_faces = []
-    ctrl_inner_rect_faces = []
-    ctrl_sheath_rect_faces = []
-    ctrl_absorber_mat = None
-    ctrl_sheath_mat = None
-
-    if has_cross:
-        ctrl_shapes_ref = getattr(assembly_box_cell, "_ctrl_cross_shapes", None)
-        if ctrl_shapes_ref is None:
-            # Rebuild if not attached
-            ctrl_shapes_ref = _build_control_cross_shapes(ctrl, ap)
-        ctrl_absorber_mat = ctrl.absorber_material
-        ctrl_sheath_mat = ctrl.sheath_material
-        solid = ctrl.is_solid  # AT10-style (no sheath cavity)
-
-        for t in ctrl_shapes_ref["absorber_tubes"]:
-            ctrl_tube_inner_faces.append(t.inner_circles[0].face)
-            if not solid:
-                ctrl_tube_outer_faces.append(t.inner_circles[1].face)
-        ctrl_inner_rect_faces = [r.face for r in ctrl_shapes_ref["inner_sheath_rectangles"]]
-        ctrl_sheath_rect_faces = [r.face for r in ctrl_shapes_ref["sheath_rectangles"]]
-
-    # ------------------------------------------------------------------
-    # Query each sub-face to assign MATERIAL and MACRO
-    # ------------------------------------------------------------------
-    subfaces = assembly_box_cell.extract_subfaces()
-    n_regions = len(subfaces)
-
-    materials_list = [""] * n_regions
-    macros_list = [""] * n_regions
-
-    for i, subface in enumerate(subfaces):
-        pt = make_vertex_inside_face(subface)
-        px, py, _ = get_point_coordinates(pt)
-
-        # Classify material by geometric containment
-        mat_assigned = False
-        if has_cross:
-            # 1–2. Absorber tubes
-            for j in range(len(ctrl_tube_inner_faces)):
-                if is_point_inside_shape(pt, ctrl_tube_inner_faces[j]):
-                    materials_list[i] = ctrl_absorber_mat
-                    mat_assigned = True
-                    break
-                if not solid:
-                    if is_point_inside_shape(pt, ctrl_tube_outer_faces[j]):
-                        materials_list[i] = ctrl_sheath_mat
-                        mat_assigned = True
-                        break
-            if not mat_assigned:
-                # 3. Inner sheath cavity
-                for irf in ctrl_inner_rect_faces:
-                    if is_point_inside_shape(pt, irf):
-                        if solid:
-                            materials_list[i] = ctrl_sheath_mat
-                            mat_assigned = True
-                            break
-                        else:
-                            materials_list[i] = "MODERATOR"
-                            mat_assigned = True
-                            break
-            if not mat_assigned:
-                # 4. Outer sheath / structural rectangles
-                for srf in ctrl_sheath_rect_faces:
-                    if is_point_inside_shape(pt, srf):
-                        materials_list[i] = ctrl_sheath_mat
-                        mat_assigned = True
-                        break
-
-        if not mat_assigned:
-            # 5–7. Standard box regions
-            if is_point_inside_shape(pt, coolant_boundary.face):
-                materials_list[i] = "COOLANT"
-            elif is_point_inside_shape(pt, channel_box_boundary.face):
-                materials_list[i] = "CHANNEL_BOX"
-            else:
-                materials_list[i] = "MODERATOR"
-
-        # Classify position → MACRO name
-        macro = _classify_point_to_macro(
-            px, py, x0, y0, x1, y1, pin_pitch, n_cols, n_rows,
-            wing_footprints=wing_footprints,
-        )
-        macros_list[i] = macro
-    
-    # handle corner cases : if the point is classified as "BASE_CELL" but material is "CHANNEL_BOX", it means it's a corner region that should be classified as a corner macro, not base cell
-    for i in range(n_regions):
-        if materials_list[i] == "CHANNEL_BOX" and macros_list[i] == "BASE_CELL":
-            pt = make_vertex_inside_face(subfaces[i])
-            px, py, _ = get_point_coordinates(pt)
-            mid_x = ap / 2.0
-            mid_y = ap / 2.0
-            # test which corner it is closest to and map to corner pin MACRO{row}{col}
-            row = 0 if py < mid_y else (n_rows - 1) 
-            col = 0 if px < mid_x else (n_cols - 1)
-            macros_list[i] = f"MACRO{row}{col}"
-
-    # Sanity check
-    unknowns = [i for i, m in enumerate(materials_list) if m == "UNKNOWN"]
-    if unknowns:
-        print(f"WARNING: {len(unknowns)} sub-faces could not be assigned a "
-              f"material after box subdivision.")
-
-    # Set both MATERIAL and MACRO properties in one call
-    assembly_box_cell.set_properties({
-        PropertyType.MATERIAL: materials_list,
-        PropertyType.MACRO: macros_list,
-    })
-
-    print(f"subdivide_box_into_macros: split assembly box into "
-          f"{n_regions} sub-regions with "
-          f"{len(set(macros_list))} unique MACROs.")
-
-    return assembly_box_cell
 
 
 def _build_cross_aware_discretization_rects(
@@ -2743,20 +2477,40 @@ def _build_wing_submesh_rects(ctrl, ap, control_cross_submesh_config, ctrl_shape
     # Optionally extend tube bounding surfaces to sheath border and/or
     # bisect tubes.
     # ==================================================================
-    tubes = ctrl_shapes["absorber_tubes"]
+    ## Now every element is represented by [unique key name : for tubes ABS/SHEATH_TUBE_V/H_{i}]["geometry"/"macro"/"material"]
 
     if extend_tube or bisect_tube:
         for i in range(n_tubes):
             # Get tube centres from the Salome geometry objects.
-            # Horizontal tube is at index 2*i, vertical at 2*i+1.
-            tube_h = tubes[2 * i]
-            tube_v = tubes[2 * i + 1]
+            geom_obj_H = ctrl_shapes[f"ABS_TUBE_H_{i}"]["geometry"]
+            geom_obj_V = ctrl_shapes[f"ABS_TUBE_V_{i}"]["geometry"]
 
-            # Retrieve tube centres via Salome GetParameters
-            tx_h = float(tube_h.inner_circles[0].o.GetParameters().split(":")[0])
-            ty_h = float(tube_h.inner_circles[0].o.GetParameters().split(":")[1])
-            tx_v = float(tube_v.inner_circles[0].o.GetParameters().split(":")[0])
-            ty_v = float(tube_v.inner_circles[0].o.GetParameters().split(":")[1])
+            # create dummy regions to reconstruct absorber tube representation from geom_obj
+            region_t_H = Region(
+                    geom_obj=geom_obj_H,
+                    properties={
+                        PropertyType.MATERIAL: "DUMMY_ABS_MAT",
+                    }
+                )
+            
+            region_t_V = Region(
+                    geom_obj=geom_obj_V,
+                    properties={
+                        PropertyType.MATERIAL: "DUMMY_ABS_MAT",
+                    }
+                )
+
+            # Retrieve tube centres from the regions created.
+            tx_h = get_point_coordinates(region_t_H.o)[0]
+            ty_v = get_point_coordinates(region_t_V.o)[1]
+            # get the constant coordinate in assembly coordinate system.
+            # in NW canocical : ty_h = constant = ap
+            # and and tx_v = constant = 0.0
+            xy = _corner_transform(corner, tx_h, ap, ap)
+            ty_h = xy[1]
+            xy = _corner_transform(corner, 0.0, ty_v, ap)
+            tx_v = xy[0]
+
 
             if extend_tube:
                 # Horizontal arm: full bt-wide rectangle at tube centre,
@@ -2837,7 +2591,7 @@ def _build_wing_submesh_rects(ctrl, ap, control_cross_submesh_config, ctrl_shape
     return rects
 
 
-def discretize_box(assembly_box_cell, assembly_model, box_discretization_config):
+def discretize_box(assembly_universe, assembly_model, box_discretization_config):
     """
     Subdivide the assembly-box peripheral regions into a grid of
     sub-faces for MOC tracking.
@@ -2867,8 +2621,8 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
 
     Parameters
     ----------
-    assembly_box_cell : RectCell
-        The assembly box cell as returned by ``build_assembly_box``
+    assembly_universe : CartesianCell
+        The assembly universe as returned by ``build_assembly_with_macros``.
         (3-region for uncontrolled, multi-region for controlled).
     assembly_model : CartesianAssemblyModel
         Assembly model providing dimensional information.
@@ -2878,8 +2632,8 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
 
     Returns
     -------
-    assembly_box_cell : RectCell
-        The updated cell with a finer technological geometry.
+    assembly_universe : CartesianCell
+        The updated universe with a finer technological geometry.
     """
     ap = assembly_model.assembly_pitch
     pin_pitch = assembly_model.pin_geometry_dict["pin_pitch"]
@@ -3151,13 +2905,13 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
     if has_cross:
         ctrl_cross_cfg = box_discretization_config.control_cross_submesh
         if ctrl_cross_cfg is not None and ctrl_cross_cfg.enabled:
-            ctrl_shapes = getattr(assembly_box_cell, "_ctrl_cross_shapes", None)
+            ctrl_shapes = getattr(assembly_universe, "_ctrl_cross_shapes", None)
             if ctrl_shapes is None:
                 import warnings
                 warnings.warn(
                     "Control cross sub-mesh requested but "
                     "_ctrl_cross_shapes not attached to "
-                    "assembly_box_cell.  Skipping control cross "
+                    "assembly_universe.  Skipping control cross "
                     "sub-meshing.",
                     stacklevel=2,
                 )
@@ -3172,57 +2926,293 @@ def discretize_box(assembly_box_cell, assembly_model, box_discretization_config)
     # Partition the box cell face
     # ------------------------------------------------------------------
     partitioned_face = make_partition(
-        [assembly_box_cell.face],
+        [assembly_universe],
         splitting_faces,
-        shape_type=ShapeType.COMPOUND,
+        shape_type=ShapeType.EDGE,
     )
-    assembly_box_cell.update_geometry_from_face(
-        GeometryType.TECHNOLOGICAL, partitioned_face
+    assembly_universe.geometry_maps[GeometryType.SECTORIZED] = \
+    assembly_universe.get_geometry_map(GeometryType.SECTORIZED) // wrap_shape(partitioned_face)
+
+    return assembly_universe
+
+
+
+def build_assembly_with_macros(assembly_model, calculation_step, center=None):
+    """
+    Build complete assembly with fuel lattice and layer-aware MACRO subdivision regions.
+
+    This function orchestrates the assembly construction with a new layer-aware MACRO
+    subdivision approach:
+
+    1. Generate fuel cells with sectorization (if calculation_step provided)
+    2. Create CartesianLattice and add fuel cells
+    3. Add vanished cells and water rods to lattice
+    4. Add lattice to assembly
+    5. Compute lattice footprint (with asymmetric gap support)
+    6. Generate MACRO rectangles around lattice
+    7. Get reference rectangles for layer boundaries (coolant, channel_box)
+    8. For each MACRO, generate layer-aware sub-regions (COOLANT, CHANNEL_BOX, MODERATOR)
+    9. Create Region objects with both MATERIAL and MACRO properties
+    10. Add all layer-aware MACRO regions to assembly
+
+    CHANGES IN THIS VERSION:
+    - Base regions (inner_box_coolant, channel_box, outer_moderator) are NOT created
+    - Instead, MACRO rectangles are subdivided into layer-specific geometries
+    - Each layer portion maintains the same MACRO property but different MATERIAL
+    - Layer boundaries respect asymmetric gap configurations
+
+    Parameters
+    ----------
+    assembly_model : CartesianAssemblyModel
+        Assembly model with lattice description and dimensions
+    calculation_step : CalculationStep or None
+        Optional calculation step for fuel cell sectorization
+    center : tuple or None
+        Assembly center (x, y, z). Defaults to (ap/2, ap/2, 0)
+
+    Returns
+    -------
+    assembly_universe : CartesianCell
+        Complete assembly with lattice and layer-aware MACRO regions, all properties set
+    """
+    # Extract dimensions and translation offsets
+    ap = assembly_model.assembly_pitch
+    pin_pitch = assembly_model.pin_geometry_dict["pin_pitch"]
+    n_rows = len(assembly_model.lattice_description)
+    n_cols = len(assembly_model.lattice_description[0])
+    lattice_pitch_x = n_cols * pin_pitch
+    lattice_pitch_y = n_rows * pin_pitch
+
+    if center is None:
+        center = (ap / 2.0, ap / 2.0, 0.0)
+
+    translation_x = assembly_model.translation_offset_x if assembly_model.translation_offset_x is not None else 0.0
+    translation_y = assembly_model.translation_offset_y if assembly_model.translation_offset_y is not None else 0.0
+
+    # ======================================================================
+    # STEP 1: Generate fuel cells with or without sectorization
+    # ======================================================================
+    if calculation_step:
+        calculation_step.apply_radii(assembly_model)
+
+    ordered_cells = generate_fuel_cells(
+        assembly_model, calculation_step=calculation_step
     )
 
-    n_subfaces = len(assembly_box_cell.extract_subfaces())
-    if not has_cross:
-        if has_asym_gap_splits:
-            print(f"discretize_box: split assembly box into "
-                  f"{n_subfaces} sub-regions (asymmetric gaps - "
-                  f"corner_bl={corner_bl}, corner_br={corner_br}, "
-                  f"corner_tl={corner_tl}, corner_tr={corner_tr}, "
-                  f"side_bottom={side_bottom}, side_top={side_top}, "
-                  f"side_left={side_left}, side_right={side_right}).")
-        else:
-            print(f"discretize_box: split assembly box into "
-                  f"{n_subfaces} sub-regions (corner={corner_bl}, "
-                  f"side_h={side_bottom}, side_v={side_left}).")
-    else:
-        print(f"discretize_box: split assembly box into "
-              f"{n_subfaces} sub-regions (cross-aware).")
+    # =================================================================================
+    # STEP 2: Initialize assembly_universe : container for the geometry to be exported
+    # =================================================================================
+    # Create assembly container directly without detailed base regions
+    # Base regions will be replaced by layer-aware MACRO subdivisions
+    # Use CartesianCell with width_height and center parameters to define bounds
+    assembly_universe = CartesianCell(
+        name=f"{assembly_model.name}_universe",
+        width_height=(ap, ap),
+        center=center,
+        base_props={PropertyType.MATERIAL: "COOLANT",
+                    PropertyType.MACRO:"BASE_CELL"},
+    )
 
-    # ------------------------------------------------------------------
-    # Explicit material re-assignment by geometric containment
-    # ------------------------------------------------------------------
-    if box_discretization_config.reassign_materials:
-        _reassign_materials_by_containment(assembly_box_cell, assembly_model)
+    # ======================================================================
+    # STEP 3-5: Create lattice and add all cells
+    # ======================================================================
+    lattice = CartesianLattice(
+        name=f"{assembly_model.name}_lattice",
+        centre=center,
+        cells=[],
+    )
 
-    return assembly_box_cell
+    # Add fuel cells to lattice
+    lattice = add_cells_to_cartesian_lattice(
+        lattice, ordered_cells, pin_pitch,
+        translation_x=translation_x, translation_y=translation_y
+    )
+
+    # Add water rods if present
+    if hasattr(assembly_model, "water_rods") and assembly_model.water_rods:
+        lattice = create_and_add_water_rods_to_lattice(
+            lattice, assembly_model,
+            calculation_step=calculation_step,
+        )
+
+    # Add vanished rods if present
+    if hasattr(assembly_model, "vanished_rods") and assembly_model.vanished_rods:
+        lattice = add_vanished_rods_to_lattice(
+            lattice, assembly_model,
+            calculation_step=calculation_step,
+        )
+
+    # Add lattice to assembly
+    assembly_universe.add(lattice)
+
+    # ======================================================================
+    # STEP 6: Compute lattice footprint (with asymmetric gap support)
+    # ======================================================================
+    x0 = translation_x if translation_x != 0.0 else (ap - lattice_pitch_x) / 2.0
+    y0 = translation_y if translation_y != 0.0 else (ap - lattice_pitch_y) / 2.0
+    x1 = x0 + lattice_pitch_x
+    y1 = y0 + lattice_pitch_y
+
+    # ======================================================================
+    # STEP 7: channel box tratment : generate MACRO rectangles
+    # ======================================================================
+    macro_rects = _generate_macro_subdivision_rectangles(
+        assembly_model,
+        calculation_step,
+        x0, y0, x1, y1,
+        center
+    )
+
+    # ======================================================================
+    # STEP 8: Get reference rectangles for region boundary computation
+    # ======================================================================
+    lattice_rect, coolant_rect, channel_box_rect = _compute_asymmetric_coolant_channel_box_rects(
+        assembly_model, center
+    )
+
+    # ======================================================================
+    # STEP 9-10: Create material-aware MACRO region subdivisions
+    # ======================================================================
+    print(f"\n=== Creating Layer-Aware MACRO Regions ===")
+    for region_name, rect_params in macro_rects.items():
+        macro_name, height, width, rect_center, rounded = rect_params
+
+        # Create Rectangle geometry for this MACRO
+        print(f"\nProcessing Region '{region_name}', assiciated with MACRO '{macro_name}' with center {rect_center}, height {height}, width {width}")
+        region_rect = Rectangle(
+            name=region_name,
+            height=height,
+            width=width,
+            center=rect_center,  # Keep center for boolean operations to work correctly
+            rounded_corners=rounded
+        )
+
+        # Generate layer-specific sub-regions using set operations
+        layer_geometries = _generate_strip_region_layers(
+            region_rect,
+            region_name,
+            macro_name,
+            coolant_rect,
+            channel_box_rect
+        )
+
+        # Create Region objects for each layer portion
+        for material_type, geometry in layer_geometries.items():
+            if geometry is None:  # Skip if layer doesn't exist for this MACRO
+                continue
+
+            try:
+                # Create Region with layer-aware geometry
+                # All portions of a MACRO (e.g., BOT_1_COOLANT and BOT_1_CHANNEL_BOX)
+                # share the same MACRO property identifier (BOT_1)
+                region = Region(
+                    geometry,
+                    properties={
+                        PropertyType.MATERIAL: material_type,
+                        PropertyType.MACRO: macro_name  # Keep original MACRO name
+                    }
+                )
+
+                # Add region to assembly_universe at the CENTER of THIS LAYER'S GEOMETRY.
+                # Boolean operations (intersection/difference) produce layer-specific geometries
+                # with different centers than the original rect_center. We must use each layer's
+                # actual center (computed as CDG by Region) to avoid stacking layers on top of each other.
+                layer_center = get_point_coordinates(region.o)
+                assembly_universe.add(region, position=layer_center)
+                print(f"Added region layer with region_name : '{region_name}, with material type : {material_type} and macro : {macro_name}")
+            except Exception as e:
+                print(f"  Warning: Failed to create Region for '{region_name}' with : MACRO '{macro_name}' / MATERIAL '{material_type}': {e}")
+
+    print(f"\n=== Finished Creating Layer-Aware MACRO Regions ===\n")
+
+    # ======================================================================
+    # STEP 11: Generate corner channel box regions
+    # ======================================================================
+    # These regions bridge between lattice footprint and channel box at corners,
+    # assigning them to the corner fuel pin macros (MACRO00, MACRO0{n_cols-1}, etc.)
+    print(f"\n=== Creating Corner Channel Box Regions ===")
+    corner_cb_regions = _generate_corner_channel_box_regions(
+        x0, y0, x1, y1, ap,
+        n_rows, n_cols,
+        coolant_rect, channel_box_rect,
+        center,
+        calculation_step
+    )
+
+    for corner_id, corner_data in corner_cb_regions.items():
+        geometry = corner_data['geometry']
+        macro_name = corner_data['macro']
+
+        if geometry is None:
+            continue
+
+        try:
+            region = Region(
+                geometry,
+                properties={
+                    PropertyType.MATERIAL: "CHANNEL_BOX",
+                    PropertyType.MACRO: macro_name
+                }
+            )
+            layer_center = get_point_coordinates(region.o)
+            assembly_universe.add(region, position=layer_center)
+            print(f"  Corner {corner_id}: Created CHANNEL_BOX region with {macro_name}")
+        except Exception as e:
+            print(f"  Warning: Failed to create corner CB region {corner_id}: {e}")
+
+    print(f"=== Finished Creating Corner Channel Box Regions ===\n")
+
+    # If control cross is present, build control cross shapes to assembly_universe for later use in box discretization
+    if hasattr(assembly_model, "control_cross") and assembly_model.control_cross is not None:
+        elements = _build_control_cross_elements(
+            assembly_model=assembly_model,
+            ap=ap,
+            assembly_center=center
+        )
+        for element_name in elements.keys():
+            geom_obj = elements[element_name]["geometry"]
+            material = elements[element_name]["material"]
+            macro = elements[element_name]["macro"]
+            
+            if "offset" in elements[element_name].keys():
+                offset = elements[element_name]["offset"] 
+            else:
+                offset = (0.0, 0.0, 0.0)
+
+            try: 
+                region = Region(
+                    geom_obj=geom_obj,
+                    properties={
+                        PropertyType.MATERIAL: material,
+                        PropertyType.MACRO: macro
+                    }
+                )
+                region_center = get_point_coordinates(region.o)
+                offset_center = (region_center[0]+offset[0],region_center[1]+offset[1], region_center[2]+offset[2])
+                assembly_universe.add(region, position=offset_center)
+            except Exception as e:
+                print(f"  Warning failed to create Region for control cross element : {element_name}")
+
+        assembly_universe._ctrl_cross_shapes = elements
+    assembly_universe.update_hierarchical_structure(True)   
+
+    return assembly_universe
+
 
 
 def build_full_assembly_geometry(assembly_model, calculation_step,
                                  output_path, output_file_name):
     """
-    High-level function that builds a complete assembly geometry —
-    including the assembly box with automatic MACRO subdivision for
-    IC-method compatibility — and exports it to a TDT file.
+    High-level function that builds a complete assembly geometry with fuel lattice,
+    MACRO subdivision regions (if IC method), and optional MOC discretization.
+    Exports result to a TDT file.
 
     This function orchestrates the full pipeline:
 
-    1. Apply radial discretization from the ``calculation_step``.
-    2. Generate fuel ``RectCell`` objects (with sectorization).
-    3. Build the 3-layer assembly box (coolant / channel box / moderator).
-    4. If the step uses the IC spatial method with macro export, subdivide
-       the assembly box into per-pin-row/column MACRO regions
-       automatically.
-    5. Assemble the ``Lattice``, add fuel cells, water rods, and box.
-    6. Export the TDT file.
+    1. Build assembly with fuel lattice and MACRO regions (all cells, water rods, vanished rods)
+    2. Apply symmetry
+    3. Optionally apply MOC box discretization if enabled
+    4. Export the TDT file
 
     Parameters
     ----------
@@ -3240,91 +3230,85 @@ def build_full_assembly_geometry(assembly_model, calculation_step,
 
     Returns
     -------
-    lattice : Lattice
-        The assembled glow ``Lattice`` object, already exported.
-    assembly_box_cell : RectCell
-        The assembly box cell (with MACRO properties if applicable).
+    assembly_universe : CartesianCell
+        The complete assembly geometry with all properties set and exported.
     """
     from ..DDModel.DragonModel import CartesianAssemblyModel  # type check only
 
-    # ----- Extract asymmetric translation offsets from model -----
-    translation_x = assembly_model.translation_offset_x if assembly_model.translation_offset_x is not None else 0.0
-    translation_y = assembly_model.translation_offset_y if assembly_model.translation_offset_y is not None else 0.0
+    print(f"Building assembly geometry for {assembly_model.name} with {calculation_step.spatial_method} method")
 
-    # ----- Derived dimensions -----
-    ap = assembly_model.assembly_pitch
-    pin_pitch = assembly_model.pin_geometry_dict["pin_pitch"]
-    n_cols = len(assembly_model.lattice_description[0])
-
-    center = (ap / 2.0, ap / 2.0, 0.0)
-
-    # Step 1: Apply radii from the calculation step
-    calculation_step.apply_radii(assembly_model)
-
-    # Step 2: Generate fuel cells with sectorization
-    ordered_cells = generate_fuel_cells(
-        assembly_model, calculation_step=calculation_step
-    )
-    if ap > pin_pitch * n_cols:
-        # Step 3: Build assembly box
-        assembly_box_cell = build_assembly_box(assembly_model, center=center)
-
-        # Step 4: Subdivide assembly box if needed
-        #   - IC + macros  → per-pin-row/column MACRO regions
-        #   - MOC + box_discretization enabled → fine grid for MOC tracking
-        print("Calculation step spatial method:", calculation_step.spatial_method)
-        if (calculation_step.spatial_method == "IC"
-                and calculation_step.export_macros):
-            assembly_box_cell = subdivide_box_into_macros(
-                assembly_box_cell, assembly_model
-            )
-        elif (calculation_step.box_discretization is not None
-                and calculation_step.box_discretization.enabled):
-            print("Box discretization enabled for MOC tracking; subdividing assembly box into ")
-            assembly_box_cell = discretize_box(
-                assembly_box_cell, assembly_model,
-                calculation_step.box_discretization,
-            )
-    else:        
-        print(f"Assembly pitch {ap} is not larger than pin lattice "
-            f"footprint {pin_pitch * n_cols}; skipping assembly box.")
-        assembly_box_cell = None
-
-    # Step 5: Build lattice and add cells
-    lattice = Lattice(
-        name=f"{assembly_model.name}_{calculation_step.name}",
-        center=center,
+    # ======================================================================
+    # STEP 1: Build complete assembly with MACRO regions
+    # ======================================================================
+    # This function handles:
+    # - Fuel cell generation and sectorization
+    # - Assembly box creation (coolant/channel_box/moderator)
+    # - Lattice creation and population with all cell types
+    # - MACRO region generation with properties
+    assembly_universe = build_assembly_with_macros(
+        assembly_model,
+        calculation_step=calculation_step
     )
 
-    lattice = add_cells_to_regular_lattice(
-        lattice, ordered_cells, pin_pitch, translation_x=translation_x, translation_y=translation_y
-    )
-    # Build optional water rods if present in the model and add to lattice
-    if hasattr(assembly_model, "water_rods") and assembly_model.water_rods:
-        lattice = create_and_add_water_rods_to_lattice(
-            lattice, assembly_model,
-            translation_x=translation_x, translation_y=translation_y,
-            calculation_step=calculation_step,
-        )
-    # Build optional vanished rods : apply sectorization to vanished rods if present and add to lattice
-    if hasattr(assembly_model, "vanished_rods") and assembly_model.vanished_rods:
-        lattice = add_vanished_rods_to_lattice(
-            lattice, assembly_model,
-            translation_x=translation_x, translation_y=translation_y,
-            calculation_step=calculation_step,
+
+    # ======================================================================
+    # STEP 2: Optionally apply MOC box discretization
+    # ======================================================================
+    # If MOC method with box discretization enabled, subdivide assembly box further
+    # for fine MOC tracking grid
+    if (calculation_step.box_discretization is not None
+            and calculation_step.box_discretization.enabled):
+        print(f"Box discretization enabled for MOC tracking; subdividing assembly box")
+        assembly_universe = discretize_box(
+            assembly_universe, assembly_model,
+            calculation_step.box_discretization,
         )
 
-    if assembly_box_cell is not None:
-        lattice.lattice_box = assembly_box_cell
+    # ======================================================================
+    # STEP 3: Apply symmetry
+    # ======================================================================
+    # check for symmetries
+    is_anti_diag_symmetric = assembly_model.check_anti_diagonal_symmetry()
+    is_main_diag_symmetric = assembly_model.check_main_diagonal_symmetry()
+    is_quarter_symmetric = assembly_model.check_quarter_symmetry()
+    is_half_symmetric = assembly_model.check_half_symmetry()
+    if is_quarter_symmetric and not (is_anti_diag_symmetric or is_main_diag_symmetric):
+        print("Assembly is quarter symmetric; applying quarter symmetry")
+        assembly_universe.apply_symmetry(SymmetryType.QUARTER)
+        symmetry = SymmetryType.QUARTER
+    elif is_quarter_symmetric and is_anti_diag_symmetric and is_main_diag_symmetric:
+        print("Assembly is quarter symmetric with diagonal symmetry; applying eigth symmetry")
+        assembly_universe.apply_symmetry(SymmetryType.EIGHTH)
+        symmetry = SymmetryType.EIGHTH
+    elif is_half_symmetric:
+        print("Assembly is half symmetric; applying half symmetry")
+        assembly_universe.apply_symmetry(SymmetryType.HALF)
+        symmetry = SymmetryType.HALF
+    elif is_main_diag_symmetric:
+        print("Assembly is symmetric across a diagonal; applying diagonal symmetry")
+        assembly_universe.apply_symmetry(SymmetryType.DIAG)
+        symmetry = SymmetryType.DIAG
+    elif is_anti_diag_symmetric:
+        print("Assembly is symmetric across anti-diagonal; applying anti-diagonal symmetry")
+        assembly_universe.apply_symmetry(SymmetryType.FULL)
+        symmetry = SymmetryType.FULL
+    else:
+        print("Assembly has no symmetries; using full geometry")
+        assembly_universe.apply_symmetry(SymmetryType.FULL)
+        symmetry = SymmetryType.FULL
 
-    # Step 6: Export TDT
+        
+    # ======================================================================
+    # STEP 4: Export to TDT file
+    # ======================================================================
     export_glow_geom(
         output_path,
         output_file_name,
-        lattice,
+        assembly_universe,
+        symmetry_type=symmetry,
         tracking_option=calculation_step.tracking,
         export_macro=calculation_step.export_macros,
     )
 
-    return lattice, assembly_box_cell
+    return assembly_universe
 

@@ -82,7 +82,7 @@ class TestPB2UncontrolledAsymmetricAssembly:
         )
 
         # Analyze lattice to populate water_rods and lattice
-        assembly.analyze_lattice_description(build_pins=False)
+        assembly.analyze_lattice_description(build_pins=True)
 
         return assembly
 
@@ -127,7 +127,6 @@ class TestPB2UncontrolledAsymmetricAssembly:
         """Test that water rod centers are in assembly coordinates."""
         am = pb2_uncontrolled_assembly
 
-        # Water rod centers from YAML: [[7.04596, 6.56844], [8.67156, 8.19404]]
         wr0_center = am.water_rods[0].center
         wr1_center = am.water_rods[1].center
 
@@ -138,10 +137,10 @@ class TestPB2UncontrolledAsymmetricAssembly:
         assert 0 < wr1_center[1] < am.assembly_pitch
 
         # Check specific values match YAML
-        assert wr0_center[0] == pytest.approx(7.04596, rel=1e-4)
-        assert wr0_center[1] == pytest.approx(6.56844, rel=1e-4)
-        assert wr1_center[0] == pytest.approx(8.67156, rel=1e-4)
-        assert wr1_center[1] == pytest.approx(8.19404, rel=1e-4)
+        assert wr0_center[0] == pytest.approx(8.67156, rel=1e-4)
+        assert wr0_center[1] == pytest.approx(8.19404, rel=1e-4)
+        assert wr1_center[0] == pytest.approx(7.045959, rel=1e-4)
+        assert wr1_center[1] == pytest.approx(6.56844, rel=1e-4)
 
     def test_pb2_uncontrolled_s2_lattice_creation(self, pb2_uncontrolled_assembly):
         """Test that S2_Lattice can be created from PB2 uncontrolled assembly."""
@@ -205,7 +204,7 @@ class TestPB2ControlledAsymmetricAssembly:
         )
 
         # Analyze lattice to populate water_rods and lattice
-        assembly.analyze_lattice_description(build_pins=False)
+        assembly.analyze_lattice_description(build_pins=True)
 
         return assembly
 
@@ -316,7 +315,7 @@ class TestAsymmetricGapCenterAlignment:
             tdt_file=None,
             geometry_description_yaml=PB2_UNCONTROLLED_GEOMETRY_YAML,
         )
-        assembly.analyze_lattice_description(build_pins=False)
+        assembly.analyze_lattice_description(build_pins=True)
         return assembly
 
     def test_lattice_center_uses_unpadded_dimensions(self, pb2_uncontrolled_assembly):

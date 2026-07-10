@@ -1,7 +1,7 @@
 ### Python prototype for THMPH procedure : goal : make it more robust.
 
 import numpy as np
-from .material_mixture import AVOGADRO, CM2_TO_BARN
+from .material_mixture import AVOGADRO, CM2_TO_BARN, ISOTOPIC_MASSES
 
 try:
     from iapws import IAPWS97
@@ -146,7 +146,7 @@ def compute_water_iso_densities_at_densities(densities):
         One ``{"H1": N_H, "O16": N_O}`` dict per density, in
         atoms/barn·cm.
     """
-    M_H2O = 15.9994 + 2.0 * 1.00794
+    M_H2O = ISOTOPIC_MASSES["8016"] + 2.0 * ISOTOPIC_MASSES["1001"]
     results = []
     for rho in densities:
         N_MAT = rho * AVOGADRO / (M_H2O * CM2_TO_BARN)

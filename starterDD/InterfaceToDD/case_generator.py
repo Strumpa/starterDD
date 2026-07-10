@@ -570,21 +570,12 @@ class DragonCase:
                         "SALOME platform (typically run "
                         "via Docker)."
                     )
-                lattice, assembly_box = build_full_assembly_geometry(
+                assembly_universe = build_full_assembly_geometry(
                     assembly_model=assembly,
                     calculation_step=step,
                     output_path=self.tdt_path,
                     output_file_name=tdt_file_name,
                 )
-                lattice.show(
-                    geometry_type_to_show=GeometryType.SECTORIZED,
-                    property_type_to_show=PropertyType.MATERIAL,
-                )
-                if step.export_macros: # would be desirable to have an option to plot MACROS or MATERIALS.
-                    lattice.show(
-                        geometry_type_to_show=GeometryType.SECTORIZED,
-                        property_type_to_show=PropertyType.MACRO,
-                    )
 
             # 4b. Read TDT and enforce material indices for THIS step
             #     This records the TDT-assigned indices in the step's state history
@@ -666,12 +657,19 @@ class DragonCase:
                 
                 # ----- MIX.c2m -----
                 mix_proc_name = "MIX"
+                materials_with_varying_density = []
                 print(f"Generating MIX procedure '{mix_proc_name}' with LIB: ...")
                 has_density = (
                     scheme.has_branches()
                     and scheme.get_branch("coolant_density") is not None
                 )
+                if scheme.get_branch("coolant_density") is not None:
+                    materials_with_varying_density.append("COOLANT")
+                if scheme.get_branch("moderator_density") is not None:
+                    materials_with_varying_density.append("MODERATOR")
+
                 lib = LIB(assembly, density_branch=has_density, ssh_calculation_step=ssh_step)
+                lib.set_varying_density_materials(materials_with_varying_density)
                 mix_path = lib.write_to_c2m(
                     self.output_path, mix_proc_name,
                 )
@@ -797,7 +795,7 @@ class DragonCase:
 
         proc = main_procedure(self.case_name)
         proc.enable_g2s = self.enable_g2s
-
+        print("in build main x2m")
         # --- Modules ---
         modules = [
             "LIB", "G2S", "SALT", "MCCGT",
@@ -832,7 +830,11 @@ class DragonCase:
             proc.add_seq_binary(trkfil)
 
         # --- Variables ---
-        aniso = ssh_step.anisotropy_level
+        if hasattr(ssh_step, "lib_anisotropy_level"):
+            aniso = ssh_step.lib_anisotropy_level
+        else:
+            aniso = ssh_step.anisotropy_level
+        print(f"ssh_step anisotropy level = {aniso}")
         proc.add_variable("o_anis", "INTEGER", aniso)
         proc.add_variable(
             "name_compo", "STRING",
@@ -924,6 +926,8 @@ class DragonCase:
             wrap_cle2000_line(uss_line)
         )
         proc.add_body_line("   PASS 3")
+        asm_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
+        proc.add_body_line(f"    EDIT 1 {asm_keyword}")
         proc.add_body_line(";")
         proc.add_body_line("")
 
@@ -944,11 +948,6 @@ class DragonCase:
                     flux_library = "LIBRARY2"
         else:
             flux_library = "LIBRARY2"
-
-        asm_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
-        proc.add_body_line(f"    EDIT 1 {asm_keyword}")
-        proc.add_body_line(";")
-        proc.add_body_line("")
 
         # --- ASM + FLU on flux step ---
         flux_steps = scheme.get_flux_steps()
@@ -1085,7 +1084,10 @@ class DragonCase:
             proc.add_seq_binary(trkfil)
 
         # --- Variables ---
-        aniso = ssh_step.anisotropy_level
+        if hasattr(ssh_step, "lib_anisotropy_level"):
+            aniso = ssh_step.lib_anisotropy_level
+        else:
+            aniso = ssh_step.anisotropy_level
         proc.add_variable("o_anis", "INTEGER", aniso)
         proc.add_variable(
             "name_compo", "STRING",
@@ -1596,7 +1598,10 @@ class DragonCase:
             proc.add_seq_binary(trkfil)
 
         # --- Variables ---
-        aniso = ssh_step.anisotropy_level
+        if hasattr(ssh_step, "lib_anisotropy_level"):
+            aniso = ssh_step.lib_anisotropy_level
+        else:
+            aniso = ssh_step.anisotropy_level
         proc.add_variable("o_anis", "INTEGER", aniso)
         proc.add_variable("name_compo", "STRING",
                           f"_CPO_{self.case_name}")
@@ -1738,6 +1743,7 @@ class DragonCase:
             proc.add_body_line("*" * 50)
             proc.add_body_line("* SPH: equivalence correction")
             proc.add_body_line("*" * 50)
+            sph_corr.set_solution_approach(l1_asm_keyword)
             proc.add_body_block(
                 sph_corr.build_sph_call(l1_trk, l1_trkfil)
             )
@@ -1830,8 +1836,8 @@ class DragonCase:
         from .CLE2000 import wrap_cle2000_line
 
         edi_step = scheme.get_edition_between_levels_steps()[0]
-        edi_cond = EDI_condensation(edi_step, lib_name="LIBEQ")
-        sph_corr = SPH_correction(edi_step, lib_name="LIBEQ")
+        edi_cond = EDI_condensation(edi_step, lib_name="LIBEQL1")
+        sph_corr = SPH_correction(edi_step, lib_name="LIBEQL1")
 
         flux_steps = scheme.get_flux_steps()
         l1_step = flux_steps[0]
@@ -1865,13 +1871,17 @@ class DragonCase:
         proc.add_linked_list("FLUXL2")
         proc.add_linked_list("EDITION")
         proc.add_linked_list(edi_cond.lib_name)
+        proc.add_linked_list("LIBEQL2")
         proc.add_linked_list("COMPO")
         proc.add_linked_list("PARAMS")
         for _, trkfil in trk.get_track_names():
             proc.add_seq_binary(trkfil)
 
         # --- Variables ---
-        aniso = ssh_step.anisotropy_level
+        if hasattr(ssh_step, "lib_anisotropy_level"):
+            aniso = ssh_step.lib_anisotropy_level
+        else:
+            aniso = ssh_step.anisotropy_level
         proc.add_variable("o_anis", "INTEGER", aniso)
         proc.add_variable("name_compo", "STRING",
                           f"_CPO_{self.case_name}")
@@ -2160,6 +2170,7 @@ class DragonCase:
             proc.add_body_line(
                 f"{inner_indent}* SPH: equivalence correction"
             )
+            sph_corr.set_solution_approach(l1_asm_keyword)
             proc.add_body_block(
                 _indent_block(
                     sph_corr.build_sph_call(l1_trk, l1_trkfil),
@@ -2239,7 +2250,7 @@ class DragonCase:
         proc.add_body_line(
             wrap_cle2000_line(
                 f"{inner_indent}COMPO := {edir_proc_name} FLUXL2 "
-                f"{edi_cond.lib_name} "
+                f"{flux_level2_library} "
                 f"{l2_trk} COMPO :: <<name_compo>> "
                 f"{para_args} ;"
             )

@@ -81,6 +81,43 @@ NATURAL_ABUNDANCES = {
     # Extend as needed for other elements
 }
 
+ISOTOPIC_MASSES = {
+    # H
+    "1001": 1.007825,
+    # He
+    "2004": 4.00260,
+    # B
+    "5010":   10.01294,
+    "5011":   11.00928,
+    # C
+    "6012":   11.99671,
+    # O
+    "8016": 15.994915,
+    # Si 
+    "14028": 27.977340, "14029": 28.976927, "14030": 29.973488,
+    # Cr
+    "24050": 49.94605, "24052": 51.94052, "24053": 52.94066, "24054": 53.93888, 
+    # Mn
+    "25055": 54.938047,
+    # Fe
+    "26054": 53.93961, "26056": 55.93494, "26057": 56.93539, "26058": 57.93328,
+    # Ni
+    "28058": 57.93570, "28060": 59.93084, "28061": 60.93143, "28062": 61.92799, "28064": 63.92818, 
+    # Zr
+    "40090": 89.90473, "40091": 90.90563, "40092": 91.90501, "40094": 93.90631, "40096": 95.90830, 
+    # Sn
+    "50112": 111.90533, "50114": 113.90349, "50115": 114.90308, "50116": 115.90166, "50117": 116.90326, 
+    "50118": 117.90184, "50119": 118.90344, "50120": 119.90202, "50122": 121.90321, "50124": 123.90541,
+    # Gd
+    "64152": 151.92007, "64154": 153.92127, "64155": 154.92287, "64156": 155.92246, "64157": 156.92406,
+    "64158": 157.92365, "64160": 159.92686,
+    # Hf
+    "72174": 173.94004, "72176": 175.94143, "72177": 176.94001, "72178": 177.94373, "72179": 178.94584,
+    "72180": 179.94654,
+    # U
+    "92234": 234.04094, "92235": 235.04395, "92236": 236.04556, "92238": 238.05078,
+    }
+
 class Composition:
     """Isotopic composition of a material.
 
@@ -472,19 +509,16 @@ def get_element_symbol(Z: int):
 # ---------------------------------------------------------------------------
 #  Constants
 # ---------------------------------------------------------------------------
-AVOGADRO = 6.022094e23       # Avogadro's number [1/mol]
+AVOGADRO = 6.02214076e23      # Avogadro's number [1/mol]
 CM2_TO_BARN = 1e24           # barn -> cm² conversion factor
 
 
 def get_isotope_atomic_mass(zaid: str) -> float:
     """Return the atomic mass (in g/mol) for the isotope identified by *zaid*.
-
-    For now the mass number *A* is used as an approximation.
-    Replace the body of this function with a lookup table of evaluated
-    (AUDI) atomic masses for higher accuracy.
+    Using evaluated ENDF/B-VIII.1 data.
 
     :param zaid: ZAID string, e.g. ``"92235"`` for U-235 or ``"1001"`` for H-1
-    :return: Atomic mass in g/mol (≈ mass number *A*)
+    :return: atomic_mass looked up from ISOTOPIC_MASSES lookup dictionary
     """
     Z = int(float(zaid) // 1000)
     A = int(float(zaid) - Z * 1000)
@@ -494,7 +528,11 @@ def get_isotope_atomic_mass(zaid: str) -> float:
             "Natural-element ZAIDs (A=0) are not supported; "
             "please specify individual isotopes."
         )
-    return float(A)
+    try:
+        atomic_mass = ISOTOPIC_MASSES[zaid]
+    except KeyError as e:
+        raise KeyError(f"Unable to find element with ZAID {zaid} in ISOTOPIC_MASSES lookup table, check ZAID and feel free to add missing values")
+    return atomic_mass
 
 
 def fractions_to_iso_densities(

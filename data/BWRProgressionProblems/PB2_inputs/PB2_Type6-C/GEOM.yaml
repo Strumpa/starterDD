@@ -23,19 +23,19 @@ ASSEMBLY_GEOMETRY:
     - ["ROD4", "ROD3", "ROD2", "ROD2", "ROD2", "ROD2", "ROD2", "ROD3"]
 
   assembly_pitch: 15.24
-  gap_wide: 0.9017 # Issue with this : need to center box taking into account gap_wide and gap_narrow : in BWR Progression Problems the Type 6 benchmark is not centered.
+  gap_wide: 0.9017
   gap_narrow: 0.42418
   channel_box_thickness: 0.254
   corner_inner_radius_of_curvature: 0.9652
 
   Gd_rod_ids: ["ROD5"]
   non_fuel_rod_ids: ["WROD"]
+  number_of_water_rods: 2
 
 WATER_ROD_GEOMETRY:
   type: "circular"
   inner_radius : 0.67437
   outer_radius : 0.75057
-  centers: [[7.04596, 6.56844], [8.67156, 8.19404]]
 
 
 CONTROL_CROSS_GEOMETRY:

@@ -45,7 +45,7 @@ Examples are available in the tutorials/ folder
 - simple_4x4_minicore : simple CoreModel with 4x4 2D layout consisting of 3 different assembly types, defined by 3 axial layouts.
 - simple_AT10_1/2L_pincell_compo : single AT10 fuel pin example for Dragon COMPO generation with 1 or 2 levels schemes. 
 - simple_glow_GE14 : simplified GE14 model from BWR Progression Problems [3], call to glow through the assembly geometry creation procedure and automated mix and output definitions in cle2000 format.
-- simplified_GE14_model : simplified GE14 assembly model from 
+- simplified_GE14_model : simplified GE14 model adapted from BWR Progression Problems [3]
 
 # References
 - [1] DRAGON5 and DONJON5, the contribution of École Polytechnique de Montréal to the SALOME platform, A. Hébert (2014). Available at  https://git.oecd-nea.org/dragon/5.1

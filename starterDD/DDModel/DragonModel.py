@@ -5,6 +5,7 @@
 from ..MaterialProperties.material_mixture import MaterialMixture, Composition
 import yaml
 import numpy as np
+from collections import deque
 # Note: computeSantamarinaradii imported in methods to avoid circular imports
 
 class CartesianAssemblyModel:
@@ -189,7 +190,7 @@ class CartesianAssemblyModel:
             self.water_box_outer_side = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("outer_side", None)
             self.water_box_corner_radius = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("corner_radius", None)
         self.water_rod_centers = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("centers", [])
-        self.number_of_water_rods = len(self.water_rod_centers)
+        self.number_of_water_rods = len(self.water_rod_centers) if self.water_rod_centers else yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("number_of_water_rods", 0)
         self.channel_box_inner_side = self.assembly_pitch - 2 * self.channel_box_thickness - self.gap_wide - self.gap_narrow if self.channel_box_thickness is not None and self.gap_wide is not None and self.gap_narrow is not None else None
         n_cols = len(self.lattice_description[0]) if self.lattice_description else 0
         pin_pitch = self.pin_geometry_dict.get("pin_pitch", 0)
@@ -245,6 +246,7 @@ class CartesianAssemblyModel:
         "non_fuel_rod_ids": False,
         "lattice_type": False,
         "reactor_type": False,
+        "number_of_water_rods": False,
     }
 
     _EXPECTED_PIN_KEYS = {
@@ -264,7 +266,7 @@ class CartesianAssemblyModel:
         "inner_side": False,
         "outer_side": False,
         "corner_radius": False,
-        "centers": True,
+        "centers": False,
     }
 
     _EXPECTED_CONTROL_CROSS_KEYS = {
@@ -403,6 +405,7 @@ class CartesianAssemblyModel:
         self.generating_fuel_cells = []
         self.non_generating_fuel_cells = []
         self.vanished_rods = []
+        water_rod_positions = []
         for y_index, row in enumerate(self.lattice_description):
             lattice_row = []
             for x_index, descriptor in enumerate(row):
@@ -481,6 +484,7 @@ class CartesianAssemblyModel:
                                 if self.translation_offset_x is not None and self.translation_offset_y is not None and pin_pitch > 0:
                                     dummy_pin_model.set_center(center_x, center_y)
                                 lattice_row.append(dummy_pin_model)
+                                water_rod_positions.append((x_index, y_index))
                             elif descriptor == "VANR": # count the number of VANished Rods
                                 number_of_vanished_rods += 1
                                 vanished_rod_model = VanishedRodModel(f"{descriptor}_{number_of_vanished_rods}")
@@ -510,6 +514,8 @@ class CartesianAssemblyModel:
         nb_dummies_per_rod = number_of_water_rod_placeholders / self.number_of_water_rods if self.number_of_water_rods > 0 else None
         water_rod_bounding_box_side = np.sqrt(nb_dummies_per_rod) * self.pin_geometry_dict["pin_pitch"] if nb_dummies_per_rod is not None else None
         self.water_rods = []
+        if not self.water_rod_centers:
+            center_to_group = self._reconstruct_water_rods_centers_from_placeholders(water_rod_ph_positions=water_rod_positions)
         if water_rod_bounding_box_side is not None:
             for rod_nb in range(self.number_of_water_rods):
                 center = self.water_rod_centers[rod_nb]
@@ -526,10 +532,69 @@ class CartesianAssemblyModel:
                 else:
                     raise ValueError(f"Unsupported water rod geometry type: {self.water_rod_type}. Supported types are 'circular' and 'square'.")
                 water_rod_model.set_materials("MODERATOR", "CLAD", "COOLANT")
+                water_rod_model.attach_placeholders_indices_from_lattice_numbering(center_to_group[center])
                 self.water_rods.append(water_rod_model)
 
         # set number of vanished rods in the lattice :
         self.number_of_vanished_rods = number_of_vanished_rods
+
+    def _reconstruct_water_rods_centers_from_placeholders(self, water_rod_ph_positions):
+
+        nb_dummies_per_rod = len(water_rod_ph_positions) / self.number_of_water_rods if self.number_of_water_rods > 0 else None
+        self.water_rod_centers = []  
+        center_to_group = {}       
+        groups = self._group_connected_positions(water_rod_ph_positions)
+        for group in groups:
+            # get the center of the group in lattice coorrdinates:
+            x_pos = [pos[0] for pos in group]
+            y_pos = [pos[1] for pos in group]
+
+            mean_x = (np.mean(x_pos)+0.5)*self.pin_geometry_dict["pin_pitch"]
+            mean_y = (np.mean(y_pos)+0.5)*self.pin_geometry_dict["pin_pitch"]
+
+
+            center = (self.translation_offset_x + mean_x, self.translation_offset_y + mean_y)
+            self.water_rod_centers.append(center)
+            center_to_group[center] = group
+
+        return center_to_group
+
+    def _group_connected_positions(self, positions):
+        points = set(positions)   # fast lookup
+        visited = set()
+        groups = []
+
+        # 4-neighbor connectivity
+        directions = [
+            (1, 0), (-1, 0),
+            (0, 1), (0, -1)
+        ]
+
+        for p in points:
+
+            if p in visited:
+                continue
+
+            # start a new group
+            group = []
+            queue = deque([p])
+            visited.add(p)
+
+            while queue:
+                x, y = queue.popleft()
+                group.append((x, y))
+
+                # explore neighbors
+                for dx, dy in directions:
+                    neighbor = (x + dx, y + dy)
+
+                    if neighbor in points and neighbor not in visited:
+                        visited.add(neighbor)
+                        queue.append(neighbor)
+
+            groups.append(group)
+
+        return groups
 
     def add_pin_to_lattice(self, pin_model):
         """
@@ -829,6 +894,58 @@ class CartesianAssemblyModel:
                 if self.lattice_description[i][j] != self.lattice_description[j][i]:
                     return False
         return True
+    
+    def check_quarter_symmetry(self):
+        """
+        Check whether the lattice description has quarter symmetry.
+        It is symmetric about a central x=ap/2 axis and a central y=ap/2 axis, where ap is the lattice pitch. 
+        ie if the lattice matrix can be subdivided into 4 sub-blocks that are equivalent by reflection about the central axes.
+
+        Returns
+        -------
+        bool
+        """
+        n = len(self.lattice_description)
+        for row in self.lattice_description:
+            if len(row) != n:
+                return False
+        for i in range(n):
+            for j in range(n):
+                if self.lattice_description[i][j] != self.lattice_description[n - 1 - i][j]:
+                    return False
+                if self.lattice_description[i][j] != self.lattice_description[i][n - 1 - j]:
+                    return False
+        return True
+
+    def check_half_symmetry(self):
+        """
+        Check whether the lattice description has half symmetry.
+        It is symmetric about a central x=ap/2 axis or a central y=ap/2 axis, where ap is the lattice pitch. 
+        ie if the lattice matrix can be subdivided into 2 sub-blocks that are equivalent by reflection about one of the central axes.
+
+        Returns
+        -------
+        str or None
+            "x" if symmetric about x-axis, "y" if symmetric about y-axis, None if no half symmetry.
+        """
+        n = len(self.lattice_description)
+        for row in self.lattice_description:
+            if len(row) != n:
+                return None
+        symmetric_x = True
+        symmetric_y = True
+        for i in range(n):
+            for j in range(n):
+                if self.lattice_description[i][j] != self.lattice_description[n - 1 - i][j]:
+                    symmetric_x = False
+                if self.lattice_description[i][j] != self.lattice_description[i][n - 1 - j]:
+                    symmetric_y = False
+        if symmetric_x and not symmetric_y:
+            return "x"
+        elif symmetric_y and not symmetric_x:
+            return "y"
+        else:
+            return None
 
     def _compute_translation_offsets(self):
         """
@@ -2024,16 +2141,39 @@ class FuelPinModel:
 
         print(f"Created : Pin with fuel material {self.fuel_material_name} subdivided into radial zones with radii {self.radii} based on self-shielding option {self.self_shielding_option}.")
 
+    def subvivide_into_volume_based_radii(self, list_of_volumes):
+        # Import helper 
+        from ..GeometryBuilder.helpers import computeVolumeBasedRadii
+
+        fuel_radius = self.technological_radii[0]
+        gap_radius = self.technological_radii[1]
+        clad_radius = self.technological_radii[2]
+
+        self.radii = computeVolumeBasedRadii(fuel_radius, gap_radius, clad_radius, list_of_volumes)
 
     def subdivide_into_Santamarina_radii(self):
         # Import here to avoid circular import issues
-        from ..GeometryBuilder.helpers import computeSantamarinaradii
+        from ..GeometryBuilder.helpers import computeSantamarinaRadii
         
         fuel_radius = self.technological_radii[0]
         gap_radius = self.technological_radii[1]
         clad_radius = self.technological_radii[2]
         # subdivide the pin into radial zones for self-shielding treatment in Dragon based on the Santamarina radii definition
-        self.radii = computeSantamarinaradii(fuel_radius, gap_radius, clad_radius, gadolinium=self.isGd)
+        self.radii = computeSantamarinaRadii(fuel_radius, gap_radius, clad_radius, gadolinium=self.isGd)
+
+    def subdivide_into_fine_Gd_radii(self):
+        # Import here to avoid circular import issues
+        from ..GeometryBuilder.helpers import computeVolumeBasedRadii
+        
+        fuel_radius = self.technological_radii[0]
+        gap_radius = self.technological_radii[1]
+        clad_radius = self.technological_radii[2]
+        # subdivide the pin into radial zones for self-shielding treatment in Dragon based on the Santamarina radii definition
+        if self.isGd:
+            fuel_volume_fractions = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0]
+        else:
+            fuel_volume_fractions = [0.5, 0.8, 0.95, 1.0]
+        self.radii = computeVolumeBasedRadii(fuel_radius, gap_radius, clad_radius, fuel_volume_fractions)
 
 
     def subdivide_into_radial_zones(self, num_radial_zones = None):
@@ -2179,6 +2319,12 @@ class CircularWaterRodModel:
         self.cladding_material_name = cladding_material_name
         self.coolant_material_name = coolant_material_name
 
+    def attach_placeholders_indices_from_lattice_numbering(self, list_of_indices):
+        """
+        attach placeholders indicies identified from the lattice numbering
+        """
+        self.placeholder_indices = list_of_indices
+
 
 class SquareWaterRodModel:
     """
@@ -2251,6 +2397,11 @@ class SquareWaterRodModel:
         self.cladding_material_name = cladding_material_name
         self.coolant_material_name = coolant_material_name
 
+    def attach_placeholders_indices_from_lattice_numbering(self, list_of_indices):
+        """
+        attach placeholders indicies identified from the lattice numbering
+        """
+        self.placeholder_indices = list_of_indices
 
 
         
@@ -2362,7 +2513,7 @@ class ControlCrossModel:
         # Derived dimensions
         self.inner_sheath_width = blade_thickness - 2 * sheath_thickness
         self.wing_length = blade_half_span - central_structure_half_span
-
+        
         # Tube spacing: compute automatically if not provided.
         # The tubes are distributed evenly inside the inner sheath
         # region of the wing (from central structure edge + sheath
@@ -2371,14 +2522,15 @@ class ControlCrossModel:
         if tube_spacing is not None:
             self.tube_spacing = tube_spacing
         else:
-            self.tube_spacing = inner_wing_length / (number_tubes_per_wing + 0.5)
+            self.tube_spacing = inner_wing_length / float(number_tubes_per_wing)
+
+        extra_moderator_gap = (self.tube_spacing - 2.0*absorber_tube_outer_radius) / 2.0
 
         if first_tube_offset is not None:
-            self.first_tube_offset = first_tube_offset
+            self.first_tube_offset = float(first_tube_offset)
         else:
             self.first_tube_offset = (
-                central_structure_half_span + sheath_thickness
-                + self.tube_spacing / 2.0
+                central_structure_half_span + absorber_tube_outer_radius + extra_moderator_gap
             )
 
         # Per-tube material names — populated by

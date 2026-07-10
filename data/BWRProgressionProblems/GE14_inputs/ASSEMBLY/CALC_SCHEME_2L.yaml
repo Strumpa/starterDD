@@ -4,17 +4,17 @@
 #
 # This file is used as a test case and example for the automated creation of DRAGON calculation schemes in starterDD.
 # R.Guasch
-# Date : 10/03/2026 [created]
+# Date : 08/06/2026 [created]
 
 FLUX_CALCULATION_SCHEME:
-  name: "GE14_DOM_1L_MOC"
+  name: "GE14_DOM_2L_IC_MOC"
 
   steps:
     # ------------------------------------------------------------------
     # Step 1: Self-shielding (SSH)
     #   - USS: module to treat the self-shielding problems
     #   - Resonance Spectrum Expansion method for resonance self-shielding (energy treatment)
-    #   - CP spatial solution for the self-shielding calculation
+    #   - IC spatial solution for the self-shielding calculation
     #   - TISO tracking (isotropic)
     #   - Santamarina radii for fuel zone subdivision
     #   - No azimuthal sectorization
@@ -30,21 +30,49 @@ FLUX_CALCULATION_SCHEME:
       num_angles_2d: 8
       line_density: 25.0
       # No need for polar angles and nmu as not used outside of MOC. Should be supported 
-      anisotropy_level: 4
+      anisotropy_level: 2
       radial_scheme: "Santamarina"
       export_macros: true
       sectorization:
         enabled: false
 
     # ------------------------------------------------------------------
-    # Step 2: Flux calculation (single level)
+    # Step 2: First flux level
+    #   - IC spatial solution for the first flux level
+    #   - TISO tracking (isotropic)
+    #   - Santamarina radii for fuel zone subdivision
+    #   - No azimuthal sectorization
+    # ------------------------------------------------------------------
+    - name: "FLUXL1"
+      step_type: "flux"
+      tdt_file_id: "SSH"
+      mix_numbering_strategy: "by_pin"
+      spatial_method: "IC"
+      tracking: "TISO"
+      num_angles_2d: 8
+      line_density: 25.0
+      radial_scheme: "Santamarina"
+      export_macros: true
+      sectorization:
+        enabled: false
+    
+    - name: "Energy condensation"
+      step_type: "edition_between_levels"
+      number_of_macro_groups: 26
+      energy_groups_bounds: [10,  14,  18,  26,  33,  40,  49,  56,  66, 84,
+       150, 210, 241, 244, 247, 252, 255, 258, 261, 268, 273, 277, 281, 286, 291]
+      SPH_correction: True
+      max_SPH_group: 19
+    # ------------------------------------------------------------------
+    # Step 3: Flux calculation (second level)
     #   - MOC spatial solution for the flux calculation
     #   - TSPC tracking (cyclic tracks, specular boundary conditions)
     #   - Santamarina radii (same subdivision as SSH)
     #   - Windmill sectorization on coolant region
     # ------------------------------------------------------------------
-    - name: "FLUX"
+    - name: "FLUXL2"
       step_type: "flux"
+      tdt_file_id: "FLUX"
       mix_numbering_strategy: "by_pin"
       spatial_method: "MOC"
       tracking: "TSPC"
@@ -105,7 +133,7 @@ CALCULATION_OUTPUTS:
     comment: "Homogenized over all materials"
     isotopes: ["U238"] # 
     spatial_intergation_mode : "ALL"
-    energy_bounds : "None" # None : no condensation, keep all energy groups
+    energy_bounds : None # None : no condensation, keep all energy groups
     state_points: 
       coolant_density: [0.73669000, 0.59685660, 0.45702320, 0.31718980, 0.17735640]
       fuel_temperature: [900.0]

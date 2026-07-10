@@ -28,6 +28,7 @@ ASSEMBLY_GEOMETRY:
   gap_wide: 0.75
   channel_box_thickness: 0.17
   corner_inner_radius_of_curvature: 0
+  number_of_water_rods: 1
 
   Gd_rod_ids: ["ROD7", "ROD8"]
   non_fuel_rod_ids: ["WROD"]
@@ -36,4 +37,3 @@ WATER_ROD_GEOMETRY:
   type: "square"
   inner_side : 3.34
   outer_side : 3.5
-  centers: [[8.2675, 8.2675]]

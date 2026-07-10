@@ -2,7 +2,7 @@
 # R.Guasch
 # Date : 09/02/2026 [created]
 
-def computeSantamarinaradii(fuel_radius, gap_radius, clad_radius, gadolinium=False):
+def computeSantamarinaRadii(fuel_radius, gap_radius, clad_radius, gadolinium=False):
     """
     Helper to define fuel region radii for fuel pins
     A. Santamarina recommendations:
@@ -37,5 +37,35 @@ def computeSantamarinaradii(fuel_radius, gap_radius, clad_radius, gadolinium=Fal
     if gap_radius is not None and gap_radius > fuel_radius and clad_radius is None:
         ## print warning as this would be (fuel zones + gap zone) without clad. 
         print("Warning : gap radius is larger than fuel radius but no clad radius provided, this would lead to a pin with fuel zones and outer gap zone but no clad. Please check the input radii.")
+    return pin_radii
 
+
+def computeVolumeBasedRadii(fuel_radius, gap_radius, clad_radius, fuel_volume_fractions):
+    """
+    Helper to define fuel region radii for fuel pins
+    fuel_radius:
+        radius of the fuel pellet, in cm
+    gap_radius:
+        radius of the expansion gap, in cm
+    clad_radius:
+        radius of the cladding, in cm
+    fuel_volume_fractions:
+        volume fractions for the fuel subdivisions, ordered radially
+    """
+    pin_radii = []
+    if gap_radius is not None and gap_radius < fuel_radius:
+        # in case expansion gap is inner most region, add it as the first radius and then compute the fuel radii based on the remaining fuel volume after subtracting the gap volume
+        pin_radii.append(gap_radius)
+    for volume_fract in fuel_volume_fractions:
+        pin_radii.append(
+            (volume_fract**0.5) * fuel_radius,
+        )
+    if gap_radius is not None and gap_radius > fuel_radius:
+        # if gap radius is inner most region, add the clad radius as the last radius after the fuel radii
+        pin_radii.append(gap_radius)    
+    if clad_radius is not None:
+        pin_radii.append(clad_radius)
+    if gap_radius is not None and gap_radius > fuel_radius and clad_radius is None:
+        ## print warning as this would be (fuel zones + gap zone) without clad. 
+        print("Warning : gap radius is larger than fuel radius but no clad radius provided, this would lead to a pin with fuel zones and outer gap zone but no clad. Please check the input radii.")
     return pin_radii

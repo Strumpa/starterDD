@@ -7,7 +7,15 @@
 from pathlib import Path
 import os
 
-from starterDD.InterfaceToDD.case_generator import DragonCase
+try:
+    from glow.support.types import GeometryType, PropertyType
+    from starterDD.starterDD.InterfaceToDD.case_generator import DragonCase
+    GLOW_AVAILABLE = True
+    
+except ImportError:
+    
+    GLOW_AVAILABLE = False
+    from starterDD.InterfaceToDD.case_generator import DragonCase
 
 # =====================================================================
 # Configuration paths (relative to the project root)
@@ -22,8 +30,8 @@ TDT_FILES = PROJECT_ROOT / "tests" / "reference_tdt_files" / "GE14"
 DRAGON_EXEC = os.environ.get('dragon_exec', None)
 DRAGLIBS_PATH = Path(os.environ.get('DRAGLIB_DIR', "/path/to/draglibs"))
 
-run_dragon=True  # Set to False for a dry run (no Dragon execution)
-run_glow = False  # Set to True to call glow for geometry processing (if needed)
+run_dragon = False  # Set to False for a dry run (no Dragon execution)
+run_glow = True  # Set to True to call glow for geometry processing (if needed)
 
 GE14_DOM_test_case = DragonCase(
         case_name="GE14_DOM",

@@ -84,7 +84,7 @@ class LIB:
             3. Optionally, TDT indices enforced
                (``enforce_material_mixture_indices_from_tdt``).
         density_branch : bool
-            When ``True``, COOLANT and MODERATOR mix H1/O16 densities
+            When ``True``, COOLANT mix H1/O16 densities
             are replaced by ``<<N_H>>`` / ``<<N_O>>`` CLE2000 variables
             and the procedure receives two extra REAL input parameters.
         """
@@ -253,6 +253,9 @@ class LIB:
             "temp_var": temperature_variable,
         })
 
+    def set_varying_density_materials(self, list_of_materials_with_varying_density):
+        self.materials_with_varying_density = list_of_materials_with_varying_density
+
     # ------------------------------------------------------------------
     #  Build blocks
     # ------------------------------------------------------------------
@@ -336,6 +339,7 @@ class LIB:
         }
         # Materials affected by coolant-density branching
         _WATER_MATERIALS = {"COOLANT", "MODERATOR"}
+        _COOLANT_MATERIAL = {"COOLANT"}
 
         lines = ""
         for mat_name, idx, composition, temp_var in entries:
@@ -349,6 +353,7 @@ class LIB:
 
             use_density_vars = (
                 self.density_branch
+                and mat_name in self.materials_with_varying_density
                 and mat_name in _WATER_MATERIALS
             )
 
@@ -1396,7 +1401,7 @@ class MAC:
     ngroup : int
         Number of energy groups (default 1).
     anisotropy_level : int
-        Legendre expansion order for scattering (default 0).
+        Legendre expansion order for scattering (default 1).
     """
 
     def __init__(self, macro_lib_name: str, create_new: bool = True):
@@ -1417,7 +1422,7 @@ class MAC:
         self.material_mixtures = []
         self.iprint = 1 # default print level
         self.ngroup = 1 # default number of energy groups
-        self.anisotropy_level = 0 # default anisotropy level
+        self.anisotropy_level = 1 # default anisotropy level
         self.count_mixtures = 0
 
 
@@ -1672,9 +1677,17 @@ class TRK:
         """Create SALT (and MCCGT) objects for each trackable step."""
         for step in self.scheme.get_trackable_steps():
             if step.step_type == "self_shielding":
-                self.problem_anisotropy_level = step.anisotropy_level
+                if step.transport_correction == "NONE" or step.transport_correction is None:
+                    self.problem_anisotropy_level = step.anisotropy_level
+                else:
+                    step.lib_anisotropy_level = step.anisotropy_level
+                    step.anisotropy_level = 1
+                    print(f"Enforcing anisotropy level to 1 for P0 + CTRA")
             else:
-                step.anisotropy_level = getattr(self, "problem_anisotropy_level", 1)
+                if step.transport_correction == "NONE" or step.transport_correction is None:
+                    step.anisotropy_level = getattr(self, "problem_anisotropy_level", 1)
+                else:
+                    step.anisotropy_level = 1
             tdt_var = self._tdt_var_name(step)
             salt = SALT(step, tdt_var)
             self._salt_objects.append(salt)
@@ -1936,6 +1949,20 @@ class SPH_correction:
         else:
             self.lib_name = lib_name
 
+    def set_solution_approach(self, keyword):
+        """
+        Set the solution approach : 
+
+        Parameters
+        ----------
+        keyword : str
+            ARM or PIJ keyword to set solution approach :
+                ARM : iterative approach compatible with MOC and IC trackings.
+                PIJ : direct CP approach.
+        """
+
+        self.asm_keyword = keyword
+
     def build_sph_call(self, trk_ll, trkfil_ll):
         """Return the ``SPH:`` call block as a string.
 
@@ -1949,8 +1976,9 @@ class SPH_correction:
         lines = [
             f"{self.lib_name} := SPH: {self.lib_name} "
             f"{trk_ll} {trkfil_ll} ::",
-            "    EDIT 1",
-        ]
+            f"    EDIT 1 {self.asm_keyword}",
+            f"    ITER {self.step.max_iterations} {self.step.tolerance:1.1E}"
+        ]   
         if self.step.max_sph_group is not None:
             lines.append(f"    GRMAX {self.step.max_sph_group}")
         lines.append(";")
