@@ -146,7 +146,7 @@ class CartesianAssemblyModel:
         """
         with open(geometry_description_yaml, 'r') as file:
             yaml_data = yaml.safe_load(file)
-
+        self.raw_yaml_data = yaml_data 
         # Validate top-level YAML sections
         self._validate_yaml_keys(yaml_data, geometry_description_yaml)
 
@@ -180,8 +180,11 @@ class CartesianAssemblyModel:
         
         # Water rod / moderation box information
         self.water_rod_type = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("type", None)
-        if self.water_rod_type is not None and self.water_rod_type not in ["circular", "square"]:
-            raise ValueError(f"Unsupported water rod geometry type: {self.water_rod_type}. Supported types are 'circular' and 'square'.")
+        
+        # 1. On ajoute "conical" à la liste des types autorisés
+        if self.water_rod_type is not None and self.water_rod_type not in ["circular", "square", "conical"]:
+            raise ValueError(f"Unsupported water rod geometry type: {self.water_rod_type}. Supported types are 'circular', 'square' and 'conical'.")
+            
         if self.water_rod_type == "circular": # GE14 type lattice
             self.water_rod_inner_radius = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("inner_radius", None)
             self.water_rod_outer_radius = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("outer_radius", None)
@@ -189,6 +192,14 @@ class CartesianAssemblyModel:
             self.water_box_inner_side = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("inner_side", None)
             self.water_box_outer_side = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("outer_side", None)
             self.water_box_corner_radius = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("corner_radius", None)
+        # 2. On ajoute le bloc pour lire et sauvegarder les paramètres des cônes
+        elif self.water_rod_type == "conical":
+            wr_geo = yaml_data.get("WATER_ROD_GEOMETRY", {})
+            self.water_rod_outer_radius_start = wr_geo.get("outer_radius_start", None)
+            self.water_rod_outer_radius_end = wr_geo.get("outer_radius_end", None)
+            self.water_rod_inner_radius_start = wr_geo.get("inner_radius_start", None)
+            self.water_rod_inner_radius_end = wr_geo.get("inner_radius_end", None)
+            self.wall_conductivity = wr_geo.get("wall_conductivity", 18.0)  
         self.water_rod_centers = yaml_data.get("WATER_ROD_GEOMETRY", {}).get("centers", [])
         self.number_of_water_rods = len(self.water_rod_centers) if self.water_rod_centers else yaml_data.get("ASSEMBLY_GEOMETRY", {}).get("number_of_water_rods", 0)
         self.channel_box_inner_side = self.assembly_pitch - 2 * self.channel_box_thickness - self.gap_wide - self.gap_narrow if self.channel_box_thickness is not None and self.gap_wide is not None and self.gap_narrow is not None else None
@@ -237,7 +248,7 @@ class CartesianAssemblyModel:
     # Keys mapped to True are required; keys mapped to False are optional.
     _EXPECTED_ASSEMBLY_KEYS = {
         "lattice_description": True,
-        "assembly_pitch": True,
+        "assembly_pitch": False,
         "gap_wide": False,
         "gap_narrow": False,
         "channel_box_thickness": False,
@@ -247,6 +258,7 @@ class CartesianAssemblyModel:
         "lattice_type": False,
         "reactor_type": False,
         "number_of_water_rods": False,
+        "assembly_box_description": False,
     }
 
     _EXPECTED_PIN_KEYS = {
@@ -257,6 +269,7 @@ class CartesianAssemblyModel:
         "height": False,
         "self_shielding_option": False,
         "options_dict": False,
+        "grid_thickness": False,
     }
 
     _EXPECTED_WATER_ROD_KEYS = {
@@ -267,6 +280,11 @@ class CartesianAssemblyModel:
         "outer_side": False,
         "corner_radius": False,
         "centers": False,
+        "outer_radius_start": False,
+        "outer_radius_end": False,
+        "inner_radius_start": False,
+        "inner_radius_end": False,
+        "wall_conductivity": False,
     }
 
     _EXPECTED_CONTROL_CROSS_KEYS = {
@@ -514,6 +532,7 @@ class CartesianAssemblyModel:
         nb_dummies_per_rod = number_of_water_rod_placeholders / self.number_of_water_rods if self.number_of_water_rods > 0 else None
         water_rod_bounding_box_side = np.sqrt(nb_dummies_per_rod) * self.pin_geometry_dict["pin_pitch"] if nb_dummies_per_rod is not None else None
         self.water_rods = []
+        center_to_group = {}
         if not self.water_rod_centers:
             center_to_group = self._reconstruct_water_rods_centers_from_placeholders(water_rod_ph_positions=water_rod_positions)
         if water_rod_bounding_box_side is not None:
@@ -529,10 +548,15 @@ class CartesianAssemblyModel:
                                                           moderator_box_inner_side=self.water_box_inner_side,
                                                           center=center, rod_ID=f"WaterRod_{rod_nb+1}",
                                                           corner_radius=getattr(self, 'water_box_corner_radius', None))
+                elif self.water_rod_type == "conical":
+                    water_rod_model = CircularWaterRodModel(bounding_box_side_length=water_rod_bounding_box_side, 
+                                                            inner_radius=getattr(self, "water_rod_inner_radius_start", 0.0), 
+                                                            outer_radius=getattr(self, "water_rod_outer_radius_start", 0.0), 
+                                                            center=center, rod_ID=f"WaterRod_{rod_nb+1}")
                 else:
-                    raise ValueError(f"Unsupported water rod geometry type: {self.water_rod_type}. Supported types are 'circular' and 'square'.")
+                    raise ValueError(f"Unsupported water rod geometry type: {self.water_rod_type}. Supported types are 'circular', 'square' and 'conical'.")
                 water_rod_model.set_materials("MODERATOR", "CLAD", "COOLANT")
-                water_rod_model.attach_placeholders_indices_from_lattice_numbering(center_to_group[center])
+                water_rod_model.attach_placeholders_indices_from_lattice_numbering(center_to_group.get(tuple(center), []))
                 self.water_rods.append(water_rod_model)
 
         # set number of vanished rods in the lattice :

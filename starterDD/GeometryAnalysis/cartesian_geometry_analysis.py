@@ -5,37 +5,52 @@ from shapely.geometry import box, Point, MultiLineString
 from shapely.ops import unary_union
 import math
 
-# 5-point Gauss-Legendre nodes (ξ_i) and weights (w_i) on [-1, 1].
-# Exact for polynomials of degree ≤ 9.  A conical water rod has A(z) ∝ r(z)² with r linear in z,
-# so A is quadratic → the GL-5 integration below is effectively exact.
 _GL_NODES   = np.array([-0.90617984593866399, -0.53846931010568309,  0.0,
                           0.53846931010568309,  0.90617984593866399])
 _GL_WEIGHTS = np.array([ 0.23692688505618908,  0.47862867049936647,  0.56888888888888889,
                           0.47862867049936647,  0.23692688505618908])
 
+def _extract_box_dimensions(dragon_assembly_model):
+    """
+    Extrait les dimensions du boîtier. Si elles sont commentées dans le YAML,
+    on les recalcule dynamiquement à partir des surfaces (assembly_box_description).
+    """
+    L_ext = dragon_assembly_model.assembly_pitch
+    gap_wide = getattr(dragon_assembly_model, 'gap_wide', None)
+    cbt = getattr(dragon_assembly_model, 'channel_box_thickness', None)
+    
+    # 1. Si les paramètres sont définis explicitement
+    if L_ext is not None and gap_wide is not None and cbt is not None:
+        W_start = gap_wide + cbt
+        L_int = L_ext - 2 * W_start
+        return W_start, L_ext, L_int
+        
+    # 2. Sinon, on lit les surfaces brutes !
+    ass_geo = getattr(dragon_assembly_model, 'raw_yaml_data', {}).get('ASSEMBLY_GEOMETRY', {})
+    surfaces = ass_geo.get('assembly_box_description', {}).get('surfaces', [])
+    
+    pb_side = None
+    icb_side = None
+    for surf in surfaces:
+        if surf['name'] == 'problem_boundaries':
+            pb_side = surf['parameters']['side_length']
+        elif surf['name'] == 'inner_channel_box':
+            icb_side = surf['parameters']['side_length']
+            
+    if pb_side is not None and icb_side is not None:
+        L_ext = float(pb_side)
+        L_int = float(icb_side)
+        W_start = (L_ext - L_int) / 2.0
+        return W_start, L_ext, L_int
+        
+    raise ValueError(f"Impossible de déduire les dimensions du boîtier pour {dragon_assembly_model.name}. Vérifiez le YAML.")
+
 def build_assembly_geometry(dragon_assembly_model, r_wr_override=None):
-    """
-    Build the global geometry of the assembly, including fuel rods, water rods, and the inner channel box.
-    
-    Parameters:
-    - dragon_assembly_model: Object containing geometry data for pins, assembly, and water rods
-    - r_wr_override: If provided, use this value as the water rod outer radius instead of reading
-      it from `data`. Required when WATER_ROD_GEOMETRY has type "conical" (no fixed outer_radius).
-    
-    Returns:
-    - inner_box: Polygon representing the inner channel box
-    - solide_total: Polygon representing the union of all solid regions (fuel rods + water rods)
-    - multi_lignes_chauffantes: MultiLineString of heating perimeters (fuel rod boundaries)
-    - multi_lignes_water: MultiLineString of water rod perimeters
-    - data_ref: Dictionary of extracted parameters for caching
-    """
     data_ref = {}
     data_ref["ASSEMBLY_GEOMETRY"] = {}
     data_ref["PIN_GEOMETRY"] = {}
     data_ref["WATER_ROD_GEOMETRY"] = {}
     data_ref["WATER_ROD_GEOMETRY"]["centers"] = []
-
-    data_ref["ASSEMBLY_GEOMETRY"]["assembly_pitch"] = dragon_assembly_model.assembly_pitch
 
     pin_geo = dragon_assembly_model.pin_geometry_dict
     lattice = dragon_assembly_model.lattice_description
@@ -54,37 +69,32 @@ def build_assembly_geometry(dragon_assembly_model, r_wr_override=None):
     elif dragon_assembly_model.water_rod_type == "circular":
         r_wr = dragon_assembly_model.water_rod_outer_radius
     elif dragon_assembly_model.water_rod_type == "conical":
-        r_wr = getattr(dragon_assembly_model, "water_rod_outer_radius_start", dragon_assembly_model.water_rod_outer_radius)
+        r_wr = getattr(dragon_assembly_model, "water_rod_outer_radius_start", 0.0)
     else:
         raise ValueError(f"Analyzer does not support water rods with type {dragon_assembly_model.water_rod_type}")
     
     data_ref["WATER_ROD_GEOMETRY"]["outer_radius"] = r_wr
     
-    L_ext = dragon_assembly_model.assembly_pitch
-    data_ref['ASSEMBLY_GEOMETRY']["gap_wide"] = dragon_assembly_model.gap_wide
-    data_ref['ASSEMBLY_GEOMETRY']["channel_box_thickness"] = dragon_assembly_model.channel_box_thickness
-    
-    # Si 'grid_thickness' n'existe pas dans l'objet, sa valeur sera 0.0
     grid_thickness = pin_geo.get('grid_thickness', 0.0)
-
-    # Rayons d'encombrement physique (gaine + grille)
     r_solid_clad = r_clad + grid_thickness
     r_solid_wr   = r_wr   + grid_thickness
     
-    # Extraction des paramètres du boîtier interne (adapté pour l'objet)
-    W_start = dragon_assembly_model.gap_wide + dragon_assembly_model.channel_box_thickness
-    L_int = L_ext - 2 * W_start
+    # --- APPEL DE NOTRE NOUVELLE FONCTION INTELLIGENTE ---
+    W_start, L_ext, L_int = _extract_box_dimensions(dragon_assembly_model)
     R_c = dragon_assembly_model.corner_inner_radius_of_curvature
     W_end = L_ext - W_start
 
-    # Construction du Boitier Interne (basé sur le centre et le côté)
+    # Sauvegarde dans le dictionnaire pour plus tard
+    data_ref["ASSEMBLY_GEOMETRY"]["assembly_pitch"] = L_ext
+    data_ref["ASSEMBLY_GEOMETRY"]["W_start"] = W_start
+    data_ref["ASSEMBLY_GEOMETRY"]["L_int"] = L_int
+
     inner_box = box(W_start + R_c, W_start + R_c, W_end - R_c, W_end - R_c).buffer(R_c, resolution=64)
 
     formes_solides = []
     lignes_chauffantes = []
     lignes_water = []
 
-    # 2. Water Rods (les coordonnées sont déjà relatives/absolues dans le YAML/objet)
     for water_rod in dragon_assembly_model.water_rods:
         center = water_rod.center
         data_ref["WATER_ROD_GEOMETRY"]["centers"].append(center)
@@ -92,8 +102,6 @@ def build_assembly_geometry(dragon_assembly_model, r_wr_override=None):
         formes_solides.append(wr_circle)
         lignes_water.append(wr_circle.exterior)
     
-    # 3. Fuel Rods : Positionnement basé sur la lattice_bounding_box
-    # Le premier centre est situé à une demi-distance du bord de la box de la lattice
     l_gap_int = (L_int - ((len(lattice[0]) - 1) * d) - 2 * r_clad) / 2.0
     start_x = W_start + l_gap_int + r_clad
     start_y = W_start + l_gap_int + r_clad
@@ -105,22 +113,17 @@ def build_assembly_geometry(dragon_assembly_model, r_wr_override=None):
 
             if item == 'VROD':
                 if grid_thickness > 0.0:
-                    # Crayon disparu mais on est dans une grille : anneau creux (alvéole vide).
-                    # L'anneau de métal bloque le passage et génère du frottement sur ses deux faces.
                     cercle_ext = Point(cx, cy).buffer(r_solid_clad, resolution=64)
                     cercle_int = Point(cx, cy).buffer(r_clad, resolution=64)
                     anneau = cercle_ext.difference(cercle_int)
                     formes_solides.append(anneau)
                     lignes_water.append(cercle_ext.exterior)
                     lignes_water.append(cercle_int.exterior)
-                # Si grid_thickness == 0 : emplacement vide, rien à dessiner
                 continue
 
             if item in exclusions:
-                # Autres non-fuel (WROD déjà traité plus haut) : ignorer
                 continue
 
-            # Fuel rod : solide à r_solid_clad, chauffe à r_clad
             rod_circle = Point(cx, cy).buffer(r_solid_clad, resolution=64)
             formes_solides.append(rod_circle)
             lignes_chauffantes.append(Point(cx, cy).buffer(r_clad, resolution=64).exterior)
@@ -303,6 +306,18 @@ class CartesianGeometricAnalyser:
             cylinders_de_cette_tranche = self._get_cylinders(dragon_assembly_model)
 
             is_conical = getattr(dragon_assembly_model, "water_rod_type", "") == "conical"
+            if is_conical:
+                r_ws = float(dragon_assembly_model.water_rod_outer_radius_start)
+                r_we = float(getattr(dragon_assembly_model, "water_rod_outer_radius_end",
+                                    dragon_assembly_model.water_rod_outer_radius_start))
+                r_mid = (r_ws + r_we) / 2.0
+                box_geom, solide, lignes_chauffantes, lignes_water, data_slice = build_assembly_geometry(
+                    dragon_assembly_model, r_wr_override=r_mid)
+                cylinders_de_cette_tranche = self._get_cylinders(dragon_assembly_model, r_wr_override=r_mid)
+            else:
+                box_geom, solide, lignes_chauffantes, lignes_water, data_slice = build_assembly_geometry(
+                    dragon_assembly_model)
+                cylinders_de_cette_tranche = self._get_cylinders(dragon_assembly_model)
             n_wr = len(dragon_assembly_model.water_rods) if hasattr(dragon_assembly_model, "water_rods") else 1
             k_wall = float(getattr(dragon_assembly_model, "wall_conductivity", 18.0))
 
@@ -355,10 +370,10 @@ class CartesianGeometricAnalyser:
         self._dernier_resultats = None 
 
     def _get_box_geom(self):
-        """Helper to replace the old yaml-based get_box_geometry"""
+        """Helper mis à jour pour lire les valeurs extraites via les surfaces"""
         L_ext = self.data_ref['ASSEMBLY_GEOMETRY']['assembly_pitch']
-        W_start = self.data_ref['ASSEMBLY_GEOMETRY']['gap_wide'] + self.data_ref['ASSEMBLY_GEOMETRY']['channel_box_thickness']
-        L_int = L_ext - 2 * W_start
+        W_start = self.data_ref['ASSEMBLY_GEOMETRY']['W_start']
+        L_int = self.data_ref['ASSEMBLY_GEOMETRY']['L_int']
         W_end = L_ext - W_start
         return W_start, W_end, L_ext, L_int
 
@@ -463,7 +478,7 @@ class CartesianGeometricAnalyser:
         elif dragon_assembly_model.water_rod_type == "circular":
             r_wr = dragon_assembly_model.water_rod_outer_radius
         elif dragon_assembly_model.water_rod_type == "conical":
-            r_wr = getattr(dragon_assembly_model, "water_rod_outer_radius_start", dragon_assembly_model.water_rod_outer_radius)
+            r_wr = getattr(dragon_assembly_model, "water_rod_outer_radius_start", 0.0)
         else:
             r_wr = 0.0
 
@@ -471,9 +486,7 @@ class CartesianGeometricAnalyser:
         r_solid_clad = r_clad + grid_thickness
         r_solid_wr   = r_wr   + grid_thickness
 
-        L_ext = dragon_assembly_model.assembly_pitch
-        W_start = dragon_assembly_model.gap_wide + dragon_assembly_model.channel_box_thickness
-        L_int = L_ext - 2 * W_start
+        W_start, L_ext, L_int = _extract_box_dimensions(dragon_assembly_model)
 
         lattice = dragon_assembly_model.lattice_description
         exclusions = set(dragon_assembly_model.non_fuel_rod_ids)
