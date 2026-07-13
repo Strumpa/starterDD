@@ -1,10 +1,14 @@
+#!/usr/bin/env python3
 import argparse
 import os
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-from starterDD.GeometryAnalysis.geometry_analysis import GeometricAnalyser
 
+# On n'importe plus get_box_geometry, car c'est devenu une méthode interne
+from starterDD.GeometryAnalysis.cartesian_geometry_analysis import CartesianGeometricAnalyser
+# NOUVEL IMPORT : On importe le CoreModel
+from starterDD.DDModel.DonjonModel import CoreModel
 
 RACINE_PROJET = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 DOSSIER_OUTPUTS = os.path.join(RACINE_PROJET, "tests", "outputs")
@@ -38,9 +42,9 @@ if __name__ == "__main__":
     group.add_argument("--water_z", nargs=2, type=int, metavar=('I', 'J'))
     group.add_argument("--water_x", nargs=2, type=int, metavar=('I', 'J'))
     group.add_argument("--water_y", nargs=2, type=int, metavar=('I', 'J'))
-    group.add_argument("--mesh_z", choices=['fuel', 'water', 'regular'])
-    group.add_argument("--mesh_x", choices=['fuel', 'water', 'regular'])
-    group.add_argument("--mesh_y", choices=['fuel', 'water', 'regular'])
+    group.add_argument("--mesh_z", choices=['rod', 'water', 'regular'])
+    group.add_argument("--mesh_x", choices=['rod', 'water', 'regular'])
+    group.add_argument("--mesh_y", choices=['rod', 'water', 'regular'])
     
     parser.add_argument("--n", type=int, default=10)
     parser.add_argument("--n_z", type=int, default=10)
@@ -55,8 +59,25 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    # On initialise l'API avec le fichier CORE et la position demandée
-    analyser = GeometricAnalyser(args.core_file, core_i=args.core_pos[0], core_j=args.core_pos[1])
+    # --- MODIFICATIONS DE L'INITIALISATION ---
+    # 1. Séparer le dossier et le nom du fichier
+    path_to_configs = os.path.dirname(os.path.abspath(args.core_file))
+    core_desc_file = os.path.basename(args.core_file)
+    
+    # 2. Instancier le modèle du cœur
+    core_model = CoreModel(
+        name="Test_Core", 
+        path_to_yaml_configs=path_to_configs, 
+        core_description_yaml=core_desc_file
+    )
+    
+    # 3. Créer les modèles d'assemblage en mémoire
+    core_model.createAssemblyModels()
+    
+    # 4. On passe l'objet `core_model` à l'analyseur
+    analyser = CartesianGeometricAnalyser(core_model=core_model, core_i=args.core_pos[0], core_j=args.core_pos[1])
+    # -----------------------------------------
+
     x_min, x_max = analyser.get_x_global_bounds()
     y_min, y_max = analyser.get_y_global_bounds()
     z_min, z_max = analyser.get_z_global_bounds()
@@ -78,7 +99,10 @@ if __name__ == "__main__":
         if not (args.cv_z or args.rod_z or args.water_z):
             print("Erreur : Spécifiez une cible (--cv_z, --rod_z, ou --water_z) pour --plot_z.")
             exit(1)
-        z_coords, porosities, a_cools, dhs, phs, cible_str= analyser.execute_profile_z(section_type, h, p, z_min, z_max)
+        z_coords, porosities, a_cools, dhs, phs, kexp_list, kcon_list, rsin_list, cible_str = analyser.execute_profile_z(section_type, h, p, z_min, z_max)
+        for i in range(len(z_coords)):
+            if kexp_list[i] != 0 or kcon_list[i] != 0:
+                print(z_coords[i], kexp_list[i], kcon_list[i], rsin_list[i])
         fig, axs = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
         axs[0].plot(z_coords, porosities, label=r'Porosité ($\phi$)', color='blue')
         axs[0].set_ylabel(r"Porosité $\phi$ (-)")
@@ -178,9 +202,8 @@ if __name__ == "__main__":
             matrice_a_dessiner = matrice_numpy[::-1]
             afficher_nombres = (len(mat_p[0]) <= 15)
 
-            ass_geo = analyser.data_ref['ASSEMBLY_GEOMETRY']
-            W_start = ass_geo['gap_wide'] + ass_geo['channel_box_thickness']
-            W_end = ass_geo['assembly_pitch'] - W_start
+            # Remplacement de l'appel à la fonction externe
+            W_start, W_end, _, _ = analyser._get_box_geom()
             
             y_coords = np.linspace(W_end, W_start, len(matrice_numpy))
             step_y = max(1, len(y_coords) // 15) 
@@ -209,7 +232,7 @@ if __name__ == "__main__":
             print(f"Heatmap sauvegardée avec succès dans :\n -> {chemin_complet}\n")
         
     elif args.mesh_x:
-        mat_p, mat_dh = analyser.execute_mesh_x(mesh_type_x, x1, z1, z2, n_z)
+        mat_p, mat_dh = analyser.execute_mesh_x(mesh_type_x, x1, z1, z2, h, p)
         print("--- Matrice de Porosité (phi) ---")
         print(np.round(np.array(mat_p), 4)) # Arrondi à 4 décimales pour la lisibilité
         
@@ -222,9 +245,8 @@ if __name__ == "__main__":
             matrice_a_dessiner = matrice_numpy[::-1]
             afficher_nombres = (len(mat_p[0]) <= 15 and len(mat_p) <= 15)   
 
-            ass_geo = analyser.data_ref['ASSEMBLY_GEOMETRY']
-            W_start = ass_geo['gap_wide'] + ass_geo['channel_box_thickness']
-            W_end = ass_geo['assembly_pitch'] - W_start
+            # Remplacement de l'appel à la fonction externe
+            W_start, W_end, _, _ = analyser._get_box_geom()
 
             z_coords = np.linspace(z2, z1, len(matrice_numpy))
             step_z = max(1, len(z_coords) // 15) 
@@ -241,11 +263,11 @@ if __name__ == "__main__":
             plt.yticks(rotation=0) 
             plt.xticks(rotation=45) 
             
-            plt.title(f"Carte de Porosité 3D (En X={x1}cm) - {args.mesh_x.capitalize()} - Assm: {args.core_pos[0]},{args.core_pos[1]}")
+            plt.title(f"Carte de Porosité 3D (En X={x1}cm) - {args.mesh_x.capitalize()} - Hauteur: {h}cm, Pas: {p}cm - Assm: {args.core_pos[0]},{args.core_pos[1]}")
             plt.xlabel("Axe Y (Largeur de l'assemblage en cm)")
             plt.ylabel("Axe Z (Altitude en cm)")
 
-            nom_fichier = f"heatmap_mesh_x_{args.mesh_x}_assm{args.core_pos[0]}{args.core_pos[1]}_X_slice{x1}_Z{z1}_Z{z2}.png"
+            nom_fichier = f"heatmap_mesh_x_{args.mesh_x}_assm{args.core_pos[0]}{args.core_pos[1]}_X_slice{x1}_Z{z1}_Z{z2}_H{h}_P{p}.png"
             chemin_complet = os.path.join(DOSSIER_OUTPUTS, nom_fichier)
             plt.savefig(chemin_complet, dpi=300, bbox_inches='tight')
             plt.close()
@@ -253,7 +275,7 @@ if __name__ == "__main__":
             print(f"Heatmap sauvegardée avec succès dans :\n -> {chemin_complet}\n")
 
     elif args.mesh_y:
-        mat_p, mat_dh = analyser.execute_mesh_y(mesh_type_y, y1, z1, z2, n_z)
+        mat_p, mat_dh = analyser.execute_mesh_y(mesh_type_y, y1, z1, z2, h, p)
         print("--- Matrice de Porosité (phi) ---")
         print(np.round(np.array(mat_p), 4)) # Arrondi à 4 décimales pour la lisibilité
         
@@ -266,9 +288,8 @@ if __name__ == "__main__":
             matrice_a_dessiner = matrice_numpy[::-1]
             afficher_nombres = (len(mat_p[0]) <= 15 and len(mat_p) <= 15)    
             
-            ass_geo = analyser.data_ref['ASSEMBLY_GEOMETRY']
-            W_start = ass_geo['gap_wide'] + ass_geo['channel_box_thickness']
-            W_end = ass_geo['assembly_pitch'] - W_start
+            # Remplacement de l'appel à la fonction externe
+            W_start, W_end, _, _ = analyser._get_box_geom()
 
             z_coords = np.linspace(z2, z1, len(matrice_numpy))
             step_z = max(1, len(z_coords) // 15) 
@@ -285,11 +306,11 @@ if __name__ == "__main__":
             plt.yticks(rotation=0) 
             plt.xticks(rotation=45) 
             
-            plt.title(f"Carte de Porosité 3D (En Y={y1}cm) - {args.mesh_y.capitalize()} - Assm: {args.core_pos[0]},{args.core_pos[1]}")
+            plt.title(f"Carte de Porosité 3D (En Y={y1}cm) - {args.mesh_y.capitalize()} - Hauteur: {h}cm, Pas: {p}cm - Assm: {args.core_pos[0]},{args.core_pos[1]}")
             plt.xlabel("Axe X (Largeur de l'assemblage en cm)")
             plt.ylabel("Axe Z (Altitude en cm)")
 
-            nom_fichier = f"heatmap_mesh_y_{args.mesh_y}_assm{args.core_pos[0]}{args.core_pos[1]}_Y_slice{y1}_Z{z1}_Z{z2}.png"
+            nom_fichier = f"heatmap_mesh_y_{args.mesh_y}_assm{args.core_pos[0]}{args.core_pos[1]}_Y_slice{y1}_Z{z1}_Z{z2}_H{h}_P{p}.png"
             chemin_complet = os.path.join(DOSSIER_OUTPUTS, nom_fichier)
             plt.savefig(chemin_complet, dpi=300, bbox_inches='tight')
             plt.close()
@@ -315,12 +336,12 @@ if __name__ == "__main__":
             p_wr = analyser.get_pwr_rod(i, j, z1, z2)
         elif section_type[0] == 'water':
             i, j = section_type[1]
-            phi = analyser.get_porosity_z_canal(i, j, z1, z2)
-            a_cool = analyser.get_a_cool_z_canal(i, j, z1, z2)
-            dh = analyser.get_dh_z_canal(i, j, z1, z2)
-            ph = analyser.get_ph_canal(i, j, z1, z2)
-            p_box = analyser.get_pbox_canal(i, j, z1, z2)
-            p_wr = analyser.get_pwr_canal(i, j, z1, z2)
+            phi = analyser.get_porosity_z_water(i, j, z1, z2)
+            a_cool = analyser.get_a_cool_z_water(i, j, z1, z2)
+            dh = analyser.get_dh_z_water(i, j, z1, z2)
+            ph = analyser.get_ph_water(i, j, z1, z2)
+            p_box = analyser.get_pbox_water(i, j, z1, z2)
+            p_wr = analyser.get_pwr_water(i, j, z1, z2)
         print(f"Porosité (phi) : {phi}")
         print(f"Surface de passage fluide (A_cool) : {a_cool} cm²")
         print(f"Dh (cm)        : {dh}")
@@ -339,8 +360,8 @@ if __name__ == "__main__":
             dh = analyser.get_dh_x_rod(i, x1, z1, z2)
         elif section_type[0] == 'water':
             i, j = section_type[1]
-            phi = analyser.get_porosity_x_canal(i, x1, z1, z2)
-            dh = analyser.get_dh_x_canal(i, x1, z1, z2)
+            phi = analyser.get_porosity_x_water(i, x1, z1, z2)
+            dh = analyser.get_dh_x_water(i, x1, z1, z2)
         print(f"Porosité (phi) : {phi}")
         print(f"Dh (cm)        : {dh}")
 
@@ -355,13 +376,7 @@ if __name__ == "__main__":
             dh = analyser.get_dh_y_rod(j, y1, z1, z2)
         elif section_type[0] == 'water':
             i, j = section_type[1]
-            phi = analyser.get_porosity_y_canal(j, y1, z1, z2)
-            dh = analyser.get_dh_y_canal(j, y1, z1, z2)
+            phi = analyser.get_porosity_y_water(j, y1, z1, z2)
+            dh = analyser.get_dh_y_water(j, y1, z1, z2)
         print(f"Porosité (phi) : {phi}")
         print(f"Dh (cm)        : {dh}")
-        
-        
-
-    
-    
-
