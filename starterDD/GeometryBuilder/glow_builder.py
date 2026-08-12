@@ -261,7 +261,7 @@ def _build_square_water_rod_cell(water_rod_model, macro_name, calculation_step=N
 
     Returns
     -------
-    tmp_cell : RectCell
+    tmp_cell : CartesianCell
         The constructed cell ready to be added to the lattice.
     """
     import warnings

@@ -89,7 +89,7 @@ def build_assembly_geometry(dragon_assembly_model, r_wr_override=None):
     data_ref["ASSEMBLY_GEOMETRY"]["W_start"] = W_start
     data_ref["ASSEMBLY_GEOMETRY"]["L_int"] = L_int
 
-    inner_box = box(W_start + R_c, W_start + R_c, W_end - R_c, W_end - R_c).buffer(R_c, resolution=64)
+    inner_box = box(W_start + R_c, W_start + R_c, W_end - R_c, W_end - R_c).buffer(R_c, quad_segs=64)
 
     formes_solides = []
     lignes_chauffantes = []
@@ -98,7 +98,7 @@ def build_assembly_geometry(dragon_assembly_model, r_wr_override=None):
     for water_rod in dragon_assembly_model.water_rods:
         center = water_rod.center
         data_ref["WATER_ROD_GEOMETRY"]["centers"].append(center)
-        wr_circle = Point(center[0], center[1]).buffer(r_solid_wr, resolution=64)
+        wr_circle = Point(center[0], center[1]).buffer(r_solid_wr, quad_segs=64)
         formes_solides.append(wr_circle)
         lignes_water.append(wr_circle.exterior)
     
@@ -113,8 +113,8 @@ def build_assembly_geometry(dragon_assembly_model, r_wr_override=None):
 
             if item == 'VROD':
                 if grid_thickness > 0.0:
-                    cercle_ext = Point(cx, cy).buffer(r_solid_clad, resolution=64)
-                    cercle_int = Point(cx, cy).buffer(r_clad, resolution=64)
+                    cercle_ext = Point(cx, cy).buffer(r_solid_clad, quad_segs=64)
+                    cercle_int = Point(cx, cy).buffer(r_clad, quad_segs=64)
                     anneau = cercle_ext.difference(cercle_int)
                     formes_solides.append(anneau)
                     lignes_water.append(cercle_ext.exterior)
@@ -124,9 +124,9 @@ def build_assembly_geometry(dragon_assembly_model, r_wr_override=None):
             if item in exclusions:
                 continue
 
-            rod_circle = Point(cx, cy).buffer(r_solid_clad, resolution=64)
+            rod_circle = Point(cx, cy).buffer(r_solid_clad, quad_segs=64)
             formes_solides.append(rod_circle)
-            lignes_chauffantes.append(Point(cx, cy).buffer(r_clad, resolution=64).exterior)
+            lignes_chauffantes.append(Point(cx, cy).buffer(r_clad, quad_segs=64).exterior)
 
     solide_total = unary_union(formes_solides)
     multi_lignes_chauffantes = MultiLineString(lignes_chauffantes)

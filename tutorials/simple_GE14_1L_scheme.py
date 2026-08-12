@@ -42,7 +42,7 @@ GE14_DOM_test_case = DragonCase(
         config_yamls={
             "MATS": str(GE14_INPUTS / "material_compositions.yaml"),
             "GEOM": str(GE14_INPUTS / "GEOM_GE14_DOM.yaml"),
-            "CALC_SCHEME": str(GE14_INPUTS / "CALC_SCHEME_1L.yaml"),
+            "CALC_SCHEME": str(GE14_INPUTS / "CALC_SCHEME_2L.yaml"),
         },
         output_path="outputs/GE14_DOM/1L_scheme",
         tdt_path=str(TDT_FILES),

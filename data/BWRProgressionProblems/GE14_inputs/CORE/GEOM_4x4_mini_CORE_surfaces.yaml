@@ -1,0 +1,226 @@
+# Geometry description for 4x4 minicore defined in BWRProgressionProblems.
+# Dummy geometry description for a 4x4 minicore with axial variation in the assembly geometry. This file is used for testing the ability of the CoreModel to handle axial variation in the assembly geometry and to build the corresponding assembly models for each axial region.
+# The power dominated region (DOM) is taken to be from 10.0 to 232.0595 cm,
+# The vanished rods region (VAN) is taken to be from 232.0595 cm to 357.1291 cm.
+# PLENUM_BOT [0.0, 10.0] cm: conical water rods tapering from r=0.500 cm (bottom) to r=1.245 cm (top).
+# PLENUM_TOP [357.1291, 367.1291] cm: conical water rods tapering from r=1.245 cm (bottom) to r=0.500 cm (top).
+# This file describes 2D core layout and the axial variation using 
+
+
+# Idelchik model for water rod holes (lateral flow through orifice in WR wall).
+# f_table: water exits WR (P_actif < P_WR).  Columns: [winf/w0, K]
+# g_table: water enters WR (P_actif > P_WR). Columns: [winf/w0, K]
+# Ranges given by Idelchik are averaged to single midpoint values.
+WR_HOLE_MODEL:
+  IDELCHIK-EXIT:  # water exits WR
+    - [0.0, 2.75]
+    - [0.5, 2.30]
+    - [1.0, 2.25]
+    - [1.5, 2.30]
+    - [2.0, 2.65]
+    - [3.0, 3.65]
+    - [4.0, 5.00]
+    - [5.0, 6.50]
+    - [6.0, 8.00]
+  IDELCHIK-ENTER:  # water enters WR
+    - [0.0, 2.75]
+    - [0.5, 2.70]
+    - [1.0, 2.85]
+    - [2.0, 3.35]
+    - [3.0, 4.15]
+    - [4.0, 5.00]
+    - [5.0, 6.00]
+    - [6.0, 7.00]
+
+CORE_GEOMETRY:
+  geometry_type: "cartesian"
+  reactor_type: "BWR"
+  core_2D_layout:
+    - ["GE14_10%", "GE14_20%", "GE14_20%", "GE14_10%"]
+    - ["GE14_20%", "GE14_30%", "GE14_30%", "GE14_20%"]
+    - ["GE14_20%", "GE14_30%", "GE14_30%", "GE14_20%"]
+    - ["GE14_10%", "GE14_20%", "GE14_20%", "GE14_10%"]
+  assembly_axial_layouts:
+    GE14_10%:
+      - axial_region: "PLENUM_BOT"
+        axial_bounds: [0.0, 10.0]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_PLENUM_BOT_surfaces.yaml"
+        wr_holes:
+          - {z: 3, D_hole: 0.1}  # [cm] 
+          - {z: 6, D_hole: 0.1}  # [cm] 
+      - axial_region: "DOM"
+        axial_bounds: [10.0, 31.28015]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [31.28015, 35.40765]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [35.40765, 80.56885]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [80.56885, 84.69635]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [84.69635, 129.85755]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [129.85755, 133.98505]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [133.98505, 179.14625]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [179.14625, 183.27375]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [183.27375, 228.43595]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [228.43595, 232.56245]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [232.56245, 240]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "VAN"
+        axial_bounds: [240, 277.72365]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [277.72365, 281.85115]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_VAN_surfaces.yaml"
+      - axial_region: "VAN"
+        axial_bounds: [281.85115, 327.01235]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [327.01235, 331.13985]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_VAN_surfaces.yaml"
+      - axial_region: "VAN"
+        axial_bounds: [331.13985, 357.1291]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN_surfaces.yaml"
+      - axial_region: "PLENUM_TOP"
+        axial_bounds: [357.1291, 367.1291]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_PLENUM_TOP_surfaces.yaml"
+        wr_holes:
+          - {z: 360, D_hole: 0.1}  # [cm] 
+          - {z: 363, D_hole: 0.1}  # [cm]
+    GE14_20%:
+      - axial_region: "PLENUM_BOT"
+        axial_bounds: [0.0, 10.0]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_PLENUM_BOT_surfaces.yaml"
+        wr_holes:
+          - {z: 3, D_hole: 0.1}  # [cm] 
+          - {z: 6, D_hole: 0.1}  # [cm]
+      - axial_region: "DOM"
+        axial_bounds: [10.0, 31.28015]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [31.28015, 35.40765]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [35.40765, 80.56885]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [80.56885, 84.69635]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [84.69635, 129.85755]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [129.85755, 133.98505]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [133.98505, 179.14625]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [179.14625, 183.27375]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [183.27375, 228.43595]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [228.43595, 232.56245]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [232.56245, 240]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "VAN"
+        axial_bounds: [240, 277.72365]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [277.72365, 281.85115]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_VAN_surfaces.yaml"
+      - axial_region: "VAN"
+        axial_bounds: [281.85115, 327.01235]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [327.01235, 331.13985]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_VAN_surfaces.yaml"
+      - axial_region: "VAN"
+        axial_bounds: [331.13985, 357.1291]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN_surfaces.yaml"
+      - axial_region: "PLENUM_TOP"
+        axial_bounds: [357.1291, 367.1291]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_PLENUM_TOP_surfaces.yaml"
+        wr_holes:
+          - {z: 360, D_hole: 0.1}  # [cm] 
+          - {z: 363, D_hole: 0.1}  # [cm]
+    GE14_30%:
+      - axial_region: "PLENUM_BOT"
+        axial_bounds: [0.0, 10.0]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_PLENUM_BOT_surfaces.yaml"
+        wr_holes:
+          - {z: 3, D_hole: 0.1}  # [cm] 
+          - {z: 6, D_hole: 0.1}  # [cm]
+      - axial_region: "DOM"
+        axial_bounds: [10.0, 31.28015]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [31.28015, 35.40765]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [35.40765, 80.56885]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [80.56885, 84.69635]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [84.69635, 129.85755]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [129.85755, 133.98505]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [133.98505, 179.14625]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [179.14625, 183.27375]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [183.27375, 228.43595]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [228.43595, 232.56245]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_DOM_surfaces.yaml"
+      - axial_region: "DOM"
+        axial_bounds: [232.56245, 240]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM_surfaces.yaml"
+      - axial_region: "VAN"
+        axial_bounds: [240, 277.72365]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [277.72365, 281.85115]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_VAN_surfaces.yaml"
+      - axial_region: "VAN"
+        axial_bounds: [281.85115, 327.01235]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN_surfaces.yaml"
+      - axial_region: "GRID"
+        axial_bounds: [327.01235, 331.13985]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_GRID_VAN_surfaces.yaml"
+      - axial_region: "VAN"
+        axial_bounds: [331.13985, 357.1291]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_VAN_surfaces.yaml"
+      - axial_region: "PLENUM_TOP"
+        axial_bounds: [357.1291, 367.1291]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_PLENUM_TOP_surfaces.yaml"
+        wr_holes:
+          - {z: 360, D_hole: 0.1}  # [cm] 
+          - {z: 363, D_hole: 0.1}  # [cm]
