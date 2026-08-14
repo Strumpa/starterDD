@@ -9,32 +9,32 @@ from starterDD.GeometryAnalysis.cartesian_geometry_analysis import CartesianGeom
 from starterDD.InterfaceToDD.donjon_module_calls import DonjonTHM1DProcedure
 from starterDD.DDModel.DonjonModel import CoreModel 
 
-def generate_case_name(pdrop, power_kw, type_profil):
+def generate_case_name(pdrop, power_kw, profile_type):
     nom = "dfm"
     if pdrop == 1: nom += "p"
     nom += str(int(power_kw))
-    if type_profil.lower() in ['cosinus', 'cos', 'c']: nom += "c"
-    elif type_profil.lower() in ['sinus', 'sin', 's']: nom += "s"
+    if profile_type.lower() in ['cosine', 'cos', 'c']: nom += "c"
+    elif profile_type.lower() in ['sine', 'sin', 's']: nom += "s"
     else: nom += "u"
     nom += "_v"
     return nom
 
-def generate_power_profile(type_profil, nz):
-    profil = []
+def generate_power_profile(profile_type, nz):
+    profile = []
     for i in range(nz):
         z_norm = (i + 0.5) / nz 
-        if type_profil == 'cosinus':
-            # Quart de cosinus : max en bas (z=0), nul en haut (z=1)
+        if profile_type == 'cosine':
+            # Quarter cosine : max at z=0, 0 at z=zmax
             val = math.cos((math.pi / 2.0) * z_norm) 
-        elif type_profil == 'sinus':
-            # Demi-sinus : cloche symétrique max au centre
+        elif profile_type == 'sine':
+            # Half-sine : 0 at z=0, max at z=zmax/2, 0 at z=zmax 
             val = math.sin(math.pi * z_norm)
         else:
             val = 1.0
-        profil.append(val)
+        profile.append(val)
     
-    moyenne = sum(profil) / nz
-    return [v / moyenne for v in profil]
+    mean = sum(profile) / nz
+    return [v / mean for v in profile]
 
 
 
@@ -63,7 +63,7 @@ def test_DONJON_THM_generator_and_porosity_calculation():
     analyser = CartesianGeometricAnalyser(minicore_model, core_i=core_pos[0], core_j=core_pos[1])
     # --- TEST CASE MATRIX ---
     power = 20.0
-    profiles_to_test = ['cosinus', 'sinus']
+    profiles_to_test = ['cosine', 'sine']
     pdrop = 1
     nz = 40
     dfm = 1
@@ -138,7 +138,7 @@ def test_4x4_minicore_surfaces_definition():
 
     # --- TEST CASE MATRIX ---
     powers_to_test = [20.0, 40.0] #kW
-    power_profile = 'sinus'
+    power_profile = 'sine'
     pdrop = 1
     nz = 40
     dfm = 1
