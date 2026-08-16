@@ -369,6 +369,100 @@ class CartesianGeometricAnalyser:
         self._dernier_args = None
         self._dernier_resultats = None 
 
+    def run_THM_analysis(self, nz, include_water_rods=False):
+        """
+        Wrapper method to perform geometry analysis and return the necessary data to run a pyTHM or THM: case
+        
+        nz : integer : number of axial mesh points
+        include_water_rods : boolean : include analysis of water rods present in the geometry.
+        """
+
+        geometric_data = {}
+        geometric_data["active_flow_data"] = {}
+        geometric_data["fuel_data"] = {} 
+        geometric_data["water_rod_data"] = {}
+        # --- 1. Extract geometric information ---
+        z_min, maxh = self.get_z_global_bounds() # in cm
+        dz = (maxh - z_min) / nz
+        _, pitch_cm = self.get_x_global_bounds()
+        pitch_m = pitch_cm * 1E-2
+        # Analyse the axial profile for in control volume mode ('cv'), recover active flow parameters
+        geom_profiles = self.execute_profile_z(['cv', [0, 0, pitch_cm, pitch_cm]], dz, dz, z_min, maxh)
+        
+        # Recover porosities, coolant flow cross sectional areas, hydraulic diameters, 
+        porosities_profile = geom_profiles[1]
+        acool_profile = [a * 1e-4 for a in geom_profiles[2]] # Conversion cm² -> m²
+        dhs_profile = [dh * 1e-2 for dh in geom_profiles[3]]    # Conversion cm -> m
+        phs_profile = [pch * 1e-2 for pch in geom_profiles[4]]  # Conversion cm -> m
+        kexp_profile = geom_profiles[5]
+        kcon_profile = geom_profiles[6]
+        rsin_profile = geom_profiles[7]
+
+        geometric_data["active_flow_data"]["number_of_axial_meshes"] = nz
+        geometric_data["active_flow_data"]["porosities"] = porosities_profile
+        geometric_data["active_flow_data"]["coolant_cross_sectional_areas"] = acool_profile
+        geometric_data["active_flow_data"]["hydraulic_diamters"] = dhs_profile
+        geometric_data["active_flow_data"]["heated_perimeters"] = phs_profile
+        geometric_data["active_flow_data"]["k_expansion"] = kexp_profile
+        geometric_data["active_flow_data"]["k_contraction"] = kcon_profile
+        geometric_data["active_flow_data"]["reference_coolant_cross_sectional_area"] = min(acool_profile)
+        geometric_data["active_flow_data"]["singular_contraction_ratios"] = rsin_profile
+        geometric_data["active_flow_data"]["pitch"] = pitch_m
+
+        if include_water_rods:
+            geom_profiles_wr = self.execute_profile_z(
+                ('wr_tube',),
+                dz, dz, z_min, maxh
+            )
+
+            acools_wr = [a * 1e-4 for a in geom_profiles_wr[2]] # Conversion cm² -> m²
+            porosities_wr = geom_profiles_wr[1]
+            dhs_wr = [dh * 1e-2 for dh in geom_profiles_wr[3]]    # Conversion cm -> m
+            kexp_wr = geom_profiles_wr[5]
+
+            
+            p_wr = []
+            rwall_wr   = []
+            curr_z = z_min
+            while curr_z + dz <= maxh + 1e-10:
+                z1, z2 = curr_z, curr_z + dz
+                p_wr.append(self.get_pch_wr_outer(z1, z2) * 1e-2)
+                rwall_wr.append(self.get_rwall_wr_tube(z1, z2))
+                curr_z += dz
+            wr_holes, Idelchik_exit, Idelchik_enter = self.get_wr_hole_data()
+
+            hole_z = [h['z'] * 1e-2 for h in wr_holes]
+            hole_A = [math.pi * (h['D_hole'] * 0.5e-2) ** 2 for h in wr_holes]
+
+            geometric_data["water_rod_data"]["moderator_cross_sectional_areas"] = acools_wr
+            geometric_data["water_rod_data"]["porosities"] = porosities_wr
+            geometric_data["water_rod_data"]["hydraulic_diamters"] = dhs_wr
+            geometric_data["water_rod_data"]["k_expansion"] = kexp_wr
+            geometric_data["water_rod_data"]["permieters"] = p_wr
+            geometric_data["water_rod_data"]["thermal_resistances"] = rwall_wr
+            geometric_data["water_rod_data"]["Idelchik_enter"] = Idelchik_enter
+            geometric_data["water_rod_data"]["Idelchik_exit"] = Idelchik_exit
+            geometric_data["water_rod_data"]["hole_A"] = hole_A
+            geometric_data["water_rod_data"]["hole_Z"] = hole_z 
+
+
+        # --- Recover fuel pin related parameters from the DRAGON assembly model
+        # Convert from cm to m for downstream use
+        pin_geom = self.slices_data[0]['dragon_assembly_model'].pin_geometry_dict
+        fuel_radius = pin_geom['fuel_radius'] * 1E-2
+        gap_radius = pin_geom['gap_radius'] * 1E-2
+        clad_radius = pin_geom['clad_radius'] * 1E-2
+        pin_pitch = pin_geom['pin_pitch'] * 1E-2
+        fuel_rod_length = (maxh - z_min) * 1E-2
+        geometric_data["fuel_data"]["fuel_radius"] = fuel_radius
+        geometric_data["fuel_data"]["gap_radius"] = gap_radius
+        geometric_data["fuel_data"]["clad_radius"] = clad_radius
+        geometric_data["fuel_data"]["pin_pitch"] = pin_pitch
+        geometric_data["fuel_data"]["max_rod_length"] = fuel_rod_length
+
+        return geometric_data
+
+
     def _get_box_geom(self):
         """Helper mis à jour pour lire les valeurs extraites via les surfaces"""
         L_ext = self.data_ref['ASSEMBLY_GEOMETRY']['assembly_pitch']
