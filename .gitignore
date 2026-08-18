@@ -18,3 +18,5 @@ build
 
 tutorials/__pycache__/
 tutorials/results/
+
+tests/outputs

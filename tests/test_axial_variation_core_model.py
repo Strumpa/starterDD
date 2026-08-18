@@ -51,9 +51,3 @@ def test_axial_variation_4x4_minicore():
     assert minicore_model.assemblies[(0, 0, "GE14_10%")].slices_2D == ["2D_slice_geometry_for_DOM_region_of_GE14_10%", "2D_slice_geometry_for_VAN_region_of_GE14_10%"]
     assert minicore_model.assemblies[(0, 0, "GE14_10%")].z_bounds == [0.0, 222.0595, 347.1291]
     assert minicore_model.assemblies[(0, 0, "GE14_10%")].slice_to_geometry_dict == {"2D_slice_geometry_for_DOM_region_of_GE14_10%": "../ASSEMBLY/GEOM_GE14_DOM.yaml", "2D_slice_geometry_for_VAN_region_of_GE14_10%": "../ASSEMBLY/GEOM_GE14_VAN.yaml"}
-
-if __name__ == "__main__":
-    test_axial_variation_single_assembly_core_model()
-    print("Test passed successfully.")
-    test_axial_variation_4x4_minicore()
-    print("Test passed successfully.")

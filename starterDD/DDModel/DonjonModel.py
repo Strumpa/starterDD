@@ -87,6 +87,8 @@ class CoreModel:
         with open(core_description_yaml, 'r') as file:
             yaml_data = yaml.safe_load(file)
         geometric_data = yaml_data.get("CORE_GEOMETRY", {})
+        self.wr_hole_model = yaml_data.get("WR_HOLE_MODEL", {})
+        self.raw_yaml_data = yaml_data # Save just in case
         self.geometry_type = geometric_data.get("geometry_type", "cartesian") # by default, assume cartesian geometry for the core
         self.reactor_type = geometric_data.get("reactor_type", "BWR") # by default, assume BWR type for the core, which can be used to define default
         self.core_2D_layout = geometric_data.get("core_2D_layout", []) # list of lists representing the 2D layout of the core, with each entry corresponding to an assembly ID

@@ -1,6 +1,11 @@
 # Geometry description for the GE14 BWR progression problem.
-# This file describes the geometry of the pincell, including the fuel radius, gap radius, clad radius, and the number of fuel zones. 
-# This information is used to build the pincell geometry.
+# This file describes the geometry for the BOTTOM PLENUM axial region.
+# In this region the water rods are cone-shaped: they taper from a small
+# connection radius at the bottom of the plenum (outer_radius_start) to the
+# full nominal radius at the top where they connect to the DOM region
+# (outer_radius_end = nominal DOM radius).
+# The cone profile is interpolated linearly between these two values over the
+# axial extent of the PLENUM_BOT tranche as defined in the core YAML.
 
 PIN_GEOMETRY:
   fuel_radius: 0.438
@@ -42,38 +47,34 @@ ASSEMBLY_GEOMETRY:
         surface_id: 1
         parameters:
           center: [7.62, 7.62]
-          side_length: 13.7302 # assembly_pitch - gap_wide*2 (since in GE14 gap wide = gap_narrow)
-          radius_of_curvature: 1.301 # channel_box_thickness + corner_inner_radius_of_curvature
+          side_length: 13.7302
+          radius_of_curvature: 1.301
         fill_material: "channel_box"
       - name: "inner_channel_box"
         surface_id: 2
         type: "square"
         parameters:
           center: [7.62, 7.62]
-          side_length: 13.4 # given data in BWR Progression Problem description, corresponds to assembly_pitch - 2*gap_wide - 2*channel_box_thickness
-          radius_of_curvature: 0.965 # corner_inner_radius_of_curvature
+          side_length: 13.4
+          radius_of_curvature: 0.965
         fill_material: "coolant"
       - name: "lattice_bounding_box"
         surface_id: -1
         type: "square"
         parameters:
           center: [7.62, 7.62]
-          side_length: 13.0 # 10 * pin_pitch, corresponds to the bounding box of the lattice of pins
+          side_length: 13.0
         fill: "lattice"
 
-  # The following paranteres can be replaced by the surfaces defined above.   
-  # if either gap or gap_wide or gap_narrow is specified : 
-  # it is will be assumed that the gap is the same on all sides of the fuel channel ie the lattice is centered
-  # at 
-   
-  #assembly_pitch: 15.24
-  #gap_wide: 0.7549 
-  #channel_box_thickness: 0.1651
-  #corner_inner_radius_of_curvature: 0.965
-
 WATER_ROD_GEOMETRY:
-  type: "circular"
-  inner_radius : 1.170
-  outer_radius : 1.245
-  wall_conductivity: 18.0  # Zircaloy-2 at ~280°C [W/m/K]
-  centers: [[6.32, 6.32], [8.92, 8.92]] # coordinates relative to the bottom-left corner of the assembly bounding box
+  type: "conical"
+  # outer_radius_start: radius at z_start (bottom) of this plenum tranche — cone tip
+  # outer_radius_end:   radius at z_end   (top)    of this plenum tranche — full nominal size
+  # inner_radius_start / inner_radius_end: inner bore radius (wall_thickness = 0.075 cm is constant)
+  # The radius is interpolated linearly between these two values by cartesian_geometry_analysis.py.
+  outer_radius_start: 0.500   # [cm] cone tip at the bottom of the plenum
+  outer_radius_end:   1.245   # [cm] nominal GE14 water rod outer radius (matches DOM)
+  inner_radius_start: 0.425   # [cm] = outer_radius_start - 0.075
+  inner_radius_end:   1.170   # [cm] = outer_radius_end   - 0.075
+  wall_conductivity: 18.0     # Zircaloy-2 at ~280°C [W/m/K]
+  centers: [[6.32, 6.32], [8.92, 8.92]]
