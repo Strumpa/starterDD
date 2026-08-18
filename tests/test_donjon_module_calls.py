@@ -163,12 +163,12 @@ def test_4x4_minicore_surfaces_definition():
         assert len(procedure.thm_module.pch_profile) == nz
         assert len(procedure.thm_module.dh_profile) == nz
 
-        assert procedure.thm_module.acool_profile[0] == pytest.approx(0.009821292, abs=1e-5)
-        assert procedure.thm_module.acool_profile[-1] == pytest.approx(0.010987695, abs=1e-5)
+        assert procedure.thm_module.acool_profile[0] == pytest.approx(0.009741326, abs=1e-5)
+        assert procedure.thm_module.acool_profile[-1] == pytest.approx(0.010907729, abs=1e-5)
 
         assert procedure.thm_module.acool_profile[-1] - procedure.thm_module.acool_profile[0] == pytest.approx(14*np.pi*(0.515e-2)**2, abs=1e-5)
-        assert procedure.thm_module.acool_profile[25] == 0.009039768
-        assert procedure.thm_module.acool_profile[26] == 0.010310048
+        assert procedure.thm_module.acool_profile[25] == pytest.approx(0.008959802, abs=1e-5)
+        assert procedure.thm_module.acool_profile[26] == pytest.approx(0.010230082, abs=1e-5)
         # 4. Write the c2m file
         refs = REFERENCE_VALS.get(case_name, (None, None))
         c2m_path = procedure.write_to_c2m(OUTPUTS_DIR, case_name,

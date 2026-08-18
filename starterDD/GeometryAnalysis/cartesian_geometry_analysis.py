@@ -12,20 +12,20 @@ _GL_WEIGHTS = np.array([ 0.23692688505618908,  0.47862867049936647,  0.568888888
 
 def _extract_box_dimensions(dragon_assembly_model):
     """
-    Extrait les dimensions du boîtier. Si elles sont commentées dans le YAML,
-    on les recalcule dynamiquement à partir des surfaces (assembly_box_description).
+    Extract channel box domensions.
+    If surfaces are present in the assembly_box_description yaml entry : they are dinamically computed here.
     """
     L_ext = dragon_assembly_model.assembly_pitch
     gap_wide = getattr(dragon_assembly_model, 'gap_wide', None)
     cbt = getattr(dragon_assembly_model, 'channel_box_thickness', None)
     
-    # 1. Si les paramètres sont définis explicitement
+    # Check if parameters are explicitely set
     if L_ext is not None and gap_wide is not None and cbt is not None:
         W_start = gap_wide + cbt
         L_int = L_ext - 2 * W_start
         return W_start, L_ext, L_int
         
-    # 2. Sinon, on lit les surfaces brutes !
+    # Else : recover them from the surfaces definition in the YAML data.
     ass_geo = getattr(dragon_assembly_model, 'raw_yaml_data', {}).get('ASSEMBLY_GEOMETRY', {})
     surfaces = ass_geo.get('assembly_box_description', {}).get('surfaces', [])
     
@@ -36,6 +36,8 @@ def _extract_box_dimensions(dragon_assembly_model):
             pb_side = surf['parameters']['side_length']
         elif surf['name'] == 'inner_channel_box':
             icb_side = surf['parameters']['side_length']
+            inner_radius_of_curvature = surf["parameters"].get("radius_of_curvature", 0.0)
+            dragon_assembly_model.corner_inner_radius_of_curvature = inner_radius_of_curvature
             
     if pb_side is not None and icb_side is not None:
         L_ext = float(pb_side)
@@ -43,7 +45,7 @@ def _extract_box_dimensions(dragon_assembly_model):
         W_start = (L_ext - L_int) / 2.0
         return W_start, L_ext, L_int
         
-    raise ValueError(f"Impossible de déduire les dimensions du boîtier pour {dragon_assembly_model.name}. Vérifiez le YAML.")
+    raise ValueError(f"Computation of channel box dimensions based on YAML provided data failed for : {dragon_assembly_model.name} slice.")
 
 def build_assembly_geometry(dragon_assembly_model, r_wr_override=None):
     data_ref = {}
@@ -436,9 +438,9 @@ class CartesianGeometricAnalyser:
 
             geometric_data["water_rod_data"]["moderator_cross_sectional_areas"] = acools_wr
             geometric_data["water_rod_data"]["porosities"] = porosities_wr
-            geometric_data["water_rod_data"]["hydraulic_diamters"] = dhs_wr
+            geometric_data["water_rod_data"]["hydraulic_diameters"] = dhs_wr
             geometric_data["water_rod_data"]["k_expansion"] = kexp_wr
-            geometric_data["water_rod_data"]["permieters"] = p_wr
+            geometric_data["water_rod_data"]["perimeters"] = p_wr
             geometric_data["water_rod_data"]["thermal_resistances"] = rwall_wr
             geometric_data["water_rod_data"]["Idelchik_enter"] = Idelchik_enter
             geometric_data["water_rod_data"]["Idelchik_exit"] = Idelchik_exit
@@ -1279,25 +1281,26 @@ class CartesianGeometricAnalyser:
         """
         Singular pressure-loss coefficient for a conical expansion of the water rod bore.
 
-        Model (from hydraulic handbooks):
+        Model (from ref : Idelchik "Handbook of Hydraulic Resistance". 
+                            Begell House, New York, 4th Edition, 2007):
+
           b     = d1 / d2      (inlet/outlet diameter ratio, b < 1 for expansion)
           alpha = arctan((d2 - d1) / (2 * L))  [degrees, half-angle of the cone]
 
           For a contraction (r_outlet < r_inlet):  K = 0  (conical contraction is lossless)
 
-          0° ≤ alpha ≤ 10°:
-            K = 8.3 * tan(alpha)^1.75 * (1 - b²)²
+        Formulas for 0° ≤ alpha ≤ 40° are given in ref. "Handbook of Hydraulic Resistance" - Idelchik.
+        For 40° < alpha ≤ 90°, the formula is interpolated from an abaccus from ref :
+            "Fluid Mechanics" - White,  McGraw-Hill, New York, 6th Edition, 2008
 
-          10° < alpha ≤ 30°:
-            K_base = 1.366 * sin_deg(2 * sqrt(2*alpha - 15)) - 0.17
-            if b < 0.5: K_base -= 3.28 * (0.0625 - b⁴) * sqrt((alpha-10)/20)
-            K = max(0, K_base) * (1 - b²)²
+        if 0° ≤ alpha ≤ 20°:
+            K = 3.2 * tan(alpha)^1.25 * (1 - b²)²
 
-          30° < alpha ≤ 90°:
-            if b <= 0.5:
-              K = max(0, 1.205 - 3.28*(0.0625-b⁴) - 12.8*b⁶*sqrt((alpha-30)/60)) * (1-b²)²
-            else:
-              K = max(0, 1.205 - 0.2*sqrt((alpha-30)/60)) * (1-b²)²
+        if  20° < alpha ≤ 40°:
+            K = (0.905 - 0.295 cos(9 * alpha / 2)) * (1 - b²)²
+
+        if  40° < alpha ≤ 90°:
+            K = (1 + 0.2 * (1 + cos((18.0 * (alpha - 40.0) / 5.0))) / 2.0) * (1 - b²)²
 
         Parameters:
         - r_inlet:      inlet radius of the cone [any consistent unit]
@@ -1314,10 +1317,6 @@ class CartesianGeometricAnalyser:
         b = d1 / d2
         alpha = math.degrees(math.atan((d2 - d1) / (2.0 * cone_length)))
         factor = (1.0 - b ** 2) ** 2
-
-        def sin_deg(x):
-            """sin with argument in degrees."""
-            return math.sin(math.radians(x))
 
         if alpha <= 20.0:
             K = 3.2 * math.tan(math.radians(alpha)) ** 1.25 * factor
