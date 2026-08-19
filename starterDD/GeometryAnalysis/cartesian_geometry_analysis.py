@@ -464,6 +464,105 @@ class CartesianGeometricAnalyser:
 
         return geometric_data
 
+    def run_TPF_analysis(self, nz):
+        """
+        Wrapper method to perform geometry analysis and return the necessary data to run a TWOPORFLOW case.
+                
+        nz : integer : number of axial mesh points
+        """
+
+        geometric_data_TPF = {}
+        geometric_data_TPF["active_flow_data"] = {}
+        geometric_data_TPF["fuel_data"] = {}
+        geometric_data_TPF["assembly_map"] = {}
+
+        # --- Extract geometric information ---
+        z_min, maxh = self.get_z_global_bounds() # in cm
+        core_height = (maxh - z_min) * 1E-2 # cm -> m
+        dz = (maxh - z_min) / nz
+        _, pitch_cm = self.get_x_global_bounds() # in cm
+        pitch_m = pitch_cm * 1E-2 # cm -> m
+
+        # --- Execute geometry axial profile analysis ---
+        geom_profiles = self.execute_profile_z(['cv', (0, 0, pitch_cm, pitch_cm)],
+                                               dz, dz, z_min, maxh)
+
+        # --- Process geometry axial profile analysis ---
+        porosities_profile = geom_profiles[1]
+        acool_profile = [a / 10000 for a in geom_profiles[2]] # cm^2 -> m^2
+        dh_profile = [d / 100 for d in geom_profiles[3]] # cm -> m
+        ph_profile = [p / 100 for p in geom_profiles[4]] # cm -> m
+        kexp_profile = geom_profiles[5]
+        kcon_profile = geom_profiles[6]
+
+        # --- Attribution of geometric information ---
+        geometric_data_TPF["active_flow_data"]["Number of axial meshes"] = nz
+        geometric_data_TPF["active_flow_data"]["core_height"] = core_height
+        geometric_data_TPF["active_flow_data"]["dz"] = dz
+        geometric_data_TPF["active_flow_data"]["pitch"] = pitch_m
+        geometric_data_TPF["active_flow_data"]["porosities"] = porosities_profile
+        geometric_data_TPF["active_flow_data"]["acool"] = acool_profile
+        geometric_data_TPF["active_flow_data"]["dh"] = dh_profile
+        geometric_data_TPF["active_flow_data"]["ph"] = ph_profile
+        geometric_data_TPF["active_flow_data"]["kexp"] = kexp_profile
+        geometric_data_TPF["active_flow_data"]["kcon"] = kcon_profile
+
+        # --- Extract fuel information ---
+        pin_geom = self.slices_data[0]['dragon_assembly_model'].pin_geometry_dict
+        pin_pitch = pin_geom["pin_pitch"] * 1E-2 # cm -> m  
+        fuel_radius = pin_geom["fuel_radius"] * 1E-2 # cm -> m
+        gap_radius = pin_geom["gap_radius"] * 1E-2 # cm -> m
+        clad_radius = pin_geom["clad_radius"] * 1E-2 # cm -> m
+        fuel_rod_length = (maxh - z_min) * 1E-2 # cm -> m
+        rods_per_cell = self.slices_data[0]["dragon_assembly_model"].count_number_of_pins
+
+        geometric_data_TPF["fuel_data"]["pin_pitch"] = pin_pitch
+        geometric_data_TPF["fuel_data"]["fuel_radius"] = fuel_radius
+        geometric_data_TPF["fuel_data"]["gap_radius"] = gap_radius
+        geometric_data_TPF["fuel_data"]["clad_radius"] = clad_radius
+        geometric_data_TPF["fuel_data"]["fuel_rod_length"] = fuel_rod_length
+        geometric_data_TPF["fuel_data"]["rods_per_cell"] = rods_per_cell
+
+        # --- Extract core layout information and format assembly map
+        core_layout = self.core_model.core_2D_layout
+        assembly_lines = []
+        for row_id, row in enumerate(core_layout):
+            row_length = len(row)
+            # Eventually consider the option to choose between assembly
+            # or core case in TPF. Also, if an assembly case is considered,
+            # is the analysis assembly-wise (one equivalent rod, as intended
+            # in the original TPF framework) or rod-wise (as in other subchannel
+            # codes).
+            # Assembly case (assembly-wise):
+            # 1
+            #
+            # Assembly case (rod-wise), for GE14 assembly:
+            # With material 1 = UO2 fuel, material 2 = part-length rods
+            # and material 3 = UO2 + Gd2O3 fuel (would have to be defined
+            # in fuel_data)
+            # 1 1 1 1 1 1 1 1 1 1
+            # 1 2 3 2 1 1 2 3 2 1
+            # 1 3 1 1 3 1 1 1 3 1
+            # 1 2 1 3 1 0 0 1 2 1
+            # 1 1 3 1 2 0 0 1 1 1
+            # 1 1 1 0 0 2 1 1 3 1
+            # 1 2 1 0 0 1 1 3 2 1
+            # 1 3 1 1 1 1 3 1 3 1
+            # 1 2 3 2 1 3 2 3 2 1
+            # 1 1 1 1 1 1 1 1 1 1
+            #
+            # Core case (mini-core example):
+            # 0 0 1 0 0
+            # 0 1 1 1 0
+            # 1 1 1 1 1
+            # 0 1 1 1 0
+            # 0 0 1 0 0
+            assembly_lines.append("1 " * row_length)
+        assembly_map = "\n".join(assembly_lines)
+
+        geometric_data_TPF["assembly_map"] = assembly_map
+
+        return geometric_data_TPF
 
     def _get_box_geom(self):
         """Helper mis à jour pour lire les valeurs extraites via les surfaces"""

@@ -20,6 +20,7 @@ OUTPUTS_DIR = (TESTS_DIR / "outputs").resolve()      # .../starterDD/tests/outpu
 GE14_INPUTS_DIR = DATA_DIR / "BWRProgressionProblems" / "GE14_inputs"
 # CORE TESTS
 GE14_CORE_YAML = str(GE14_INPUTS_DIR / "CORE")
+GE14_SINGLE_ASSEMBLY_CORE_YAML = "GEOM_single_assembly_CORE.yaml"
 # ASSEMBLY TESTS
 GE14_COMPOSITIONS_YAML = str(GE14_INPUTS_DIR / "ASSEMBLY" / "material_compositions.yaml")
 GE14_SIMPLE_GEOMETRY_YAML = str(GE14_INPUTS_DIR / "ASSEMBLY" / "simplified_geometry.yaml")
