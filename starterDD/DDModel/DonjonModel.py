@@ -2,7 +2,7 @@
 
 import os
 import yaml
-from starterDD.DDModel.DragonModel import CartesianAssemblyModel
+from .DragonModel import CartesianAssemblyModel
 from ..MaterialProperties.material_mixture import parse_all_compositions_from_yaml
 from .helpers import associate_material_to_rod_ID
 
@@ -83,10 +83,12 @@ class CoreModel:
                     - axial_region: "region_2"
                         axial_bounds: [z_lower_2, z_upper_2]
                         assembly_geometry_file: "assembly_id_2_region_2_geometry.yaml"
+                reflector: # special treatment of reflectors : no need for assembly_id_geometry.yaml
         """
         with open(core_description_yaml, 'r') as file:
             yaml_data = yaml.safe_load(file)
         geometric_data = yaml_data.get("CORE_GEOMETRY", {})
+        self.reflector_geometry = yaml_data.get("REFLECTOR_GEOMETRY", {})
         self.wr_hole_model = yaml_data.get("WR_HOLE_MODEL", {})
         self.raw_yaml_data = yaml_data # Save just in case
         self.geometry_type = geometric_data.get("geometry_type", "cartesian") # by default, assume cartesian geometry for the core
@@ -101,7 +103,8 @@ class CoreModel:
         # Create AxiallyExtrudedAssemblyModel instances for each assembly with axial variation in the core description
         self.assemblies = {}
         #for assembly_id, axial_layout in self.assembly_axial_layouts.items():
-        count = 0
+        count_fuel_assemblies = 0
+        count_reflectors = 0
         for row_idx, row in enumerate(self.core_2D_layout):
             for col_idx, assembly_id in enumerate(row):
                 print(f"CoreModel: Processing assembly '{assembly_id}' in row {row_idx} index {col_idx} for core '{self.name}'.")
@@ -130,13 +133,15 @@ class CoreModel:
                     # test that z_bounds are consistent with z_bounds_sorted
                     if z_bounds != z_bounds_sorted:
                         raise ValueError(f"Z bounds for assembly '{assembly_id}' are not in ascending order. Z bounds: {z_bounds}, sorted unique Z bounds: {z_bounds_sorted}. Please check the axial bounds in the core description YAML file. Regions should be defined in z- to z+ order and in a way that the upper bound of one region corresponds to the lower bound of the next region in the axial layout.")
-
-                count += 1    
+                if assembly_id == "reflector":
+                    count_reflectors += 1
+                else:
+                    count_fuel_assemblies += 1    
                 self.assemblies[(col_idx, row_idx, assembly_id)] = AxiallyExtrudedAssemblyModel(assembly_id, slices_2D, z_bounds_sorted)
                 self.assemblies[(col_idx, row_idx, assembly_id)].set_slice_to_geometry_mapping(slice_to_geometry_dict)
             print(f"CoreModel: Created AxiallyExtrudedAssemblyModel for assembly '{assembly_id}' with axial regions {axial_regions} and axial bounds {z_bounds_sorted}.")
         print(f"CoreModel: Created AxiallyExtrudedAssemblyModel instances for core '{self.name}' with {len(self.assemblies)} assemblies having axial variation.")
-        print(f"Assemblies in core '{self.name}': {list(self.assemblies.keys())}, count: {count}.")
+        print(f"Assemblies in core '{self.name}': {list(self.assemblies.keys())}, count: {count_fuel_assemblies}.")
 
     def createAssemblyModels(self):
         """
@@ -144,19 +149,31 @@ class CoreModel:
         This function can be used to build the assembly models for each axial region of the assemblies with axial variation in the core description.
         """
         self.assembly_models = {}
+        self.reflector_models = {}
         for assembly_id, assembly_model in self.assemblies.items():
             for slice_2D in assembly_model.slices_2D:
-                geometry_file = assembly_model.slice_to_geometry_dict.get(slice_2D, "")
-                if os.path.isfile(f"{self.path_to_configs}/material_compositions.yaml") and os.path.isfile(f"{self.path_to_configs}/{geometry_file}"):
-                    rod_id_to_material = associate_material_to_rod_ID(f"{self.path_to_configs}/material_compositions.yaml", f"{self.path_to_configs}/{geometry_file}")
-                    D5_assembly_model = CartesianAssemblyModel(name=slice_2D, tdt_file=None, geometry_description_yaml=f"{self.path_to_configs}/{geometry_file}")
-                    D5_assembly_model.set_rod_ID_to_material_mapping(rod_id_to_material)
+                if assembly_id[-1] == "reflector":
+                    self.reflector_models[(assembly_id, slice_2D)] = ReflectorModel(name=slice_2D, 
+                                                                                    reflector_type=self.reflector_geometry["type"], 
+                                                                                    shape=self.reflector_geometry["shape"],
+                                                                                    dimensions=self.reflector_geometry["dimensions"]
+                                                                                    )
                 else:
-                    D5_assembly_model = CartesianAssemblyModel(name=slice_2D, tdt_file=None, geometry_description_yaml=f"{self.path_to_configs}/{geometry_file}")
-                    print(f"CoreModel: Created CartesianAssemblyModel for slice '{slice_2D}' of assembly '{assembly_id}' with geometry description from file '{geometry_file}' without material composition information.")
-                D5_assembly_model.analyze_lattice_description(build_pins=True)
-                self.assembly_models[(assembly_id, slice_2D)] = D5_assembly_model
-                print(f"CoreModel: after AssemblyModel geometry analysis for slice '{slice_2D}' of assembly '{assembly_id}', the model has {D5_assembly_model.count_number_of_pins()} pins.")
+                    geometry_file = assembly_model.slice_to_geometry_dict.get(slice_2D, "")
+                    if os.path.isfile(f"{self.path_to_configs}/material_compositions.yaml") and os.path.isfile(f"{self.path_to_configs}/{geometry_file}"):
+                        rod_id_to_material = associate_material_to_rod_ID(f"{self.path_to_configs}/material_compositions.yaml", f"{self.path_to_configs}/{geometry_file}")
+                        D5_assembly_model = CartesianAssemblyModel(name=slice_2D, 
+                                                                tdt_file=None, 
+                                                                geometry_description_yaml=f"{self.path_to_configs}/{geometry_file}")
+                        D5_assembly_model.set_rod_ID_to_material_mapping(rod_id_to_material)
+                    else:
+                        D5_assembly_model = CartesianAssemblyModel(name=slice_2D, 
+                                                                tdt_file=None, 
+                                                                geometry_description_yaml=f"{self.path_to_configs}/{geometry_file}")
+                        print(f"CoreModel: Created CartesianAssemblyModel for slice '{slice_2D}' of assembly '{assembly_id}' with geometry description from file '{geometry_file}' without material composition information.")
+                    D5_assembly_model.analyze_lattice_description(build_pins=True)
+                    self.assembly_models[(assembly_id, slice_2D)] = D5_assembly_model
+                    print(f"CoreModel: after AssemblyModel geometry analysis for slice '{slice_2D}' of assembly '{assembly_id}', the model has {D5_assembly_model.count_number_of_pins()} pins.")
 
 class AxiallyExtrudedAssemblyModel:
     """Axially extruded assembly composed of stacked 2-D slices.
@@ -193,3 +210,14 @@ class AxiallyExtrudedAssemblyModel:
         """
         self.slice_to_geometry_dict = slice_to_geometry_dict
         print(f"AxiallyExtrudedAssemblyModel: Set slice to geometry mapping for assembly '{self.name}' with {len(self.slice_to_geometry_dict)} slices.")
+
+class ReflectorModel:
+    """
+    Minimal implementation of core reflector model. 
+    """
+    def __init__(self, name, reflector_type, shape, dimensions):
+        self.name = name
+        self.reflecot_type = reflector_type
+        self.shape = shape
+        self.dimensions = dimensions
+        

@@ -4,15 +4,45 @@ import os
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import pytest
 
-# On n'importe plus get_box_geometry, car c'est devenu une méthode interne
 from starterDD.GeometryAnalysis.cartesian_geometry_analysis import CartesianGeometricAnalyser
-# NOUVEL IMPORT : On importe le CoreModel
 from starterDD.DDModel.DonjonModel import CoreModel
 
 RACINE_PROJET = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 DOSSIER_OUTPUTS = os.path.join(RACINE_PROJET, "tests", "outputs")
- 
+from conftest import GE14_CORE_YAML, OUTPUTS_DIR
+
+
+@pytest.fixture(scope='session')
+def solver_data():
+    yaml_path = os.path.join(GE14_CORE_YAML , "GEOM_single_assembly_CORE.yaml")
+        
+    if not os.path.exists(yaml_path):
+        raise FileNotFoundError(f"Input geometry YAML file {yaml_path} not found.")
+    
+    # 1. Split folder and file name
+    path_to_configs = os.path.dirname(yaml_path)
+    core_desc_file = os.path.basename(yaml_path)
+    
+    # 2. Initiate core model
+    core_model = CoreModel(
+        name="GE14_FUEL_BUNDLE", 
+        path_to_yaml_configs=path_to_configs, 
+        core_description_yaml=core_desc_file
+    )
+    
+    # 3. Create assembly models
+    core_model.createAssemblyModels()
+    
+    # 4. Analyze the core's layout
+    analyser = CartesianGeometricAnalyser(core_model=core_model, core_i=1, core_j=1)
+    # -------------------------
+
+    solver_data = analyser.run_THM_analysis(nz=160, include_water_rods=False) 
+    return solver_data
+
+
 if __name__ == "__main__":
     # Création du dossier outputs s'il n'existe pas encore
     os.makedirs(DOSSIER_OUTPUTS, exist_ok=True)
@@ -380,3 +410,19 @@ if __name__ == "__main__":
             dh = analyser.get_dh_y_water(j, y1, z1, z2)
         print(f"Porosité (phi) : {phi}")
         print(f"Dh (cm)        : {dh}")
+
+def test_THM_mesh_solver_data(solver_data):
+
+        porosities = solver_data["active_flow_data"]["porosities"]
+        acools = solver_data["active_flow_data"]["coolant_cross_sectional_areas"]
+        dhs = solver_data["active_flow_data"]["hydraulic_diameters"]
+        phs = solver_data["active_flow_data"]["heated_perimeters"]
+        kexp_profile = solver_data["active_flow_data"]["k_expansion"]
+        kcon_profile = solver_data["active_flow_data"]["k_contraction"] 
+        rsin_profile =  solver_data["active_flow_data"]["singular_contraction_ratios"] 
+        pitch = solver_data["active_flow_data"]["pitch"]
+        nz = solver_data["active_flow_data"]["number_of_axial_meshes"]
+        nb_pins = np.array(phs) / (2*np.pi*solver_data["fuel_data"]["clad_radius"])
+        assert len(porosities) == nz
+        assert round(nb_pins[0]) == 92
+        assert round(nb_pins[-1]) == 92 - 14

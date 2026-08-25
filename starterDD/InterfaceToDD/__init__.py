@@ -1,6 +1,7 @@
 """InterfaceToDD module - Dragon module call generation."""
 
 from .dragon_module_calls import LIB, MAC, EDI, COMPO, EDI_COMPO, SALT, MCCGT, TRK
+from .donjon_module_calls import INIT, NEUTRONICS
 from .CLE2000 import (
     CLE2000_MAX_LINE, CLE2000_MAX_VARNAME,
     validate_varname, wrap_cle2000_line,
@@ -77,4 +78,6 @@ __all__ = ["LIB",
            "S2_ThermalScattering",
            "S2_Settings",
            "Serpent2Model",
+           "INIT",
+           "NEUTRONICS"
           ]

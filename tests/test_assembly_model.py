@@ -51,6 +51,7 @@ def test_assembly_model_creation():
     assert GE14_simple_assembly.lattice[0][0].fuel_material_name == "UOX16"
     assert GE14_simple_assembly.lattice[1][2].fuel_material_name == "UOX40Gd8"
     assert GE14_simple_assembly.lattice[3][3].rod_ID == "WROD"
+    assert GE14_simple_assembly.count_number_of_pins() == 92 
 
     # ------------------------------------------------------------------
     # Test: number_fuel_material_mixtures with "by_material" strategy

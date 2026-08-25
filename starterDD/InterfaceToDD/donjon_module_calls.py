@@ -1,6 +1,7 @@
 ## collection of classes to handle DONJON module calls
-# Author: B. Godard
-#Date: 16/04/2026 (creation)
+# Authors: B. Godard, R. Guasch
+# Date: 16/04/2026 (creation)
+# Updated : 18/08/2026
 # Purpose : Define class structures to handle DONJON module calls for starterDD package
 # ----------------------------------------------------------------------------------------------- 
 
@@ -8,8 +9,12 @@ import os
 import numpy as np
 
 
-def format_cle2000_array(vector, max_per_line=10):
-    """Formate une liste Python en un bloc de texte CLE-2000."""
+def format_cle2000_float_array(vector, max_per_line=10):
+    """
+    List formating of a python list into a CLE2000 block
+    vector : list to format,
+    max_per_line  (optional / defaults to 10) : maximum values per line.
+    """
     lines = []
     current_line = []
     for val in vector:
@@ -21,15 +26,22 @@ def format_cle2000_array(vector, max_per_line=10):
         lines.append(" ".join(current_line))
     return "\n".join(lines)
 
-
-def format_meshz(z_bounds, values_per_line=8):
-    """Formate la liste des z_bounds en lignes CLE-2000 pour le mot-clé MESHZ.
-    La première ligne commence par ' MESHZ', les suivantes sont indentées."""
-    tokens = [f"{z:.4f}" for z in z_bounds]
-    chunks = [tokens[i:i + values_per_line] for i in range(0, len(tokens), values_per_line)]
-    first = " MESHZ " + " ".join(chunks[0])
-    rest = [" " * 7 + " ".join(chunk) for chunk in chunks[1:]]
-    return "\n".join([first] + rest) + "\n"
+def format_cle2000_integer_array(array, max_per_line = 10):
+    """
+    List formating of a python list into a CLE2000 block
+    vector : list to format,
+    max_per_line  (optional / defaults to 10) : maximum values per line.
+    """
+    lines = []
+    current_line = []
+    for val in array:
+        current_line.append(f"{int(val)}")
+        if len(current_line) == max_per_line:
+            lines.append(" ".join(current_line))
+            current_line = []
+    if current_line:
+        lines.append(" ".join(current_line))
+    return "\n".join(lines)
 
 
 # -----------------------------------------------------------------------------------------------
@@ -37,101 +49,394 @@ def format_meshz(z_bounds, values_per_line=8):
 # -----------------------------------------------------------------------------------------------
 
 class GEO:
-    """Génère l'appel au module GEO: (et USPLIT:) pour la géométrie."""
-    def __init__(self, nz, pitch_cm, z_bounds):
-        self.nz = nz
-        self.pitch_cm = pitch_cm
-        self.z_bounds = z_bounds
+    """
+        Generate calls to the GEO: module, defining the reactor geometry.
+        model_initialisation : ModelInitialisation object storing meshing information.
+
+    """
+    def __init__(self, lcm_geometry_name, model_initialisation):
+
+        self.geometry_lcm_name = lcm_geometry_name
+        self.nx = len(model_initialisation.meshx) - 1
+        self.ny = len(model_initialisation.meshy) - 1
+        self.nz = len(model_initialisation.meshz) - 1
+        self.radial_homogenisation_option = model_initialisation.radial_homogenization_strategy
+        self.x_boundary_condition = model_initialisation._bc_keyword_handling("x")
+        self.y_boundary_condition = model_initialisation._bc_keyword_handling("y")
+        self.z_boundary_condition = model_initialisation._bc_keyword_handling("z")
+        self.initModel = model_initialisation
+
+
+    def write_c2m(self, embedded_call=False):
+        """
+        embedded_call (boolean, optional) : option to exclude "GEONAM :=" section of the call
+        to support embedded GEO: calls 
+        """
+        if embedded_call:
+            call_option = f"  :::  GEO:"
+        else:
+            call_option = f"{self.geometry_lcm_name} := GEO:"
+        block = (
+            f"{call_option} :: CAR3D {self.nx} {self.ny} {self.nz}\n"
+            f" X- {self.x_boundary_condition} X+ {self.x_boundary_condition} \n"
+            f" Y- {self.y_boundary_condition} Y+ {self.y_boundary_condition} \n"
+            f" Z- {self.z_boundary_condition} Z+ {self.z_boundary_condition} \n"
+        )
+        block += self.format_mesh()
+
+        block += " MIX\n"
+        for k in range(1, self.nz + 1):
+            block += f"  PLANE {k}  {self.format_plane(k)}\n"
+        block += " ;\n"
+        if embedded_call is False:
+            self.initModel._set_number_of_fuel_mixtures(len(self.initModel.fuel_mixtures))
+        return block
+
+    def format_plane(self, k):
+        """
+        Format definition of PLANE keyword
+        k (int) : axial plane index
+        """
+
+        lines = []
+        if self.radial_homogenisation_option == "by_assembly":
+            # each assembly in a core 2D slice gets a unique number 
+            # escape keyword "reflector" sets to 0 ?
+            for j in range(self.ny):
+                lines.append("\n")
+                for i in range(self.nx):
+                    unique_index = self.initModel._get_fuel_index_from_ijk(i,j,k-1)
+                    lines.append(f"{unique_index}")
+                    if unique_index != 0:
+                        self.initModel._add_fuel_mix_index(unique_index)
+        else: 
+            raise ValueError(f"This type of radial homogenisation option is not implemented yet. Expected 'by_assembly', got {self.radial_homogenisation_option}")
+
+        return " ".join(lines)
+
+
+    def format_mesh(self, values_per_line=8):
+        """
+        Format a list of mesh bounds into CLE-2000 lines to be used within the MESHZ GEO: keyword.
+        """
+        xbounds = self.initModel.meshx
+        ybounds = self.initModel.meshy
+        zbounds = self.initModel.meshz
+
+        tokens = [f"{x:.4f}" for x in xbounds]
+        chunks = [tokens[i:i + values_per_line] for i in range(0, len(tokens), values_per_line)]
+
+        firstx = " MESHX " + " ".join(chunks[0])
+        restx = [" " * 7 + " ".join(chunk) for chunk in chunks[1:]]
+
+        tokens = [f"{y:.4f}" for y in ybounds]
+        chunks = [tokens[i:i + values_per_line] for i in range(0, len(tokens), values_per_line)]
+
+        firsty = "\n MESHY " + " ".join(chunks[0])
+        resty = [" " * 7 + " ".join(chunk) for chunk in chunks[1:]]
+
+        tokens = [f"{z:.4f}" for z in zbounds]
+        chunks = [tokens[i:i + values_per_line] for i in range(0, len(tokens), values_per_line)]
+
+        firstz = "\n MESHZ " + " ".join(chunks[0])
+        restz = [" " * 7 + " ".join(chunk) for chunk in chunks[1:]]
+    
+
+        lines = ( 
+            "".join([firstx] + restx) + "\n"
+            "".join([firsty] + resty) + "\n"
+            "".join([firstz] + restz) + "\n"
+        )
+        return lines
+
+class USPLIT:
+    """
+        Class handling calls to the USPLIT Donjon module generating a material indexation.
+        geometry_name (str) : name of the geometry CLE-2000 variable.
+        matex_name (str) : name of the material indexation object to be created by USPLIT:
+        model_initialisation : ModelInitialisation object to hold information about the calculation to be performed.
+    """
+
+    def __init__(self, geometry_name, matex_name, model_initialisation):
+        self.geometry_name = geometry_name
+        self.matex_name = matex_name
+        self.initModel = model_initialisation
+        self.max_number_of_regions = 100000
 
     def write_c2m(self):
-        block = (
-            f"Geom := GEO: :: CAR3D 1 1 {self.nz}\n"
-            " X- REFL X+ REFL Y- REFL Y+ REFL Z- REFL Z+ REFL\n"
-            f" MESHX 0.0 {self.pitch_cm:.5f}\n"
-            f" MESHY 0.0 {self.pitch_cm:.5f}\n"
-        )
-        block += format_meshz(self.z_bounds)
-        block += " MIX\n"
-        for i in range(1, self.nz + 1):
-            if i == 1:
-                block += f"  PLANE {i}  1\n"
-            else:
-                block += f"  PLANE {i} SAME 1\n"
-                
-        block += " ;\n"
-        block += "Geom Matex := USPLIT: Geom :: NGRP 2 MAXR 10000 NFUEL 1 FMIX 1 ;\n"
+        block = ""
+        block += f"{self.geometry_name} {self.matex_name} := USPLIT: {self.geometry_name} ::\n"
+        block += f"NGRP {self.initModel.number_of_energy_groups} MAXR {self.max_number_of_regions} \n"
+        block += f"NFUEL {self.initModel.nfuel} FMIX \n"
+        block += f"{format_cle2000_integer_array(self.initModel.fuel_mixtures)} \n"
+        block += ";\n"
+
         return block
+
 
 
 class RESINI:
-    """Génère l'appel au module RESINI: pour la création de la Fuel Map."""
-    def __init__(self, nz, power_mw, axial_pform, pitch_cm, z_bounds):
-        self.nz = nz
-        self.power_mw = power_mw
-        self.axial_pform = axial_pform
-        self.pitch_cm = pitch_cm
-        self.z_bounds = z_bounds
+    """
+        Calls handling calls to module RESINI: to create a Fuel Map.
+        Minimal implementation : assume FMap and calculation geometries are the same.
+
+        fuel_map_name (str)
+        matex_name (str)
+        model_initialiser (ModelInitialisation object)
+        model_updater (NeutronicsSolve object) : if provided, the Fuel Map is updated accoding to values associated with the desired neutronics solution. 
+    """
+    def __init__(self, fuel_map_name, matex_name, model_initialiser, model_updater=None):
+
+        self.fuel_map_name = fuel_map_name
+        self.matex_name = matex_name
+        self.model_initialiser = model_initialiser
+        self.model_updater = model_updater
 
     def write_c2m(self):
-        pform_str = format_cle2000_array(self.axial_pform)
-
-        geo_inner = (
-            " X- REFL X+ REFL Y- REFL Y+ REFL Z- REFL Z+ REFL\n"
-            f" MESHX 0.0 {self.pitch_cm:.5f}\n"
-            f" MESHY 0.0 {self.pitch_cm:.5f}\n"
-        )
-        geo_inner += format_meshz(self.z_bounds)
-        geo_inner += " MIX\n"
-        for i in range(1, self.nz + 1):
-            if i == 1:
-                geo_inner += f"  PLANE {i}  1\n"
-            else:
-                geo_inner += f"  PLANE {i} SAME 1\n"
-
-        block = (
-            "*--------------------------------------------------------\n"
-            "* Fuel map definition\n"
-            "*--------------------------------------------------------\n"
-            "Fmap Matex := RESINI: Matex ::\n"
-            f"    ::: GEO: CAR3D 1 1 {self.nz}\n"
-            f"{geo_inner}"
-            ";\n"
-            "NXNAME '01' NYNAME 'A' NCOMB 1 B-ZONE 1\n\n"
-            "    ADD-PARAM PNAME 'T-FUEL' PARKEY 'TFuel' GLOBAL\n"
-            "    ADD-PARAM PNAME 'T-COOL' PARKEY 'TCool' GLOBAL\n"
-            "    ADD-PARAM PNAME 'D-COOL' PARKEY 'DCool' GLOBAL\n"
-            "    BTYPE INST-BURN INST-BVAL CHAN 0.0\n"
-            f"    REACTOR-POW {max(self.power_mw, 1e-10):.5E} AXIAL-PFORM\n"
-            f"{pform_str}\n"
-            "    SET-PARAM 'T-FUEL' 900.0\n"
-            "    SET-PARAM 'T-COOL' 543.15\n"
-            "    SET-PARAM 'D-COOL' 0.65\n"
-            "    FUEL WEIGHT 6.464E-3\n"
-            ";\n"
-        )
-        return block
-
-
-def _idelchik_line(keyword, table, max_len=119):
-    """Format an IDELCHIK-EXIT/ENTER keyword line, wrapping at max_len chars."""
-    prefix = f"    {keyword} {len(table)} "
-    cont   = "        "  # continuation indent (must be shorter than prefix)
-    tokens = [f"{pt[0]:.4f} {pt[1]:.4f}" for pt in table]
-    lines  = []
-    current = prefix
-    for tok in tokens:
-        candidate = current + tok + " "
-        if len(candidate) > max_len and current != prefix:
-            lines.append(current.rstrip())
-            current = cont + tok + " "
+        if self.model_updater == None: 
+            initialisation = True
         else:
-            current = candidate
-    lines.append(current.rstrip())
-    return "\n".join(lines) + "\n"
+            initialisation = False
 
+        if initialisation:
+            geo_inner = GEO(lcm_geometry_name="Geom", model_initialisation=self.model_initialiser)
+            geo_def = geo_inner.write_c2m(embedded_call=True)
+
+            power_mw = self.model_initialiser.reactor_power*1e-6
+            pform_str = format_cle2000_float_array(self.model_initialiser.axial_power_form)
+            nx_names, ny_names = self.format_nx_ny_names()
+            b_zones = self.format_burnup_zones()
+            parameters_definition = self.format_parameters_definition()
+            set_parameters_bloc = self.format_set_parameters_bloc(initialisation)
+            fuel_weight_bloc = self.format_fuel_weight_bloc()
+
+            block = (
+                "*--------------------------------------------------------\n"
+                "* Fuel map definition\n"
+                "*--------------------------------------------------------\n"
+                f"{self.fuel_map_name} {self.matex_name} := RESINI: {self.matex_name} ::\n"
+                f"{geo_def}"
+                f"NXNAME {nx_names} \nNYNAME {ny_names}\n" 
+                f"NCOMB {self.model_initialiser.nfuel}\n"
+                "B-ZONE \n"
+                f"{b_zones}"
+                f"{parameters_definition}"
+                "    BTYPE INST-BURN INST-BVAL CHAN 0.0\n"
+                f" REACTOR-POW {max(power_mw, 1e-10):.5E}\n"
+                "  AXIAL-PFORM\n"
+                f"{pform_str}\n"
+                f"{set_parameters_bloc}\n"
+                f"{fuel_weight_bloc}"
+                ";\n"
+            )
+            return block
+
+        else:
+            # Create a precodure updating the fuel map by setting local parameters
+
+            set_parameters_bloc = self.format_set_parameters_bloc(initialisation)
+
+            block = (
+                "*--------------------------------------------------------\n"
+                "* Update Fuel Map \n"
+                "*--------------------------------------------------------\n"
+                f"{self.fuel_map_name} := RESINI: {self.fuel_map_name} ::\n"
+                " BTYPE INST-BURN INST-BVAL CHAN 0.0\n"
+                f"{set_parameters_bloc}\n"
+                ";\n"
+            )
+            return block
+
+
+    def format_nx_ny_names(self):
+        """
+        Format the NXNAME and NYNAME keyword entries
+        This assumes that each entry in the cartesian nx by ny grid is a fuel assembly
+        TODO : implement escape parameter if a channel is declared as non-fuel, denoted by '-'
+        """
+        NX_NAMES = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10',
+                    '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', 
+                    '21', '22', '23', '24', '25', '26']
+        NY_NAMES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 
+                    'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 
+                    'U', 'V', 'W', 'X', 'Y', 'Z']
+        nx = len(self.model_initialiser.meshx) - 1
+        ny = len(self.model_initialiser.meshy) - 1
+        if nx > len(NX_NAMES) or ny > len(NY_NAMES):
+            raise ValueError(f"RESINI: Maximal core dimensions supported are 28 by 28, got {nx} by {ny}.")
+        nxname_str = ""
+        nyname_str = ""
+        x_pos_with_refl = []
+        y_pos_with_refl = []
+        for pair in self.model_initialiser.reflector_pairs:
+            x_pos_with_refl.append(pair[0])
+            y_pos_with_refl.append(pair[1])
+        for idx in range(nx):
+            if len(x_pos_with_refl)>0:
+                if idx == max(x_pos_with_refl) or idx == min(x_pos_with_refl):
+                    nxname_str += "'-' "
+                else:    
+                    nxname_str += f"'{NX_NAMES[idx-1]}' "
+            else:
+                nxname_str += f"'{NX_NAMES[idx]}' "
+        for idy in range(ny):
+            if len(y_pos_with_refl)>0:
+                if idy == max(y_pos_with_refl) or idy == min(y_pos_with_refl) and len(y_pos_with_refl)>0:
+                    nyname_str += "'-' "
+                else:
+                    nyname_str += f"'{NY_NAMES[idy-1]}' "
+            else:
+                nyname_str += f"'{NY_NAMES[idy]}' "
+
+        return nxname_str, nyname_str
+
+    def format_burnup_zones(self):
+        """
+        Format B-ZONE entry
+        For now assume one burnup zone per fuel channel and per height. 
+        TODO : implement grouping of zones for more flexible burnup zone assignment.
+        """
+
+        nx = len(self.model_initialiser.meshx) - 1
+        ny = len(self.model_initialiser.meshy) - 1
+        nz = len(self.model_initialiser.meshz) - 1
+
+        b_zones_str = ""
+        zone_index = 1
+        for idz in range(nz):
+            for idy in range(ny):
+                b_zones_str += "\n"
+                for idx in range(nx):
+                    if (idx, idy) in self.model_initialiser.fuel_channel_pairs:
+                        b_zones_str += f"{zone_index} "
+                        zone_index += 1
+
+        return b_zones_str
+
+    def format_parameters_definition(self):
+        """
+        Format paramters definition that should be included in the fuel map.
+        """
+        params_str = ""
+        parameters = self.model_initialiser.interpolation_variables
+        for parameter in parameters.keys():
+            params_str += f"ADD-PARAM PNAME '{parameters[parameter][1]}' PARKEY '{parameter}' {parameters[parameter][0]} \n"
+        return params_str
+
+    def format_set_parameters_bloc(self, isInitialisation):
+        """
+        Format the SET-PARAM block 
+        """
+        set_params_block = ""
+        parameters = self.model_initialiser.interpolation_variables
+        for param in parameters.keys():
+            if isInitialisation:
+                # recover guess initial value for parameter
+                inital_pvalue = self.model_initialiser.get_initial_parameter(param) 
+                if parameters[param][0] == "GLOBAL":
+                    set_params_block += f"SET-PARAM '{parameters[param][1]}' {inital_pvalue:.5E}\n"
+                else: 
+                    # set bundle-wise values : 1 value per channel, 1 value per axial mesh
+                    num_chan = self.model_initialiser.number_fuel_channels
+                    num_bundles = num_chan * (len(self.model_initialiser.meshz) - 1) 
+                    param_values = [inital_pvalue] * num_bundles
+                    set_params_block += f"SET-PARAM '{parameters[param][1]}' BUND \n"
+                    set_params_block += f"{format_cle2000_float_array(param_values)}\n"
+            else:
+                param_values = self.model_updater.parameter_values_dict[param]
+                if parameters[param][0] == "GLOBAL" and len(param_values)==1: 
+                    set_params_block += f"SET-PARAM '{parameters[param][1]}' {param_values[0]:.5E}\n"
+                else:
+                    set_params_block += f"SET-PARAM '{parameters[param][1]}' BUND \n"
+                    set_params_block += f"{format_cle2000_float_array(param_values)}\n"
+        return set_params_block
+
+    def format_fuel_weight_bloc(self):
+        """
+        This function will not work in this current implementation with vanished rods as it assumes that the fuel mass is evenly 
+        distributed along the core's height.
+        """
+        fuel_weight_bloc = ""
+        num_chan = self.model_initialiser.number_fuel_channels
+        nz = (len(self.model_initialiser.meshz) - 1) 
+        num_bundles = num_chan * nz
+        fuel_weight_bloc += f"FUEL WEIGHT\n" 
+        fuel_weight_values = [self.model_initialiser.total_fuel_mass / self.model_initialiser.nfuel] * num_bundles
+        fuel_weight_bloc += f"{format_cle2000_float_array(fuel_weight_values)}\n"
+
+        return fuel_weight_bloc
+
+
+
+
+class NCR:
+    """
+        Call to the NCR: module performing interpolation of cross sections based on a set of parameters.
+    """
+    def __init__(self, libname, fuelmap_name, initialModel, neutronicsSolve):
+        """
+        libname (str) : CLE2000 variable name to host the output cross section library.
+        fuelmap_name (str) : CLE2000 variable name hosting the fuel map to recover parameters from.
+        initial_model : ModelInitialisation object carrying the variables to be included in the interpolation.
+        neutronicsSolve : NeutronicsSolve object carrying the parameters used to interpolate cross sections on
+        compo1 : CLE2000 variable name hosting the 
+        """
+
+        self.libname = libname
+        self.fuelmap_name = fuelmap_name
+        self.initial_model = initialModel
+        self.neutronics_model = neutronicsSolve
+
+
+    def write_c2m(self):
+        # include second compo ? 
+        # call NCR: for as many compos as there are and pair mixes to compos + DIR to interpolate from
+        compos_dir_keys = self.neutronics_model.compo_dir_to_mix.keys()
+        compo_names = [cpo_dir_pair[0] for cpo_dir_pair in compos_dir_keys]
+        updateLib = False
+
+        ncr_call_block = ""
+        for compo_dir_pair in compos_dir_keys:
+            cpo_lcm_name = compo_dir_pair[0]
+            cpodir = compo_dir_pair[1]
+            if updateLib:
+                ncr_call_block += f"{self.libname} := NCR: {self.fuelmap_name} {self.libname} {cpo_lcm_name} ::\n"
+                ncr_call_block += "    EDIT 0 \n"
+            else:
+                ncr_call_block += f"{self.libname} := NCR: {self.fuelmap_name} {cpo_lcm_name} ::\n"
+                ncr_call_block += "    EDIT 0 \n"
+                ncr_call_block += f"    NMIX {self.initial_model.nfuel}"
+
+            updateLib = True
+            ncr_call_block += f"    MICRO {self.neutronics_model.interpolation_type.upper()} \n"
+
+            mix_def = self.format_compo_dir_pair_mix_def(cpo_lcm_name, cpodir)
+            ncr_call_block += f"{mix_def}\n"
+            ncr_call_block += ";\n"
+
+        return ncr_call_block
+
+
+    def format_compo_dir_pair_mix_def(self, compo_lcm, compo_dir):
+        """
+        Format MIX definitions from a CPO + CPODIR and a set of parameters
+        """
+        mix_definitions = ""
+        mix_indices = self.neutronics_model.compo_dir_to_mix[(compo_lcm, compo_dir)]
+        for mix_idx in mix_indices:
+            mix_definitions += f"    COMPO {compo_lcm} {compo_dir}\n"
+            mix_definitions += f"    MIX {mix_idx}\n"
+            for par_key in self.neutronics_model.parameter_values_dict.keys():
+                parameter_value = self.neutronics_model.parameter_values_dict[par_key][mix_idx-1]
+                mix_definitions += f"    SET '{par_key}' {parameter_value:5E}\n"
+            mix_definitions += "    ENDMIX\n"
+
+        return mix_definitions
 
 class THM:
-    """Génère l'appel au module THM: pour le calcul thermohydraulique."""
+    """
+        Call to the THM: module responsible for providing a simplified thermal-hydraulics solution.
+    """
     def __init__(self, inlet_temp, outlet_press, pdrop, dfm, 
                  fuel_radius, gap_radius, clad_radius, acool_profile, dh_profile, pch_profile,
                  kexp_profile=None, kcon_profile=None, rsin_profile=None,
@@ -169,21 +474,21 @@ class THM:
         self.mass_flow = 8.407E-02 * (_ref_acool / 8.470E-05)
 
     def write_c2m(self):
-        acool_str = format_cle2000_array(self.acool_profile)
-        hd_str = format_cle2000_array(self.dh_profile)
-        pch_str = format_cle2000_array(self.pch_profile)
+        acool_str = format_cle2000_float_array(self.acool_profile)
+        hd_str = format_cle2000_float_array(self.dh_profile)
+        pch_str = format_cle2000_float_array(self.pch_profile)
 
         # KEXP-P block: only written when there are non-zero expansion losses
         if self.kexp_profile is not None and any(k != 0.0 for k in self.kexp_profile):
-            kexp_p_str = format_cle2000_array(self.kexp_profile)
+            kexp_p_str = format_cle2000_float_array(self.kexp_profile)
             kexp_p_block = "    KEXP-P\n" + f"{kexp_p_str}\n"
         else:
             kexp_p_block = ""
 
         # KCON-P and RSIN-P blocks: written together when there are non-zero contraction losses
         if self.kcon_profile is not None and any(k != 0.0 for k in self.kcon_profile):
-            kcon_p_str = format_cle2000_array(self.kcon_profile)
-            rsin_p_str = format_cle2000_array(self.rsin_profile)
+            kcon_p_str = format_cle2000_float_array(self.kcon_profile)
+            rsin_p_str = format_cle2000_float_array(self.rsin_profile)
             kcon_p_block = "    KCON-P\n" + f"{kcon_p_str}\n" + "    RSIN-P\n" + f"{rsin_p_str}\n"
         else:
             kcon_p_block = ""
@@ -191,10 +496,9 @@ class THM:
         # WR-HOLE block: written when holes are defined
         # A_hole = pi*(D_hole/2)^2, D_hole in cm -> A_hole in m^2
         if self.wr_holes:
-            import math
             hole_z_vals   = " ".join(f"{h['z'] * 1e-2:.5E}" for h in self.wr_holes)
             hole_a_vals   = " ".join(
-                f"{math.pi * (h['D_hole'] * 0.5e-2) ** 2:.5E}" for h in self.wr_holes
+                f"{np.pi * (h['D_hole'] * 0.5e-2) ** 2:.5E}" for h in self.wr_holes
             )
             wr_hole_block = (
                 f"    WR-HOLE {len(self.wr_holes)}\n"
@@ -202,46 +506,46 @@ class THM:
                 f"    HOLE-A {hole_a_vals} (*m2*)\n"
             )
             if self.idelchik_exit:
-                wr_hole_block += _idelchik_line('IDELCHIK-EXIT', self.idelchik_exit)
+                wr_hole_block += self._idelchik_line('IDELCHIK-EXIT', self.idelchik_exit)
             if self.idelchik_enter:
-                wr_hole_block += _idelchik_line('IDELCHIK-ENTER', self.idelchik_enter)
+                wr_hole_block += self._idelchik_line('IDELCHIK-ENTER', self.idelchik_enter)
         else:
             wr_hole_block = ""
 
         # ACOOL-WR / HD-WR / KSING-WR blocks for water rod interior
         if self.acool_wr is not None:
-            acool_wr_str = format_cle2000_array(self.acool_wr)
+            acool_wr_str = format_cle2000_float_array(self.acool_wr)
             acool_wr_block = "    ACOOL-WR\n" + f"{acool_wr_str}\n\n"
         else:
             acool_wr_block = ""
 
         if self.dh_wr is not None:
-            dh_wr_str = format_cle2000_array(self.dh_wr)
+            dh_wr_str = format_cle2000_float_array(self.dh_wr)
             dh_wr_block = "    HD-WR\n" + f"{dh_wr_str}\n\n"
         else:
             dh_wr_block = ""
 
         if self.kexp_wr is not None and any(k != 0.0 for k in self.kexp_wr):
-            kexp_wr_str = format_cle2000_array(self.kexp_wr)
+            kexp_wr_str = format_cle2000_float_array(self.kexp_wr)
             kexp_wr_block = "    KEXP-WR\n" + f"{kexp_wr_str}\n"
         else:
             kexp_wr_block = ""
 
         if self.kcon_wr is not None and any(k != 0.0 for k in self.kcon_wr):
-            kcon_wr_str = format_cle2000_array(self.kcon_wr)
-            rsin_wr_str = format_cle2000_array(self.rsin_wr)
+            kcon_wr_str = format_cle2000_float_array(self.kcon_wr)
+            rsin_wr_str = format_cle2000_float_array(self.rsin_wr)
             kcon_wr_block = "    KCON-WR\n" + f"{kcon_wr_str}\n" + "    RSIN-WR\n" + f"{rsin_wr_str}\n"
         else:
             kcon_wr_block = ""
 
         if self.pch_wr_out is not None:
-            pch_wr_str = format_cle2000_array(self.pch_wr_out)
+            pch_wr_str = format_cle2000_float_array(self.pch_wr_out)
             pch_wr_block = "    PCH-WR-OUT\n" + f"{pch_wr_str}\n\n"
         else:
             pch_wr_block = ""
 
         if self.rwall_wr is not None:
-            rwall_str = format_cle2000_array(self.rwall_wr)
+            rwall_str = format_cle2000_float_array(self.rwall_wr)
             rwall_block = "    RWALL-WR\n" + f"{rwall_str}\n"
         else:
             rwall_block = ""
@@ -300,9 +604,107 @@ class THM:
         )
         return block
 
+    def _idelchik_line(self, keyword, table, max_len=119):
+        """
+            Format an IDELCHIK-EXIT/ENTER keyword line, wrapping at max_len chars
+        """
+        prefix = f"    {keyword} {len(table)} "
+        cont   = "        "  # continuation indent (must be shorter than prefix)
+        tokens = [f"{pt[0]:.4f} {pt[1]:.4f}" for pt in table]
+        lines  = []
+        current = prefix
+        for tok in tokens:
+            candidate = current + tok + " "
+            if len(candidate) > max_len and current != prefix:
+                lines.append(current.rstrip())
+                current = cont + tok + " "
+            else:
+                current = candidate
+        lines.append(current.rstrip())
+        return "\n".join(lines) + "\n"
+
+######################################################################################################################################
+##############################                         Procedure orchestrators :                           ###########################
+######################################################################################################################################
+
 
 # -----------------------------------------------------------------------------------------------
-# Test Case Orchestrator
+#   Procedure to initialise a DONJON Case
+# -----------------------------------------------------------------------------------------------
+class INIT:
+    """
+    Wrapper class creating a CLE2000 procedure initalizing the Donjon Model
+    """
+
+    def __init__(self, scheme, proc_name = "IniDonjon", case_name="donjon_case"):
+        """
+        scheme : DonjonCalculationScheme
+        """
+        self.scheme = scheme
+        self.geometry_lcm_name = "Geom"
+        self.matex_lcm_name = "Matex"
+        self.fmap_lcm_name = "Fmap"
+        
+
+    def build_GEO_call(self):
+        """
+        Build a call to GEO: initializing the geometry model for the donjon case 
+        """
+        geo_proc = GEO(lcm_geometry_name=self.geometry_lcm_name, model_initialisation=self.scheme.initialisation_step)
+        geom_block = geo_proc.write_c2m()
+        return geom_block
+
+    def build_MATEX_call(self):
+        """
+        Build a call to USPLIT: performing material indexation and producing a Matex lcm object.
+        """
+        usplit_proc = USPLIT(geometry_name=self.geometry_lcm_name, matex_name=self.matex_lcm_name, model_initialisation=self.scheme.initialisation_step)
+        usplit_block = usplit_proc.write_c2m()
+        return usplit_block
+
+    def build_RESINI_call(self):
+        """
+        Build a call to RESINI: 
+        """
+        resini_proc = RESINI(fuel_map_name=self.fmap_lcm_name, matex_name=self.matex_lcm_name, 
+                             model_initialiser = self.scheme.initialisation_step, 
+                             )
+        resini_block = resini_proc.write_c2m()
+        return resini_block
+
+
+# -----------------------------------------------------------------------------------------------
+#    Procedure solving the neutronics problem
+# -----------------------------------------------------------------------------------------------
+
+class NEUTRONICS:
+    """
+    Wrapper class orchestrating the neutronics solution
+    """
+
+    def __init__(self, scheme, proc_name = "Neutronics", case_name = "Donjon_case"):
+        self.scheme = scheme
+
+    def build_RESINI_call(self):
+        """
+        Build a call to the RESINI: module to update Fuel Map parameters
+        """
+        
+        resini_proc = RESINI(fuel_map_name="FMap", matex_name="Matex", model_initialiser=self.scheme.initialisation_step, model_updater=self.scheme.neutronics_step)
+        resini_block = resini_proc.write_c2m()
+        return resini_block
+
+    def build_NCR_call(self):
+        """
+        Build a call to the NCR: interpolation module
+        """
+        ncr_proc = NCR(libname="MicroF", fuelmap_name="FMap", initialModel= self.scheme.initialisation_step, neutronicsSolve=self.scheme.neutronics_step)
+        ncr_block = ncr_proc.write_c2m()
+        return ncr_block
+
+
+# -----------------------------------------------------------------------------------------------
+# Test Case Orchestrator for THM / Donjon
 # -----------------------------------------------------------------------------------------------
 
 class DonjonTHM1DProcedure:
@@ -365,7 +767,7 @@ class DonjonTHM1DProcedure:
     use_acool_profile=False and use_ksing=False are applied last and override the
     region-based filters above.
     """
-    def __init__(self, analyser, nz, power_kw,
+    def __init__(self, model_initialiser, analyser, nz, power_kw,
                  axial_pform=None, pdrop=1, dfm=1,
                  inlet_temp=543.15, outlet_press=7.20E+06,
                  use_acool_profile=True, use_ksing=True,
@@ -542,11 +944,8 @@ class DonjonTHM1DProcedure:
         axial_pform = axial_pform if axial_pform else [1.0] * self.nz
 
         # --- 2. Instantiation of DONJON modules ---
-        self.geo_module = GEO(nz=self.nz, pitch_cm=pitch_cm, z_bounds=z_bounds)
-        self.resini_module = RESINI(
-            nz=self.nz, power_mw=power_mw, 
-            axial_pform=axial_pform, pitch_cm=pitch_cm, z_bounds=z_bounds
-        )
+        self.geo_module = GEO(lcm_geometry_name="Geom", model_initialisation=model_initialiser)
+        self.resini_module = RESINI(fuel_map_name="FMap", matex_name="Matex", model_initialiser=model_initialiser)
         self.thm_module = THM(
             inlet_temp=inlet_temp, outlet_press=outlet_press, 
             pdrop=pdrop, dfm=dfm, fuel_radius=fuel_radius, gap_radius=gap_radius, clad_radius=clad_radius,

@@ -403,7 +403,7 @@ class CartesianGeometricAnalyser:
         geometric_data["active_flow_data"]["number_of_axial_meshes"] = nz
         geometric_data["active_flow_data"]["porosities"] = porosities_profile
         geometric_data["active_flow_data"]["coolant_cross_sectional_areas"] = acool_profile
-        geometric_data["active_flow_data"]["hydraulic_diamters"] = dhs_profile
+        geometric_data["active_flow_data"]["hydraulic_diameters"] = dhs_profile
         geometric_data["active_flow_data"]["heated_perimeters"] = phs_profile
         geometric_data["active_flow_data"]["k_expansion"] = kexp_profile
         geometric_data["active_flow_data"]["k_contraction"] = kcon_profile
@@ -412,10 +412,7 @@ class CartesianGeometricAnalyser:
         geometric_data["active_flow_data"]["pitch"] = pitch_m
 
         if include_water_rods:
-            geom_profiles_wr = self.execute_profile_z(
-                ('wr_tube',),
-                dz, dz, z_min, maxh
-            )
+            geom_profiles_wr = self.execute_profile_z(('wr_tube',),dz, dz, z_min, maxh)
 
             acools_wr = [a * 1e-4 for a in geom_profiles_wr[2]] # Conversion cm² -> m²
             porosities_wr = geom_profiles_wr[1]
@@ -1382,7 +1379,8 @@ class CartesianGeometricAnalyser:
         ]
 
         curr_z = z_min
-        while curr_z + h <= z_max:
+        tol = 1e-6
+        while curr_z + h <= z_max + tol:
             z1 = curr_z
             z2 = curr_z + h
 

@@ -6,8 +6,9 @@ import pytest
 from conftest import GE14_CORE_YAML, OUTPUTS_DIR
 
 from starterDD.GeometryAnalysis.cartesian_geometry_analysis import CartesianGeometricAnalyser
-from starterDD.InterfaceToDD.donjon_module_calls import DonjonTHM1DProcedure
-from starterDD.DDModel.DonjonModel import CoreModel 
+from starterDD.InterfaceToDD.donjon_module_calls import DonjonTHM1DProcedure, INIT, NEUTRONICS
+from starterDD.DDModel.DonjonModel import CoreModel
+from starterDD.DDModel.DonjonCalculationScheme import DonjonCalculationScheme, ModelInitialisation, NeutronicsSolve
 
 def generate_case_name(pdrop, power_kw, profile_type):
     nom = "dfm"
@@ -37,6 +38,68 @@ def generate_power_profile(profile_type, nz):
     return [v / mean for v in profile]
 
 
+@pytest.fixture
+def single_channel_model_initialiser():
+    GE14_core_description_yaml = "GEOM_single_assembly_CORE.yaml"
+    core_model = CoreModel(name="GE14_single_assembly_core", path_to_yaml_configs=GE14_CORE_YAML, core_description_yaml=GE14_core_description_yaml)
+    single_channel_model_initialiser = ModelInitialisation(core_model=core_model, 
+                                        radial_homogenization_strategy="by_assembly",
+                                        boundary_conditions_dict={"x": "reflective",
+                                                                  "y": "reflective",
+                                                                  "z": "void"},
+                                        number_of_axial_materials_per_slice=[10, 5],
+                                        number_of_energy_groups=2,
+                                        interpolation_variables=[("TFuel", "local", "fuel_temperature"), 
+                                                                 ("TCool", "local", "coolant_temperature"),
+                                                                 ("DCool", "local", "coolant_density")])
+    
+    single_channel_model_initialiser.resolve_mesh()
+
+    single_channel_model_initialiser.set_slice_to_compodir_correspondance(xpos=0, ypos=0, z_bounds=[0.0, 222.0595], compo_name="CPODOM", dir_name="EDI_2G")
+    single_channel_model_initialiser.set_slice_to_compodir_correspondance(xpos=0, ypos=0, z_bounds=[222.0595, 347.1291], compo_name="CPOVAN", dir_name="EDI_2G")
+    single_channel_model_initialiser.set_reactor_power(870e6)
+    single_channel_model_initialiser.set_initial_axial_power_form("uniform")
+    single_channel_model_initialiser.set_initial_parameters({"TFuel": 900, "TCool": 600.0, "DCool": 0.73669})
+    single_channel_model_initialiser.set_fuel_mass(total_fuel_mass = 0.5*16)
+    
+    return single_channel_model_initialiser
+
+@pytest.fixture
+def minicore_model_initialiser():
+    GE14_core_description_yaml = "GEOM_mini_CORE_reflector.yaml"
+    core_model = CoreModel(name="GE14_single_assembly_core", path_to_yaml_configs=GE14_CORE_YAML, core_description_yaml=GE14_core_description_yaml)
+    minicore_model_initialiser = ModelInitialisation(core_model=core_model, 
+                                        radial_homogenization_strategy="by_assembly",
+                                        boundary_conditions_dict={"x": "reflective",
+                                                                  "y": "reflective",
+                                                                  "z": "void"},
+                                        number_of_axial_materials_per_slice=[10, 5],
+                                        number_of_energy_groups=2,
+                                        interpolation_variables=[("TFuel", "local", "fuel_temperature"), 
+                                                                 ("TCool", "local", "coolant_temperature"),
+                                                                 ("DCool", "local", "coolant_density")])
+    
+    minicore_model_initialiser.resolve_mesh()
+
+    minicore_model_initialiser.set_slice_to_compodir_correspondance(xpos=0, ypos=0, z_bounds=[0.0, 222.0595], compo_name="CPODOM", dir_name="EDI_2G")
+    minicore_model_initialiser.set_slice_to_compodir_correspondance(xpos=0, ypos=0, z_bounds=[222.0595, 347.1291], compo_name="CPOVAN", dir_name="EDI_2G")
+    minicore_model_initialiser.set_reactor_power(870e6)
+    minicore_model_initialiser.set_initial_axial_power_form("uniform")
+    minicore_model_initialiser.set_initial_parameters({"TFuel": 900, "TCool": 600.0, "DCool": 0.73669})
+    minicore_model_initialiser.set_fuel_mass(total_fuel_mass = 0.5*16)
+    
+    return minicore_model_initialiser
+
+@pytest.fixture
+def neutronics_step(single_channel_model_initialiser):
+    neutronics_step = NeutronicsSolve(single_channel_model_initialiser, "diffusion", "linear")
+    nz = len(single_channel_model_initialiser.meshz) - 1
+    neutronics_step.set_interpolation_parameter("TFuel", [1200.0]*nz)
+    neutronics_step.set_interpolation_parameter("TCool", [559.0]*nz)
+    neutronics_step.set_interpolation_parameter("DCool", [0.600]*nz)
+    neutronics_step.resolve_cpo_dir_to_mix()
+    return neutronics_step
+
 
 def test_geometric_analyser():
 
@@ -54,7 +117,8 @@ def test_geometric_analyser():
     assert analyser.slices_data[1]["z_start"] == 222.0595
     assert analyser.slices_data[1]["z_end"] == 347.1291
 
-def test_DONJON_THM_generator_and_porosity_calculation():
+
+def test_DONJON_THM_generator_and_porosity_calculation(minicore_model_initialiser):
 
     core_pos = (1, 1)
     # create a CoreModel from DonjonModel
@@ -79,6 +143,7 @@ def test_DONJON_THM_generator_and_porosity_calculation():
         
         # 3. Create a c2m procedure
         procedure = DonjonTHM1DProcedure(
+            model_initialiser=minicore_model_initialiser,
             analyser=analyser,
             nz=nz,
             power_kw=power,
@@ -101,8 +166,9 @@ def test_DONJON_THM_generator_and_porosity_calculation():
 
         # 4. Écriture du fichier
         c2m_path = procedure.write_to_c2m(OUTPUTS_DIR, case_name)
-        
-def test_4x4_minicore_surfaces_definition():
+
+
+def test_4x4_minicore_surfaces_definition(minicore_model_initialiser):
 
     # Reference values (PINLET, EPSOUT) for non-regression assertions.
     REFERENCE_VALS = {
@@ -152,6 +218,7 @@ def test_4x4_minicore_surfaces_definition():
         
         # 3. Create a THM1D procedure
         procedure = DonjonTHM1DProcedure(
+            model_initialiser=minicore_model_initialiser,
             analyser=analyser,
             nz=nz,
             power_kw=power,
@@ -173,3 +240,37 @@ def test_4x4_minicore_surfaces_definition():
         refs = REFERENCE_VALS.get(case_name, (None, None))
         c2m_path = procedure.write_to_c2m(OUTPUTS_DIR, case_name,
                                             pinlet_ref=refs[0], epsout_ref=refs[1])
+
+
+def test_donjon_single_channel_model_INIT_procedure(single_channel_model_initialiser, neutronics_step):
+
+    
+    scheme = DonjonCalculationScheme(name="test_scheme")
+    scheme.add_initialisation_step(single_channel_model_initialiser)
+    scheme.add_neutronics_step(neutronics_step)
+
+    init_proc = INIT(scheme)
+    init_proc.build_GEO_call()
+    assert init_proc.scheme.initialisation_step.nfuel == 15
+    init_proc.build_MATEX_call()
+    init_proc.build_RESINI_call()
+    assert init_proc.scheme.initialisation_step.nfuel == 15
+
+    neutronics_proc = NEUTRONICS(scheme)
+    neutronics_proc.build_RESINI_call()
+    neutronics_proc.build_NCR_call()
+
+
+def test_donjon_minicore_model_INIT_procedure(minicore_model_initialiser):
+
+    
+    scheme = DonjonCalculationScheme(name="test_scheme")
+    scheme.add_initialisation_step(minicore_model_initialiser)
+
+    init_proc = INIT(scheme)
+    init_proc.build_GEO_call()
+    assert init_proc.scheme.initialisation_step.nfuel == 16*15
+    init_proc.build_MATEX_call()
+    assert init_proc.scheme.initialisation_step.nfuel == 16*15
+    init_proc.build_RESINI_call()
+    assert init_proc.scheme.initialisation_step.nfuel == 16*15

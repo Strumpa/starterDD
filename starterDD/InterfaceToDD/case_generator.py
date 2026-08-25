@@ -511,13 +511,9 @@ class DragonCase:
               "trk": path, "edir": path}``
         """
         # Determine the first draglib alias
-        draglib_alias = list(
-            self.draglib_name_to_alias.values()
-        )[0]
+        draglib_alias = list(self.draglib_name_to_alias.values())[0]
         # 1. Load scheme
-        scheme = DragonCalculationScheme.from_yaml(
-            self.calc_scheme_yaml
-        )
+        scheme = DragonCalculationScheme.from_yaml(self.calc_scheme_yaml)
         self.scheme = scheme
 
         # 2. Build assembly model
