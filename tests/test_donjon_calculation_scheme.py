@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Polygon
 from starterDD.DDModel.DonjonModel import CoreModel
 from conftest import GE14_CORE_YAML
+from starterDD.InterfaceToDD.donjon_module_calls import INIT, NEUTRONICS
 from starterDD.DDModel.DonjonCalculationScheme import DonjonCalculationScheme, ModelInitialisation, NeutronicsSolve
 
 
@@ -13,6 +14,32 @@ def one_channel_core_model():
     GE14_core_description_yaml = "GEOM_single_assembly_CORE.yaml"
     one_channel_core_model = CoreModel(name="GE14_single_assembly_core", path_to_yaml_configs=GE14_CORE_YAML, core_description_yaml=GE14_core_description_yaml)
     return one_channel_core_model
+
+@pytest.fixture
+def DOM_channel_initialiser():
+    GE14_core_description_yaml = "GEOM_single_DOM_assembly_CORE.yaml"
+    core_model = CoreModel(name="GE14_single_DOM_assembly_core", path_to_yaml_configs=GE14_CORE_YAML, core_description_yaml=GE14_core_description_yaml)
+    DOM_channel_initialiser = ModelInitialisation(core_model=core_model, 
+                                        radial_homogenization_strategy="by_assembly",
+                                        boundary_conditions_dict={"x": "reflective",
+                                                                  "y": "reflective",
+                                                                  "z": "void"},
+                                        number_of_axial_materials_per_slice=[40],
+                                        number_of_energy_groups=2,
+                                        interpolation_variables=[("TFuel", "local", "fuel_temperature"), 
+                                                                 ("TCool", "local", "coolant_temperature"),
+                                                                 ("DCool", "local", "coolant_density")])
+    
+    DOM_channel_initialiser.resolve_mesh()
+
+    DOM_channel_initialiser.set_slice_to_compodir_correspondance(xpos=0, ypos=0, z_bounds=[0.0, 347.1291], compo_name="CPODOM", dir_name="EDI_2G")
+
+    DOM_channel_initialiser.set_reactor_power(3.6e6)
+    DOM_channel_initialiser.set_initial_axial_power_form("uniform")
+    DOM_channel_initialiser.set_initial_parameters({"TFuel": 900, "TCool": 600.0, "DCool": 0.73669})
+    DOM_channel_initialiser.set_fuel_mass(total_fuel_mass = 0.5)
+    
+    return DOM_channel_initialiser
 
 @pytest.fixture
 def model_initialiser():
@@ -257,7 +284,7 @@ def test_model_initialisation(one_channel_core_model):
     init_step.set_slice_to_compodir_correspondance(xpos=0, ypos=0, z_bounds=[222.0595, 347.1291], compo_name="CPOVAN", dir_name="EDI_2G")
 
     elements, raw_elements = generate_macro_mesh(ref_mesh, ref_mesh, split_diag=True)
-    init_step.set_reactor_power(870e6)
+    init_step.set_reactor_power(870e6*16/240)
 
 
 def test_core_model_analysis(minicore_initialiser):
@@ -288,3 +315,26 @@ def test_neutronics_solve(minicore_initialiser):
     assert len(neutonics_solution.compo_dir_to_mix) == 2
     assert len(neutonics_solution.compo_dir_to_mix[('CPODOM', 'EDI_2G')]) == 160
     assert len(neutonics_solution.compo_dir_to_mix[('CPOVAN', 'EDI_2G')]) == 240 - 160
+
+def test_single_DOM_channel(DOM_channel_initialiser):
+
+
+    neutronics_step = NeutronicsSolve(DOM_channel_initialiser, "diffusion", "linear")
+    nz = len(DOM_channel_initialiser.meshz) - 1
+    neutronics_step.set_interpolation_parameter("TFuel", [1200.0]*nz)
+    neutronics_step.set_interpolation_parameter("TCool", [559.0]*nz)
+    neutronics_step.set_interpolation_parameter("DCool", [0.600]*nz)
+    neutronics_step.resolve_cpo_dir_to_mix()
+
+    scheme = DonjonCalculationScheme(name="test_scheme")
+    scheme.add_initialisation_step(DOM_channel_initialiser)
+    scheme.add_neutronics_step(neutronics_step)
+
+    init_proc = INIT(scheme)
+    assert init_proc.scheme.initialisation_step.nfuel == 40
+
+    neutronics_proc = NEUTRONICS(scheme)
+    neutronics_proc.build_RESINI_call()
+    neutronics_proc.build_NCR_call()
+
+    init_proc.write_to_c2m("tests/outputs", "IniDonjon_minicore")

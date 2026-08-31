@@ -250,15 +250,16 @@ def test_donjon_single_channel_model_INIT_procedure(single_channel_model_initial
     scheme.add_neutronics_step(neutronics_step)
 
     init_proc = INIT(scheme)
-    init_proc.build_GEO_call()
+    #init_proc.build_GEO_call()
     assert init_proc.scheme.initialisation_step.nfuel == 15
-    init_proc.build_MATEX_call()
-    init_proc.build_RESINI_call()
+    #init_proc.build_MATEX_call()
+    #init_proc.build_RESINI_call()
     assert init_proc.scheme.initialisation_step.nfuel == 15
 
     neutronics_proc = NEUTRONICS(scheme)
     neutronics_proc.build_RESINI_call()
     neutronics_proc.build_NCR_call()
+    init_proc.write_to_c2m("tests/outputs", "IniDonjon_single_channel")
 
 
 def test_donjon_minicore_model_INIT_procedure(minicore_model_initialiser):
@@ -268,9 +269,10 @@ def test_donjon_minicore_model_INIT_procedure(minicore_model_initialiser):
     scheme.add_initialisation_step(minicore_model_initialiser)
 
     init_proc = INIT(scheme)
-    init_proc.build_GEO_call()
+    #init_proc.build_GEO_call()
     assert init_proc.scheme.initialisation_step.nfuel == 16*15
-    init_proc.build_MATEX_call()
+    #init_proc.build_MATEX_call()
     assert init_proc.scheme.initialisation_step.nfuel == 16*15
-    init_proc.build_RESINI_call()
+    #init_proc.build_RESINI_call()
     assert init_proc.scheme.initialisation_step.nfuel == 16*15
+    init_proc.write_to_c2m("tests/outputs", "IniDonjon_minicore")

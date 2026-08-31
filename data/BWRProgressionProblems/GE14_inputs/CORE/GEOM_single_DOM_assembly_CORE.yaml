@@ -1,0 +1,10 @@
+CORE_GEOMETRY:
+  geometry_type: "cartesian"
+  reactor_type: "BWR"
+  core_2D_layout:
+    - ["single_GE14_assembly"]
+  assembly_axial_layouts:
+    single_GE14_assembly:
+      - axial_region: "DOM"
+        axial_bounds: [0.0, 347.1291]
+        assembly_geometry_file: "../ASSEMBLY/GEOM_GE14_DOM.yaml"

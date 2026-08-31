@@ -15,7 +15,8 @@ from .DonjonModel import CoreModel
 from .DonjonCalculationScheme import (
     ModelInitialisation,
     NeutronicsSolve,
-    ThermalHydraulicsSolve
+    ThermalHydraulicsSolve,
+    DonjonCalculationScheme,
 )
 
 from .helpers import associate_material_to_rod_ID, associate_temperatures_from_materials_yaml
@@ -39,5 +40,6 @@ __all__ = [
     "CoreModel",
     "ModelInitialisation",
     "NeutronicsSolve",
-    "ThermalHydraulicsSolve"
+    "ThermalHydraulicsSolve",
+    "DonjonCalculationScheme"
 ]
