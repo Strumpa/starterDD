@@ -377,7 +377,7 @@ class ModelInitialisation:
     def set_initial_axial_power_form(self, power_shape):
         """
         Initialize the axial power profile based on power_shape.
-        power_shape :: (str) | (list) | (np.ndarray) : 'cosine', 'sine', 'uniform' or a list/array of length I_z representing the power distribution along the axial dimension of the fuel assembly.
+        power_shape :: (str) | (list) | (np.ndarray) : 'cosine', 'sine', 'uniform' or a list/array of length nz representing the power distribution along the axial dimension of the fuel assembly.
         """
         profile = []
         nz_meshes = len(self.meshz) - 1
@@ -392,7 +392,7 @@ class ModelInitialisation:
             elif power_shape == 'uniform':
                 val = 1.0
             else: 
-                raise ValueError("Invalid power_distribution input. Must be 'cosine', 'sine', 'uniform', or a list/array of length I_z.")
+                raise ValueError("Invalid power_distribution input. Must be 'cosine', 'sine', 'uniform', or a list/array of length nz.")
             profile.append(val)
         
         self.axial_power_form = np.array(profile / np.mean(profile)) 
@@ -441,15 +441,21 @@ class NeutronicsSolve:
     interpolation_type (str) : type of interpolation to be used when evaluating the neutron cross sections 
     """
 
-    def __init__(self, initial_model, operator, interpolation_type):
+    def __init__(self, initial_model, operator, interpolation_type, discretization_type):
         self.model = initial_model
         self.operator = operator
         self.interpolation_type = interpolation_type
         self.parameter_values_dict = {}
+        self.read_from_lcm = {}
+        self.discretization_type = discretization_type
 
-    def set_interpolation_parameter(self, parameter_key, values):
+    def set_interpolation_parameter(self, parameter_key, values, from_lcm=False):
         """
         Set the values a parameter should take before interpolation of cross sections
+        parameter_key (str) : key to the parameter to set interpolation values from,
+        values : list of values to set the corresponding parameter to,
+        from_lcm (boolean) : default set to False -> set parameters to values stored in the list of values, if set to True : 
+            define a list of variables to recover data from a seperate   
         """
         nbChannels = self.model.number_fuel_channels
         nz = len(self.model.meshz) - 1
@@ -459,6 +465,7 @@ class NeutronicsSolve:
             raise ValueError (f"For local parameter {parameter_key} : Expected {nbChannels*nz} local parameters, got {len(values)}.")
 
         self.parameter_values_dict[parameter_key] = values
+        self.read_from_lcm[parameter_key] = from_lcm
 
     def resolve_cpo_dir_to_mix(self):
         """

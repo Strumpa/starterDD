@@ -92,7 +92,7 @@ def minicore_model_initialiser():
 
 @pytest.fixture
 def neutronics_step(single_channel_model_initialiser):
-    neutronics_step = NeutronicsSolve(single_channel_model_initialiser, "diffusion", "linear")
+    neutronics_step = NeutronicsSolve(single_channel_model_initialiser, "diffusion", "linear", ["MCFD", 1])
     nz = len(single_channel_model_initialiser.meshz) - 1
     neutronics_step.set_interpolation_parameter("TFuel", [1200.0]*nz)
     neutronics_step.set_interpolation_parameter("TCool", [559.0]*nz)

@@ -12,6 +12,18 @@ from .CLE2000 import (
     validate_varname, wrap_cle2000_line,
 )
 
+def format_cle2000_string_list(string_list, max_per_line=10):
+    lines = []
+    current_line = []
+    for val in string_list:
+        current_line.append(val)
+        if len(current_line) == max_per_line:
+            lines.append(" ".join(current_line))
+            current_line = []
+    if current_line:
+        lines.append(" ".join(current_line))
+    return "\n".join(lines)
+
 
 def format_cle2000_float_array(vector, max_per_line=10):
     """
@@ -77,11 +89,11 @@ class GEO:
         to support embedded GEO: calls 
         """
         if embedded_call:
-            call_option = f"  :::  GEO:"
+            call_option = f"  :::  GEO: "
         else:
-            call_option = f"{self.geometry_lcm_name} := GEO:"
+            call_option = f"{self.geometry_lcm_name} := GEO: ::"
         block = (
-            f"{call_option} :: CAR3D {self.nx} {self.ny} {self.nz}\n"
+            f"{call_option} CAR3D {self.nx} {self.ny} {self.nz}\n"
             f" X- {self.x_boundary_condition} X+ {self.x_boundary_condition} \n"
             f" Y- {self.y_boundary_condition} Y+ {self.y_boundary_condition} \n"
             f" Z- {self.z_boundary_condition} Z+ {self.z_boundary_condition} \n"
@@ -219,10 +231,11 @@ class RESINI:
                 "* Fuel map definition\n"
                 "*--------------------------------------------------------\n"
                 f"{self.fuel_map_name} {self.matex_name} := RESINI: {self.matex_name} ::\n"
+                "EDIT 0"
                 f"{geo_def}"
                 f"NXNAME {nx_names} \nNYNAME {ny_names}\n" 
-                f"NCOMB {self.model_initialiser.nfuel}\n"
-                "B-ZONE \n"
+                f"NCOMB {self.model_initialiser.number_fuel_channels}\n"
+                "B-ZONE"
                 f"{b_zones}\n"
                 f"{parameters_definition}\n"
                 "    BTYPE INST-BURN INST-BVAL CHAN 0.0\n"
@@ -307,13 +320,12 @@ class RESINI:
 
         b_zones_str = ""
         zone_index = 1
-        for idz in range(nz):
-            for idy in range(ny):
-                b_zones_str += "\n"
-                for idx in range(nx):
-                    if (idx, idy) in self.model_initialiser.fuel_channel_pairs:
-                        b_zones_str += f"{zone_index} "
-                        zone_index += 1
+        for idy in range(ny):
+            b_zones_str += "\n"
+            for idx in range(nx):
+                if (idx, idy) in self.model_initialiser.fuel_channel_pairs:
+                    b_zones_str += f"{zone_index} "
+                    zone_index += 1
 
         return b_zones_str
 
@@ -404,10 +416,10 @@ class NCR:
             cpo_lcm_name = compo_dir_pair[0]
             cpodir = compo_dir_pair[1]
             if updateLib:
-                ncr_call_block += f"{self.libname} := NCR: {self.fuelmap_name} {self.libname} {cpo_lcm_name} ::\n"
+                ncr_call_block += f"{self.libname} := NCR: {self.libname} {cpo_lcm_name} {self.fuelmap_name} ::\n"
                 ncr_call_block += "    EDIT 0 \n"
             else:
-                ncr_call_block += f"{self.libname} := NCR: {self.fuelmap_name} {cpo_lcm_name} ::\n"
+                ncr_call_block += f"{self.libname} := NCR: {cpo_lcm_name} {self.fuelmap_name} ::\n"
                 ncr_call_block += "    EDIT 0 \n"
                 ncr_call_block += f"    NMIX {self.initial_model.nfuel}"
 
@@ -431,8 +443,12 @@ class NCR:
             mix_definitions += f"    COMPO {compo_lcm} {compo_dir}\n"
             mix_definitions += f"    MIX {mix_idx}\n"
             for par_key in self.neutronics_model.parameter_values_dict.keys():
-                parameter_value = self.neutronics_model.parameter_values_dict[par_key][mix_idx-1]
-                mix_definitions += f"    SET '{par_key}' {parameter_value:5E}\n"
+                if self.neutronics_model.read_from_lcm[par_key] == False: 
+                    parameter_value = self.neutronics_model.parameter_values_dict[par_key][mix_idx-1]
+                    mix_definitions += f"    SET '{par_key}' {parameter_value:5E}\n"
+                else:
+                    parameter_value = f"{par_key[:2]}{mix_idx}"
+                    mix_definitions += f"    SET '{par_key}' <<{parameter_value}>>\n"
             mix_definitions += "    ENDMIX\n"
 
         return mix_definitions
@@ -627,6 +643,40 @@ class THM:
         lines.append(current.rstrip())
         return "\n".join(lines) + "\n"
 
+class TRIVAT:
+    """
+        Call to the TRIVAT: module for Finite Elements Analysis module.
+    """
+
+    def __init__(self, neutronics_sol_step, track_name="Track", geometry_name="Geom"):
+        """
+            Initialize a call to the the TRIVAT: module performing a Finite Elements analysis of the 
+
+        Args:
+            neutronics_sol_step (NeutronicsSolve): starterDD NeutronicsSolve object specifying the solver options for the FEM method to be used.
+            track_name (str): Name of the LCM variable to hold the tracking information.
+            geometry_name (str): Name of the LCM variable holding the geometry information to be tracked.
+            
+        """
+
+        self.neutronics_step = neutronics_sol_step
+        self.track_name = track_name
+        self.geometry_name = geometry_name
+        self.maxr = len(self.neutronics_step.model.meshx) * len(self.neutronics_step.model.meshy) * len(self.neutronics_step.model.meshz)
+         
+
+    def write_c2m(self):
+        """
+        Write a c2m call to the TRIVAT: module.
+        """
+
+        trivat_bloc = f"{self.track_name} := TRIVAT: {self.geometry_name} :: \n"
+        trivat_bloc += f"EDIT 1 MAXR {self.maxr} {self.neutronics_step.discretization_type[0]} {self.neutronics_step.discretization_type[1]}\n"
+        trivat_bloc += ";\n"
+        return trivat_bloc
+
+
+
 ######################################################################################################################################
 ##############################                         Procedure orchestrators :                           ###########################
 ######################################################################################################################################
@@ -648,13 +698,22 @@ class INIT:
         self.geometry_lcm_name = "Geom"
         self.matex_lcm_name = "Matex"
         self.fmap_lcm_name = "Fmap"
+        self.track_lcm_name = "Track"
         self.proc_name = proc_name
         self.case_name = case_name
 
-        self.geo_block = self.build_GEO_call()
-        self.matex_block = self.build_MATEX_call()
-        self.resini_block = self.build_RESINI_call()
-
+        if hasattr(self.scheme, "initialisation_step"):
+            self.geo_block = self.build_GEO_call()
+            self.matex_block = self.build_MATEX_call()
+            self.resini_block = self.build_RESINI_call()
+        else:
+            self.geo_block = None 
+            self.matex_block = None 
+            self.resini_block = None
+        if hasattr(self.scheme, "neutronics_step"):
+            self.trivat_block = self.build_TRIVAT_call()
+        else: 
+            self.trivat_block = None
 
         
 
@@ -684,6 +743,12 @@ class INIT:
         resini_block = resini_proc.write_c2m()
         return resini_block
 
+    def build_TRIVAT_call(self):
+        """Build a call to the TRIVAT: module"""
+        trivat_proc = TRIVAT(self.scheme.neutronics_step, self.track_lcm_name, self.geometry_lcm_name)
+        trivat_block = trivat_proc.write_c2m()
+        return trivat_block
+
     def build_initialisation_procedure(self):
         """build the body of the IniDonjon.c2m proceudre"""
         body = ""
@@ -705,11 +770,17 @@ class INIT:
             )
             body += self.resini_block
             body += "\n"
+        if self.trivat_block:
+            body += (
+                f"* Build tracking call for FEM analysis for {self.case_name}\n"
+            )
+            body += self.trivat_block
+            body += "\n"
         return body
 
     def write_to_c2m(self, path_to_procs, proc_name):
         """
-        Write the complete TRK sub-procedure to a ``.c2m`` file.
+        Write the complete Initialisation sub-procedure to a ``.c2m`` file.
         """
         from .CLE2000 import (
             CLE2000_MAX_LINE, CLE2000_MAX_VARNAME,
@@ -718,7 +789,7 @@ class INIT:
 
 
         # --- PARAMETER block ---
-        param_items = ["FMap", "Matex", "Cpo", "Track", "THData"]
+        param_items = ["Fmap", "Matex", "Cpo", "Track"]
         
         header = (
             f"* PROCEDURE {proc_name}.c2m : problem initialisation\n"
@@ -741,8 +812,19 @@ class INIT:
         
         param_block += "; ;\n"
 
+        param_block += "STRING name_compo ;\n"
+        param_block += ":: >>name_compo<< ;\n"
+
+
         # MODULE declaration
-        mod_block = "MODULE GEO: USPLIT: RESINI: END: ;\n"
+        mod_block = "MODULE GEO: USPLIT: RESINI: TRIVAT: END: ;\n"
+
+        # Local variables declaration
+        var_bloc = f"LINKED_LIST {self.geometry_lcm_name} ;\n"
+
+        # Initialise the compo lcm object : 
+        var_bloc += "SEQ_ASCII _COMPO :: FILE <<name_compo>> ;\n"
+        var_bloc += "Cpo := _COMPO ;\n"
 
         body = self.build_initialisation_procedure()
 
@@ -750,7 +832,7 @@ class INIT:
 
         content = (
             f"{header}{param_block}\n"
-            f"{mod_block}\n{body}{footer}"
+            f"{mod_block}\n{var_bloc}\n{body}{footer}"
         )
 
         if path_to_procs and not os.path.exists(path_to_procs):
@@ -778,13 +860,16 @@ class NEUTRONICS:
 
     def __init__(self, scheme, proc_name = "Neutronics", case_name = "Donjon_case"):
         self.scheme = scheme
+        self.proc_name = proc_name
+
+        self.build_NCR_call()
 
     def build_RESINI_call(self):
         """
         Build a call to the RESINI: module to update Fuel Map parameters
         """
         
-        resini_proc = RESINI(fuel_map_name="FMap", matex_name="Matex", model_initialiser=self.scheme.initialisation_step, model_updater=self.scheme.neutronics_step)
+        resini_proc = RESINI(fuel_map_name="Fmap", matex_name="Matex", model_initialiser=self.scheme.initialisation_step, model_updater=self.scheme.neutronics_step)
         resini_block = resini_proc.write_c2m()
         return resini_block
 
@@ -792,9 +877,135 @@ class NEUTRONICS:
         """
         Build a call to the NCR: interpolation module
         """
-        ncr_proc = NCR(libname="MicroF", fuelmap_name="FMap", initialModel= self.scheme.initialisation_step, neutronicsSolve=self.scheme.neutronics_step)
+        ncr_proc = NCR(libname="MicroF", fuelmap_name="Fmap", initialModel= self.scheme.initialisation_step, neutronicsSolve=self.scheme.neutronics_step)
         ncr_block = ncr_proc.write_c2m()
         return ncr_block
+
+    def format_var_definition_and_lcm_recovery(self, param_key):
+        """
+        Format the definition of variables stored in a LCM object with entry param_key
+        """
+        var_def = ""
+        var_grep = ""
+        var_root_name = param_key[:2]
+        model = self.scheme.initialisation_step
+        nbChannels = model.number_fuel_channels
+        nz = len(model.meshz) - 1
+        neutronics_solve = self.scheme.neutronics_step
+        interpolation_variables = model.interpolation_variables
+        if interpolation_variables[param_key][0] == "GLOBAL":
+            var_def += f"REAL {var_root_name} ;\n"
+            var_grep += f"GREP: {neutronics_solve.read_from_lcm[param_key][0]} :: GETVAL '{neutronics_solve.read_from_lcm[param_key][1]}' 1 >>{var_root_name}<< ;\n"
+        elif interpolation_variables[param_key][0] == "LOCAL":
+            for idx in range(nz * nbChannels):
+                var_def += f"REAL {var_root_name}{idx+1} ; "
+                if idx%5 == 0:
+                    var_def += "\n"
+                var_grep += f"GREP: {neutronics_solve.read_from_lcm[param_key][0]} :: GETVAL '{neutronics_solve.read_from_lcm[param_key][1]}' {idx+1} >>{var_root_name}{idx+1}<< ;\n"
+
+        return var_def, var_grep
+        
+    def build_neutronics_procedure(self):
+
+        proc_body = self.build_NCR_call()
+        proc_body += ("MacroF := MicroF :: STEP UP 'MACROLIB' ;\n"
+                    "Macro2 Matex := MACINI: Matex MacroF :: FUEL ;\n"
+                    "* Steady-state diffusion calculation\n"
+
+                    "System := TRIVAA: Macro2 Track ;\n"
+
+                    "IF iter 1 = THEN\n"
+                    "Flux := FLUD: System Track ::\n"
+                    "    EDIT 1 ADI 4 ACCE 5 3 ;\n"
+                    "ELSE\n"
+                    "Flux := FLUD: Flux System Track ::\n"
+                    "    EDIT 1 ;\n"
+                    "ENDIF ;\n"
+                    "System MacroF Macro2 := DELETE: System MacroF Macro2 ;\n"
+                    "GREP: Flux :: GETVAL 'K-EFFECTIVE' 1 >>keff<< ;\n"
+                    'ECHO "+++ Burnup= 0.0 Keff=" keff ;\n'
+                    "* Power distribution calculation\n"
+                    "Power Fmap := FLPOW: Fmap Flux Track Matex\n"
+                    "    :: EDIT 1 PTOT <<powi>> PRINT DISTR FLUX PRINT DISTR POWER ;\n"
+                    )
+        return proc_body
+
+    def write_to_c2m(self, path_to_procs, proc_name):
+            """
+            Write the complete neutronics solution sub-procedure to a ``.c2m`` file.
+            """
+            from .CLE2000 import (
+                CLE2000_MAX_LINE, CLE2000_MAX_VARNAME,
+                validate_varname, wrap_cle2000_line,
+            )
+    
+    
+            # --- PARAMETER block ---
+            param_items = ["Fmap", "Matex", "Flux", "Power", "Cpo", "Track", "THData"]
+            
+            header = (
+                f"* PROCEDURE {proc_name}.c2m : neutronics solution\n"
+                "* --------------------------------\n"
+                "* Procedure generated by starterDD\n"
+                "* --------------------------------\n"
+                "*    INPUT & OUTPUT PARAMETERS\n"
+                "* --------------------------------\n"
+            )
+    
+            # PARAMETER declaration
+            param_block = "PARAMETER"
+            for item in param_items:
+                param_block += f" {item}"
+            param_block += " ::\n"
+            # Linked-list declarations
+            param_block += f"::: LINKED_LIST"
+            for lcm_obj in param_items:
+                param_block += f" {lcm_obj} "
+            
+            param_block += "; ;\n"
+    
+            param_block += "INTEGER iter ;\n"
+            param_block += ":: >>iter<< ;\n"
+    
+    
+            # MODULE declaration
+            mod_block = "MODULE NCR: MACINI: TRIVAA: FLPOW: GREP: DELETE: END: ;\n"
+            if self.scheme.neutronics_step.operator == "diffusion":
+                mod_block += "MODULE FLUD: ;\n"
+            else:
+                raise ValueError(f"Transport operator {self.scheme.neutronics_step.operator} is not supported.")
+    
+            # Local variables declaration
+            var_bloc = "LINKED_LIST MacroF System Macro1 Macro2 MicroF ;\n"
+            var_bloc += "REAL keff ;\n"
+            var_bloc += f"REAL powi := {self.scheme.initialisation_step.reactor_power/1e6:.5E} ;\n"
+            for param_key in self.scheme.neutronics_step.read_from_lcm.keys():
+                if self.scheme.neutronics_step.read_from_lcm[param_key]:
+                    var_def_bloc, var_grep_bloc = self.format_var_definition_and_lcm_recovery(param_key)
+                    var_bloc += var_def_bloc
+                    var_bloc += "\n"
+                    var_bloc += var_grep_bloc
+    
+            body = self.build_neutronics_procedure()
+    
+            footer = "END: ;\n"
+    
+            content = (
+                f"{header}{param_block}\n"
+                f"{mod_block}\n{var_bloc}\n{body}{footer}"
+            )
+    
+            if path_to_procs and not os.path.exists(path_to_procs):
+                os.makedirs(path_to_procs)
+    
+            filepath = os.path.join(
+                path_to_procs, f"{proc_name}.c2m"
+            )
+            with open(filepath, 'w') as f:
+                f.write(content)
+    
+            print(f"[NEUTRONICS] Wrote procedure to {filepath}")
+            return filepath
 
 
 # -----------------------------------------------------------------------------------------------

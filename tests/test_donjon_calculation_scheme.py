@@ -300,7 +300,7 @@ def test_core_model_analysis(minicore_initialiser):
 
 
 def test_neutronics_solve(minicore_initialiser):
-    neutonics_solution = NeutronicsSolve(minicore_initialiser, "diffusion", "linear")
+    neutonics_solution = NeutronicsSolve(minicore_initialiser, "diffusion", "linear", ["MCFD", 1])
 
     assert neutonics_solution.interpolation_type == "linear"
     assert neutonics_solution.operator == "diffusion"
@@ -319,7 +319,7 @@ def test_neutronics_solve(minicore_initialiser):
 def test_single_DOM_channel(DOM_channel_initialiser):
 
 
-    neutronics_step = NeutronicsSolve(DOM_channel_initialiser, "diffusion", "linear")
+    neutronics_step = NeutronicsSolve(DOM_channel_initialiser, "diffusion", "linear", ["MCFD", 1])
     nz = len(DOM_channel_initialiser.meshz) - 1
     neutronics_step.set_interpolation_parameter("TFuel", [1200.0]*nz)
     neutronics_step.set_interpolation_parameter("TCool", [559.0]*nz)
