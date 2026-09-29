@@ -714,8 +714,15 @@ class INIT:
             self.trivat_block = self.build_TRIVAT_call()
         else: 
             self.trivat_block = None
+        if hasattr(self.scheme, "initialisation_step") and hasattr(self.scheme, "neutronics_step"):
+            self.resolve_compo_names()
 
-        
+    def resolve_compo_names(self):
+        self.compo_names = []
+        compos_dir_keys = self.scheme.neutronics_step.compo_dir_to_mix.keys()
+        for compo_dir_pair in compos_dir_keys:
+            cpo_lcm_name = compo_dir_pair[0]
+            self.compo_names.append(cpo_lcm_name)
 
     def build_GEO_call(self):
         """
@@ -729,7 +736,9 @@ class INIT:
         """
         Build a call to USPLIT: performing material indexation and producing a Matex lcm object.
         """
-        usplit_proc = USPLIT(geometry_name=self.geometry_lcm_name, matex_name=self.matex_lcm_name, model_initialisation=self.scheme.initialisation_step)
+        usplit_proc = USPLIT(geometry_name=self.geometry_lcm_name, 
+                             matex_name=self.matex_lcm_name, 
+                             model_initialisation=self.scheme.initialisation_step)
         usplit_block = usplit_proc.write_c2m()
         return usplit_block
 
@@ -737,15 +746,17 @@ class INIT:
         """
         Build a call to RESINI: 
         """
-        resini_proc = RESINI(fuel_map_name=self.fmap_lcm_name, matex_name=self.matex_lcm_name, 
-                             model_initialiser = self.scheme.initialisation_step, 
-                             )
+        resini_proc = RESINI(fuel_map_name=self.fmap_lcm_name, 
+                             matex_name=self.matex_lcm_name, 
+                             model_initialiser = self.scheme.initialisation_step, )
         resini_block = resini_proc.write_c2m()
         return resini_block
 
     def build_TRIVAT_call(self):
         """Build a call to the TRIVAT: module"""
-        trivat_proc = TRIVAT(self.scheme.neutronics_step, self.track_lcm_name, self.geometry_lcm_name)
+        trivat_proc = TRIVAT(self.scheme.neutronics_step, 
+                             self.track_lcm_name, 
+                             self.geometry_lcm_name)
         trivat_block = trivat_proc.write_c2m()
         return trivat_block
 
@@ -789,8 +800,12 @@ class INIT:
 
 
         # --- PARAMETER block ---
-        param_items = ["Fmap", "Matex", "Cpo", "Track"]
-        
+        param_items = ["Fmap", "Matex", "Track"]
+        if self.compo_names:
+            param_items.extend(self.compo_names)
+        else:
+            param_items.append("Cpo")
+
         header = (
             f"* PROCEDURE {proc_name}.c2m : problem initialisation\n"
             "* --------------------------------\n"
@@ -812,8 +827,13 @@ class INIT:
         
         param_block += "; ;\n"
 
-        param_block += "STRING name_compo ;\n"
-        param_block += ":: >>name_compo<< ;\n"
+        if self.compo_names:
+            for lcm_compo_name in self.compo_names:
+                param_block += f"STRING n{lcm_compo_name} ;\n"
+                param_block += f":: >>n{lcm_compo_name}<< ;\n"
+        else:
+            param_block += "STRING name_compo ;\n"
+            param_block += ":: >>name_compo<< ;\n"
 
 
         # MODULE declaration
@@ -823,8 +843,14 @@ class INIT:
         var_bloc = f"LINKED_LIST {self.geometry_lcm_name} ;\n"
 
         # Initialise the compo lcm object : 
-        var_bloc += "SEQ_ASCII _COMPO :: FILE <<name_compo>> ;\n"
-        var_bloc += "Cpo := _COMPO ;\n"
+        if self.compo_names:
+            for lcm_compo_name in self.compo_names:
+                var_bloc += f"SEQ_ASCII _C{lcm_compo_name} :: FILE <<n{lcm_compo_name}>> ;\n"
+            for lcm_compo_name in self.compo_names:
+                var_bloc += f"{lcm_compo_name} := _C{lcm_compo_name} ;\n"
+        else:
+            var_bloc += "SEQ_ASCII _COMPO :: FILE <<name_compo>> ;\n"
+            var_bloc += "Cpo := _COMPO ;\n"
 
         body = self.build_initialisation_procedure()
 
@@ -861,6 +887,7 @@ class NEUTRONICS:
     def __init__(self, scheme, proc_name = "Neutronics", case_name = "Donjon_case"):
         self.scheme = scheme
         self.proc_name = proc_name
+        self.case_name = case_name
 
         self.build_NCR_call()
 
@@ -941,10 +968,14 @@ class NEUTRONICS:
     
     
             # --- PARAMETER block ---
-            param_items = ["Fmap", "Matex", "Flux", "Power", "Cpo", "Track", "THData"]
+            param_items = ["Fmap", "Matex", "Flux", "Power", "Track", "THData"]
+
+            compos_dir_keys = self.scheme.neutronics_step.compo_dir_to_mix.keys()
+            for compo_dir_pair in compos_dir_keys:
+                param_items.append(compo_dir_pair[0]) # recover the compo lcm name and add it to the input parameters
             
             header = (
-                f"* PROCEDURE {proc_name}.c2m : neutronics solution\n"
+                f"* PROCEDURE {proc_name}.c2m : neutronics solution for {self.case_name}\n"
                 "* --------------------------------\n"
                 "* Procedure generated by starterDD\n"
                 "* --------------------------------\n"
