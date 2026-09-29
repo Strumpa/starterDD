@@ -6,6 +6,7 @@ This package provides tools for:
 - Dragon model definition (DragonModel)
 - Geometry analysis from TDT files (GeometryAnalysis)
 - Interface to Dragon&Donjon (InterfaceToDD)
+- Post treatment of lcm objects (PostTreatment)
 
 The package works in two modes:
 1. Standalone: Works without glow, uses abstract classes for Dragon model definition
@@ -18,6 +19,7 @@ from . import GeometryBuilder
 from . import DDModel
 from . import GeometryAnalysis
 from . import InterfaceToDD
+from . import PostTreatment
 
 # Re-export the glow availability flag
 from .GeometryBuilder import GLOW_AVAILABLE
@@ -29,5 +31,6 @@ __all__ = [
     "DDModel",
     "GeometryAnalysis",
     "InterfaceToDD",
+    "PostTreatment",
     "GLOW_AVAILABLE",
 ]

@@ -130,7 +130,7 @@ class DragonCase:
         # Config yamls — resolve each value
         self.config_yamls = {
             key: str(Path(val).resolve())
-            if not os.path.isabs(val)
+            if not isinstance(val, DragonCalculationScheme) and not os.path.isabs(val)
             else val
             for key, val in config_yamls.items()
         }
@@ -169,6 +169,11 @@ class DragonCase:
                     f"Missing key '{key}' in config_yamls. "
                     f"Expected keys: {expected}"
                 )
+            else:
+                if not(isinstance(self.config_yamls[key], str) or isinstance(self.config_yamls[key], DragonCalculationScheme)):
+                    raise ValueError(
+                        f"Key '{key}' must point to a string or a DragonCalculationScheme object."
+                    )
         self.mats_yaml = self.config_yamls["MATS"]
         self.geom_yaml = self.config_yamls["GEOM"]
         self.calc_scheme_yaml = self.config_yamls[
@@ -515,9 +520,12 @@ class DragonCase:
             self.draglib_name_to_alias.values()
         )[0]
         # 1. Load scheme
-        scheme = DragonCalculationScheme.from_yaml(
-            self.calc_scheme_yaml
-        )
+        if isinstance(self.calc_scheme_yaml, str):
+            scheme = DragonCalculationScheme.from_yaml(
+                self.calc_scheme_yaml
+            )
+        else:
+            scheme = self.calc_scheme_yaml
         self.scheme = scheme
 
         # 2. Build assembly model

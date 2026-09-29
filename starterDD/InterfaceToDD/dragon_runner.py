@@ -16,7 +16,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from ..DDModel.DragonCalculationScheme import EditionBetweenLevelsStep
+from ..DDModel.DragonCalculationScheme import EditionBetweenLevelsStep, DragonCalculationScheme
 
 import yaml
 
@@ -649,12 +649,13 @@ class DragonRunner:
         """
         inputs_dir = os.path.join(run_dir, "inputs")
         for key, yaml_path in self.case.config_yamls.items():
-            src = os.path.abspath(yaml_path)
-            if os.path.isfile(src):
-                dst = os.path.join(
-                    inputs_dir, os.path.basename(src)
-                )
-                shutil.copy2(src, dst)
+            if not isinstance(yaml_path, DragonCalculationScheme):
+                src = os.path.abspath(yaml_path)
+                if os.path.isfile(src):
+                    dst = os.path.join(
+                        inputs_dir, os.path.basename(src)
+                    )
+                    shutil.copy2(src, dst)
 
     # -----------------------------------------------------------
     # Run manifest
@@ -684,6 +685,7 @@ class DragonRunner:
             "config_yamls": {
                 key: os.path.basename(path)
                 for key, path in self.case.config_yamls.items()
+                if not isinstance(path, DragonCalculationScheme)
             },
             "num_threads": self.num_threads,
             "execution": None,  # filled after run
