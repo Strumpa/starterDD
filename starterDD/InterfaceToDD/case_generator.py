@@ -991,7 +991,7 @@ class DragonCase:
             proc.add_body_line(
                 wrap_cle2000_line(flu_line)
             )
-            proc.add_body_line("    EDIT 1 TYPE K")
+            proc.add_body_line("    EDIT 1 TYPE K B1 SIGS")
             proc.add_body_line(";")
 
             # GREP keff
@@ -1428,7 +1428,7 @@ class DragonCase:
                 )
             )
             proc.add_body_line(
-                f"{inner_indent}    EDIT 1 TYPE K"
+                f"{inner_indent}    EDIT 1 TYPE K B1 SIGS"
             )
             proc.add_body_line(f"{inner_indent};")
 
@@ -1726,7 +1726,7 @@ class DragonCase:
                 f"FLUXL1 := FLU: SYS {flux_level1_library} {l1_trk} {l1_trkfil} ::"
             )
         )
-        proc.add_body_line("    EDIT 1 TYPE K")
+        proc.add_body_line("    EDIT 1 TYPE K B1 SIGS")
         proc.add_body_line(";")
         proc.add_body_line(
             wrap_cle2000_line(
@@ -1805,7 +1805,7 @@ class DragonCase:
                 f"{l2_trk} {l2_trkfil} ::"
             )
         )
-        proc.add_body_line("    EDIT 1 TYPE K")
+        proc.add_body_line("    EDIT 1 TYPE K B1 SIGS")
         proc.add_body_line(";")
         proc.add_body_line(
             wrap_cle2000_line(
@@ -2138,7 +2138,7 @@ class DragonCase:
                 f"{l1_trk} {l1_trkfil} ::"
             )
         )
-        proc.add_body_line(f"{inner_indent}    EDIT 1 TYPE K")
+        proc.add_body_line(f"{inner_indent}    EDIT 1 TYPE K B1 SIGS")
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line(
             wrap_cle2000_line(
@@ -2237,7 +2237,7 @@ class DragonCase:
                 f"{l2_trk} {l2_trkfil} ::"
             )
         )
-        proc.add_body_line(f"{inner_indent}    EDIT 1 TYPE K")
+        proc.add_body_line(f"{inner_indent}    EDIT 1 TYPE K B1 SIGS")
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line(
             wrap_cle2000_line(
