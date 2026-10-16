@@ -123,7 +123,7 @@ class GEO:
                 for i in range(self.nx):
                     unique_index = self.initModel._get_fuel_index_from_ijk(i,j,k-1)
                     lines.append(f"{unique_index}")
-                    if unique_index != 0:
+                    if unique_index != 0 and unique_index not in self.initModel.fuel_mixtures:
                         self.initModel._add_fuel_mix_index(unique_index)
         else: 
             raise ValueError(f"This type of radial homogenisation option is not implemented yet. Expected 'by_assembly', got {self.radial_homogenisation_option}")

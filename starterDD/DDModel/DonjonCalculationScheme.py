@@ -271,7 +271,7 @@ class ModelInitialisation:
                         mapping[(i, j, k)] = 0
                     else:
                         mapping[(i, j, k)] = m
-                        m += 1
+            m += 1
         self.fuel_index_mapping = mapping
 
 
