@@ -33,7 +33,7 @@ from starterDD.DDModel.DragonCalculationScheme import (
     DEFAULT_BRANCH_LOOP_ORDER,
 )
 from starterDD.InterfaceToDD.dragon_module_calls import (
-    COMPO, EDI_COMPO, EDI,
+    COMPO, EDI_COMPO, EDI, ASM, FLU,
 )
 from conftest import (
     GE14_COMPOSITIONS_YAML,
@@ -43,6 +43,10 @@ from conftest import (
     GE14_CALC_BRANCHES_YAML,
     GE14_CALC_OUTPUTS_YAML,
     GE14_TDT_DIR,
+    AT10_4x4_COMPOSITIONS_YAML,
+    AT10_4x4_GEOMETRY_YAML,
+    AT10_4x4_CALC_SCHEME_2L_SPLIT_YAML,
+    AT10_TDT_DIR,
 )
 
 
@@ -1007,3 +1011,196 @@ def test_line_length_constraint_all_files(tmp_path):
                     f"{key} line {i} exceeds {CLE2000_MAX_LINE}: "
                     f"{stripped!r}"
                 )
+
+
+# =========================================================
+# ASM: / FLU: call generation and leakage options
+# =========================================================
+
+def _flux_step(spatial_method="IC", **leak):
+    kw = {}
+    if spatial_method == "MOC":
+        kw = dict(tracking="TSPC", polar_angles_quadrature="GAUS",
+                  number_of_polar_angles=4)
+    return CalculationStep(name="FLUX", step_type="flux",
+                           spatial_method=spatial_method, **kw, **leak)
+
+
+@pytest.mark.parametrize("method,keyword", [
+    ("CP", "PIJ"), ("IC", "ARM"), ("MOC", "ARM"),
+])
+def test_asm_call_solution_keyword(method, keyword):
+    call = ASM(_flux_step(method), "LIB", "TRK", "TRKFIL").build_call()
+    assert call.splitlines() == [
+        "SYS := ASM: LIB TRK TRKFIL ::",
+        f"    EDIT 1 {keyword}",
+        ";",
+    ]
+
+
+@pytest.mark.parametrize("leak,expected", [
+    ({}, "TYPE K"),
+    ({"leakage_model": "B1"}, "TYPE K B1"),
+    ({"leakage_model": "B1", "leakage_correction": "SIGS"}, "TYPE K B1 SIGS"),
+])
+def test_flu_type_line(leak, expected):
+    flu = FLU(_flux_step(**leak), "FLUX", "LIB", "TRK", "TRKFIL")
+    assert flu.build_type_line() == expected
+    assert flu.build_call().splitlines() == [
+        "FLUX := FLU: SYS LIB TRK TRKFIL ::",
+        f"    EDIT 1 {expected}",
+        ";",
+    ]
+
+
+def _generate_x2m(tmp_path, case_name, mats, geom, calc_yaml, tdt_dir,
+                  alias, leak_on_last_flux=None, with_branches=False):
+    scheme = DragonCalculationScheme.from_yaml(calc_yaml)
+    # Force the branch / no-branch builder independently of the YAML content
+    scheme.branches = (
+        DragonCalculationScheme.from_yaml(GE14_CALC_SCHEME_1L_YAML).branches
+        if with_branches else []
+    )
+    if leak_on_last_flux:
+        last = scheme.get_flux_steps()[-1]
+        last.leakage_model, last.leakage_correction = leak_on_last_flux
+    case = DragonCase(
+        case_name=case_name, call_glow=False,
+        draglib_name_to_alias=alias,
+        config_yamls={"MATS": mats, "GEOM": geom, "CALC_SCHEME": scheme},
+        output_path=str(tmp_path), tdt_path=tdt_dir,
+    )
+    with open(case.generate_cle2000_procedures()["x2m"]) as f:
+        return f.read()
+
+
+def _ge14_1L_x2m(tmp_path, **kw):
+    return _generate_x2m(
+        tmp_path, "GE14_DOM", GE14_COMPOSITIONS_YAML, GE14_DOM_GEOMETRY_YAML,
+        GE14_CALC_SCHEME_1L_YAML, GE14_TDT_DIR,
+        {"draglibendfb8r1SHEM295": "endfb8r1_295"}, **kw)
+
+
+def _at10_2L_x2m(tmp_path, **kw):
+    return _generate_x2m(
+        tmp_path, "AT10_4x4_mix_splitting", AT10_4x4_COMPOSITIONS_YAML,
+        AT10_4x4_GEOMETRY_YAML, AT10_4x4_CALC_SCHEME_2L_SPLIT_YAML,
+        AT10_TDT_DIR, {"dummy": "dummy_alias"}, **kw)
+
+
+@pytest.mark.parametrize("with_branches", [False, True])
+def test_1L_default_is_type_k_and_kinf(tmp_path, with_branches):
+    x2m = _ge14_1L_x2m(tmp_path, with_branches=with_branches)
+    flu_opts = [l.strip() for l in x2m.splitlines() if "TYPE K" in l]
+    assert flu_opts == ["EDIT 1 TYPE K"]
+    assert "B1" not in x2m
+    assert "K-EFFECTIVE" not in x2m and "keff" not in x2m
+    assert "GETVAL 'K-INFINITY' 1 1 1 >>kinf<<" in x2m
+    assert "REAL kinf" in x2m
+
+
+@pytest.mark.parametrize("with_branches", [False, True])
+def test_1L_b1_sigs(tmp_path, with_branches):
+    x2m = _ge14_1L_x2m(tmp_path, with_branches=with_branches,
+                       leak_on_last_flux=("B1", "SIGS"))
+    assert "EDIT 1 TYPE K B1 SIGS" in x2m
+
+
+@pytest.mark.parametrize("with_branches", [False, True])
+def test_2L_per_level_leakage_and_arg_order(tmp_path, with_branches):
+    """L1 stays plain TYPE K when B1 SIGS is set on L2 only; every FLU:
+    and ASM: call uses the same argument / keyword order."""
+    x2m = _at10_2L_x2m(tmp_path, with_branches=with_branches,
+                       leak_on_last_flux=("B1", "SIGS"))
+    flu_opts = [l.strip() for l in x2m.splitlines() if "TYPE K" in l]
+    assert flu_opts == ["EDIT 1 TYPE K", "EDIT 1 TYPE K B1 SIGS"]
+    for kinf in ("kinfL1", "kinfL2"):
+        assert f"REAL {kinf}" in x2m
+        assert f"'K-INFINITY' 1 1 1 >>{kinf}<<" in x2m
+    flu_lines = [l.strip() for l in x2m.splitlines() if ":= FLU:" in l]
+    assert len(flu_lines) == 2
+    assert all(" := FLU: SYS " in l for l in flu_lines)
+    asm_opts = [l.strip() for l in x2m.splitlines()
+                if l.strip() in ("EDIT 1 ARM", "EDIT 1 PIJ",
+                                 "ARM EDIT 1", "PIJ EDIT 1")]
+    assert asm_opts and all(o.startswith("EDIT 1") for o in asm_opts)
+
+
+# =========================================================
+# MIXEQ library selection and per-statepoint cleanup
+# =========================================================
+
+def test_find_mixeq_not_reset_by_later_entries():
+    """Regression: the old lookup loop overwrote a match with the default
+    library on later non-matching entries."""
+    procs = [
+        ("MIXEQ_SSH_to", "p1", "SSH", "FLUXL1"),
+        ("MIXEQ_FLUXL1", "p2", "FLUXL1", "FLUXL2"),
+    ]
+    assert DragonCase._find_mixeq(procs, "SSH", "FLUXL1") == "MIXEQ_SSH_to"
+    assert DragonCase._find_mixeq(procs, "FLUXL1", "FLUXL2") == "MIXEQ_FLUXL1"
+    assert DragonCase._find_mixeq(procs, "SSH", "FLUXL2") is None
+    assert DragonCase._find_mixeq([], "SSH", "FLUXL1") is None
+
+
+def test_2L_rejects_ssh_to_l1_strategy_change(tmp_path):
+    """2-level schemes with SSH and L1 numbering strategies that differ
+    are rejected before any file is written."""
+    scheme = DragonCalculationScheme.from_yaml(
+        AT10_4x4_CALC_SCHEME_2L_SPLIT_YAML)
+    scheme.get_self_shielding_steps()[0].mix_numbering_strategy = "by_pin"
+    case = DragonCase(
+        case_name="AT10_4x4_mix_splitting", call_glow=False,
+        draglib_name_to_alias={"dummy": "dummy_alias"},
+        config_yamls={"MATS": AT10_4x4_COMPOSITIONS_YAML,
+                      "GEOM": AT10_4x4_GEOMETRY_YAML,
+                      "CALC_SCHEME": scheme},
+        output_path=str(tmp_path), tdt_path=AT10_TDT_DIR,
+    )
+    with pytest.raises(NotImplementedError, match="mix_numbering_strategy"):
+        case.generate_cle2000_procedures()
+    assert os.listdir(tmp_path) == []
+
+
+def _delete_targets(x2m):
+    """Return the set of object names in the library DELETE: call."""
+    flat = " ".join(l.strip() for l in x2m.splitlines())
+    for stmt in flat.split(";"):
+        if "DELETE:" in stmt and "LIBRARY" in stmt.split("DELETE:")[1]:
+            return set(stmt.split("DELETE:")[1].split())
+    return set()
+
+
+@pytest.mark.parametrize("with_branches", [False, True])
+def test_2L_split_mixeq_l1_to_l2(tmp_path, with_branches):
+    x2m = _at10_2L_x2m(tmp_path, with_branches=with_branches)
+    assert "LIBEQL2 := MIXEQ_FLUXL1 LIBEQL1 ;" in x2m
+    assert "SYS := ASM: LIBRARY2 TRKFLUXL1" in x2m
+    assert "SYS := ASM: LIBEQL2 TRKFLUXL2" in x2m
+    assert "FLUXL1 LIBRARY2 TRKFLUXL1" in x2m      # EDI condensation input
+    if with_branches:
+        assert _delete_targets(x2m) == {
+            "LIBRARY", "LIBRARY2", "LIBEQL1", "LIBEQL2"}
+
+
+def test_1L_mixeq_with_branches_cleanup(tmp_path):
+    """1-level SSH(by_material) → FLUX(by_pin): the flux step uses LIBEQ
+    and every library created in the loop body is deleted."""
+    scheme = DragonCalculationScheme.from_yaml(
+        AT10_4x4_CALC_SCHEME_2L_SPLIT_YAML)
+    scheme.steps = [s for s in scheme.steps if s.name in ("SSH", "FLUXL2")]
+    scheme.branches = DragonCalculationScheme.from_yaml(
+        GE14_CALC_SCHEME_1L_YAML).branches
+    case = DragonCase(
+        case_name="AT10_4x4_mix_splitting", call_glow=False,
+        draglib_name_to_alias={"dummy": "dummy_alias"},
+        config_yamls={"MATS": AT10_4x4_COMPOSITIONS_YAML,
+                      "GEOM": AT10_4x4_GEOMETRY_YAML,
+                      "CALC_SCHEME": scheme},
+        output_path=str(tmp_path), tdt_path=AT10_TDT_DIR,
+    )
+    with open(case.generate_cle2000_procedures()["x2m"]) as f:
+        x2m = f.read()
+    assert "LIBEQ := MIXEQ_SSH_to LIBRARY2 ;" in x2m
+    assert "SYS := ASM: LIBEQ TRKFLUXL2" in x2m
+    assert _delete_targets(x2m) == {"LIBRARY", "LIBRARY2", "LIBEQ"}

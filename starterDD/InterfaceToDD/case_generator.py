@@ -14,7 +14,10 @@ from .CLE2000 import (
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-from .dragon_module_calls import LIB, EDI_COMPO, TRK, EDI_condensation, SPH_correction, MIXEQ
+from .dragon_module_calls import (
+    LIB, EDI_COMPO, TRK, EDI_condensation, SPH_correction, MIXEQ,
+    ASM, FLU, solution_keyword,
+)
 from ..DDModel.DragonCalculationScheme import (
     DragonCalculationScheme,
     BRANCH_TYPE_TO_PARA_NAME,
@@ -380,6 +383,38 @@ class DragonCase:
 
         return mixeq_procedures
 
+    @staticmethod
+    def _check_supported_mixeq_transitions(scheme):
+        """Reject numbering-strategy transitions the x2m builders cannot
+        handle, before any file is generated.
+
+        In 2-level schemes, only a MIXEQ between the first and second
+        flux levels is supported: the self-shielding step and the first
+        flux level must share the same ``mix_numbering_strategy``.  An
+        SSH → L1 MIXEQ would write its output into the same library name
+        as the L1 → coarse EDI condensation (``LIBEQL1``) and the
+        corresponding L1 → L2 correspondence table has not been validated.
+
+        Raises
+        ------
+        NotImplementedError
+            If a 2-level scheme changes strategy between SSH and L1.
+        """
+        if not scheme.is_two_level_scheme():
+            return
+        ssh_step = scheme.get_self_shielding_steps()[0]
+        l1_step = scheme.get_flux_steps()[0]
+        if ssh_step.mix_numbering_strategy != l1_step.mix_numbering_strategy:
+            raise NotImplementedError(
+                f"2-level scheme '{scheme.name}': the self-shielding step "
+                f"'{ssh_step.name}' ({ssh_step.mix_numbering_strategy}) and "
+                f"the first flux level '{l1_step.name}' "
+                f"({l1_step.mix_numbering_strategy}) use different "
+                f"mix_numbering_strategy values. Only SSH and L1 sharing "
+                f"the same strategy is supported, with a MIXEQ between "
+                f"the L1 and L2 flux levels only."
+            )
+
     def _validate_mixeq_generation(self, scheme, assembly):
         """
         Validate that MIXEQ generation prerequisites are met.
@@ -527,6 +562,7 @@ class DragonCase:
         else:
             scheme = self.calc_scheme_yaml
         self.scheme = scheme
+        self._check_supported_mixeq_transitions(scheme)
 
         # 2. Build assembly model
         assembly, compositions = self._build_assembly_model()
@@ -791,6 +827,107 @@ class DragonCase:
         return result_dict
 
     # -----------------------------------------------------------
+    # Shared x2m emission helpers
+    # -----------------------------------------------------------
+
+    @staticmethod
+    def _indent_block(block, indent):
+        """Prefix every non-empty line of ``block`` with ``indent``."""
+        return "".join(
+            f"{indent}{line}\n" if line.strip() else "\n"
+            for line in block.rstrip("\n").split("\n")
+        )
+
+    def _emit_asm_flu(self, proc, step, lib, trk, trkfil, flux_name,
+                      kinf_var, indent="", title="ASM: + FLU:",
+                      banner=True, echo_tag=""):
+        """Emit ASM: → FLU: → GREP K-INFINITY → ECHO for a flux step.
+
+        Parameters
+        ----------
+        proc : main_procedure
+            Procedure receiving the body lines.
+        step : CalculationStep
+            Flux step providing spatial method and leakage options.
+        lib, trk, trkfil : str
+            CLE-2000 names of the library, tracking and tracking file.
+        flux_name : str
+            CLE-2000 name of the FLUX object created by ``FLU:``.
+        kinf_var : str
+            CLE-2000 REAL variable receiving ``K-INFINITY`` (must be
+            declared by the caller).
+        indent : str
+            Indentation prefix (used inside branch WHILE loops).
+        title : str
+            Comment heading the block.
+        banner : bool
+            Use a 3-line ``****`` banner (True) or a single comment line.
+        echo_tag : str
+            Optional tag inserted in the ECHO (e.g. ``"L1 "``).
+        """
+        if banner:
+            proc.add_body_line(f"{indent}" + "*" * 50)
+            proc.add_body_line(f"{indent}* {title}")
+            proc.add_body_line(f"{indent}" + "*" * 50)
+        else:
+            proc.add_body_line(f"{indent}* {title}")
+
+        asm = ASM(step, lib, trk, trkfil)
+        for line in asm.build_call().splitlines():
+            proc.add_body_line(wrap_cle2000_line(f"{indent}{line}"))
+        proc.add_body_line("")
+
+        flu = FLU(step, flux_name, lib, trk, trkfil)
+        for line in flu.build_call().splitlines():
+            proc.add_body_line(wrap_cle2000_line(f"{indent}{line}"))
+
+        proc.add_body_line(
+            wrap_cle2000_line(
+                f"{indent}GREP: {flux_name} :: GETVAL "
+                f"'K-INFINITY' 1 1 1 >>{kinf_var}<< ;"
+            )
+        )
+        proc.add_body_line(
+            f'{indent}ECHO "{self.case_name} {echo_tag}kinf=" {kinf_var} ;'
+        )
+        proc.add_body_line("")
+
+    @staticmethod
+    def _find_mixeq(mixeq_procedures, from_step, to_step):
+        """Return the MIXEQ procedure name for ``from_step → to_step``,
+        or ``None`` if no numbering-strategy transition occurs there."""
+        for proc_name, _, current, nxt in mixeq_procedures or []:
+            if current == from_step and nxt == to_step:
+                return proc_name
+        return None
+
+    def _emit_mixeq(self, proc, mixeq_procedures, from_step, to_step,
+                    in_lib, out_lib, default_lib, indent=""):
+        """Emit the MIXEQ call for ``from_step → to_step`` if one exists.
+
+        Returns the library to be used by the next step: ``out_lib`` when
+        a MIXEQ call was emitted, ``default_lib`` otherwise.
+        """
+        proc_name = self._find_mixeq(mixeq_procedures, from_step, to_step)
+        if proc_name is None:
+            return default_lib
+        proc.add_body_line(f"{indent}* MIXEQ: {from_step} → {to_step}")
+        proc.add_body_line(
+            wrap_cle2000_line(f"{indent}{out_lib} := {proc_name} {in_lib} ;")
+        )
+        proc.add_body_line("")
+        return out_lib
+
+    @staticmethod
+    def _emit_delete(proc, objects, indent=""):
+        """Emit a single ``DELETE:`` call over ``objects`` (order kept,
+        duplicates removed)."""
+        names = " ".join(dict.fromkeys(objects))
+        proc.add_body_line(
+            wrap_cle2000_line(f"{indent}{names} := DELETE: {names} ;")
+        )
+
+    # -----------------------------------------------------------
     # Main x2m builder (single statepoint, backward compat)
     # -----------------------------------------------------------
 
@@ -934,28 +1071,16 @@ class DragonCase:
             wrap_cle2000_line(uss_line)
         )
         proc.add_body_line("   PASS 3")
-        asm_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
+        asm_keyword = solution_keyword(ssh_step.spatial_method)
         proc.add_body_line(f"    EDIT 1 {asm_keyword}")
         proc.add_body_line(";")
         proc.add_body_line("")
 
-        if mixeq_procedures:
-            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
-                if current_step_name == ssh_step.name and next_step_name == scheme.get_flux_steps()[0].name:
-                    proc.add_body_line(
-                        f"* MIXEQ: {current_step_name} → {next_step_name}"
-                    )
-                    mixeq_call = (
-                        f"LIBEQ := {proc_name} LIBRARY2 ;"
-                    )
-                    proc.add_body_line(
-                        wrap_cle2000_line(mixeq_call)
-                    )
-                    flux_library = "LIBEQ"
-                else:
-                    flux_library = "LIBRARY2"
-        else:
-            flux_library = "LIBRARY2"
+        flux_library = self._emit_mixeq(
+            proc, mixeq_procedures,
+            ssh_step.name, scheme.get_flux_steps()[0].name,
+            in_lib="LIBRARY2", out_lib="LIBEQ", default_lib="LIBRARY2",
+        )
 
         # --- ASM + FLU on flux step ---
         flux_steps = scheme.get_flux_steps()
@@ -963,52 +1088,12 @@ class DragonCase:
             flux_step = flux_steps[0]
             flux_trk, flux_trkfil = track_names[-1]
 
-            proc.add_body_line(
-                "*" * 50
+            proc.add_variable("kinf", "REAL")
+            self._emit_asm_flu(
+                proc, flux_step, flux_library, flux_trk, flux_trkfil,
+                flux_name="FLUX", kinf_var="kinf",
+                title="ASM: + FLU: flux calculation",
             )
-            proc.add_body_line(
-                "* ASM: + FLU: flux calculation"
-            )
-            proc.add_body_line(
-                "*" * 50
-            )
-            asm_line = (
-                f"SYS := ASM: {flux_library} "
-                f"{flux_trk} {flux_trkfil} ::"
-            )
-            proc.add_body_line(
-                wrap_cle2000_line(asm_line)
-            )
-            asm_keyword = "PIJ" if flux_step.spatial_method == "CP" else "ARM"
-            proc.add_body_line(f"    EDIT 1 {asm_keyword}")
-            proc.add_body_line(";")
-            proc.add_body_line("")
-
-            flu_line = (
-                f"FLUX := FLU: SYS {flux_library} "
-                f"{flux_trk} {flux_trkfil} ::"
-            )
-            proc.add_body_line(
-                wrap_cle2000_line(flu_line)
-            )
-            proc.add_body_line("    EDIT 1 TYPE K B1 SIGS")
-            proc.add_body_line(";")
-
-            # GREP keff
-            keff_var = "keff"
-            validate_varname(keff_var)
-            proc.add_variable(keff_var, "REAL")
-            proc.add_body_line(
-                wrap_cle2000_line(
-                    "GREP: FLUX :: GETVAL "
-                    "'K-EFFECTIVE' 1 1 1 "
-                    f">>keff<< ;"
-                )
-            )
-            proc.add_body_line(
-                f'ECHO "{self.case_name} keff=" keff ;'
-            )
-            proc.add_body_line("")
 
             # --- EDIR sub-procedure call ---
             proc.add_body_line(
@@ -1130,8 +1215,8 @@ class DragonCase:
             proc.add_variable("N_H", "REAL")
             proc.add_variable("N_O", "REAL")
 
-        # keff
-        proc.add_variable("keff", "REAL")
+        # kinf
+        proc.add_variable("kinf", "REAL")
 
         # --- TDT file SEQ_ASCII imports ---
         tdt_map = trk.get_tdt_file_mapping()
@@ -1365,86 +1450,31 @@ class DragonCase:
                 f"{inner_indent}{uss_line}"
             )
         )
-        ssh_asm_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
+        ssh_asm_keyword = solution_keyword(ssh_step.spatial_method)
         proc.add_body_line(
             f"{inner_indent}    EDIT 1 {ssh_asm_keyword}"
         )
-        proc.add_body_line("    PASS 3")
+        proc.add_body_line(f"{inner_indent}    PASS 3")
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line("\n")
 
-        if mixeq_procedures:
-            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
-                if current_step_name == ssh_step.name and next_step_name == scheme.get_flux_steps()[0].name:
-                    proc.add_body_line(
-                        f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
-                    )
-                    mixeq_call = (
-                        f"LIBEQ := {proc_name} LIBRARY2 ;"
-                    )
-                    proc.add_body_line(
-                        wrap_cle2000_line(
-                            f"{inner_indent}{mixeq_call}"
-                        )
-                    )
-                    proc.add_body_line("")
-                    flux_library = "LIBEQ"
-                else:
-                    flux_library = "LIBRARY2"
-        else:
-            flux_library = "LIBRARY2"
+        flux_library = self._emit_mixeq(
+            proc, mixeq_procedures,
+            ssh_step.name, scheme.get_flux_steps()[0].name,
+            in_lib="LIBRARY2", out_lib="LIBEQ", default_lib="LIBRARY2",
+            indent=inner_indent,
+        )
 
         # --- ASM + FLU on flux step ---
         flux_steps = scheme.get_flux_steps()
         if flux_steps:
             flux_trk, flux_trkfil = track_names[-1]
 
-            proc.add_body_line(
-                f"{inner_indent}* ASM: + FLU:"
+            self._emit_asm_flu(
+                proc, flux_steps[0], flux_library, flux_trk, flux_trkfil,
+                flux_name="FLUX", kinf_var="kinf", indent=inner_indent,
+                banner=False,
             )
-            asm_line = (
-                f"SYS := ASM: {flux_library} "
-                f"{flux_trk} {flux_trkfil} ::"
-            )
-            proc.add_body_line(
-                wrap_cle2000_line(
-                    f"{inner_indent}{asm_line}"
-                )
-            )
-            asm_keyword = "PIJ" if flux_steps[0].spatial_method == "CP" else "ARM"
-            proc.add_body_line(
-                f"{inner_indent}    EDIT 1 {asm_keyword}"
-            )
-            proc.add_body_line(f"{inner_indent};")
-            proc.add_body_line("")
-
-            flu_line = (
-                f"FLUX := FLU: SYS {flux_library} "
-                f"{flux_trk} {flux_trkfil} ::"
-            )
-            proc.add_body_line(
-                wrap_cle2000_line(
-                    f"{inner_indent}{flu_line}"
-                )
-            )
-            proc.add_body_line(
-                f"{inner_indent}    EDIT 1 TYPE K B1 SIGS"
-            )
-            proc.add_body_line(f"{inner_indent};")
-
-            # GREP keff
-            proc.add_body_line(
-                wrap_cle2000_line(
-                    f"{inner_indent}GREP: FLUX :: GETVAL "
-                    f"'K-EFFECTIVE' 1 1 1 "
-                    f">>keff<< ;"
-                )
-            )
-            proc.add_body_line(
-                f'{inner_indent}ECHO '
-                f'"{self.case_name} keff=" keff ;'
-            )
-            proc.add_body_line("")
 
             # --- EDIR sub-procedure call ---
             proc.add_body_line(
@@ -1472,11 +1502,11 @@ class DragonCase:
             proc.add_body_line(
                 f"{inner_indent}* Cleanup"
             )
-            proc.add_body_line(
-                wrap_cle2000_line(
-                    f"{inner_indent}LIBRARY {flux_library} := "
-                    f"DELETE: LIBRARY {flux_library} ;"
-                )
+            # Delete every library created in the loop body, so that
+            # the next statepoint can re-create them
+            self._emit_delete(
+                proc, ["LIBRARY", "LIBRARY2", flux_library],
+                indent=inner_indent,
             )
             proc.add_body_line(
                 f"{inner_indent}FLUX := DELETE: FLUX ;"
@@ -1614,8 +1644,8 @@ class DragonCase:
         proc.add_variable("name_compo", "STRING",
                           f"_CPO_{self.case_name}")
         proc.add_variable("Draglib", "STRING", draglib_alias)
-        proc.add_variable("keffL1", "REAL")
-        proc.add_variable("keffL2", "REAL")
+        proc.add_variable("kinfL1", "REAL")
+        proc.add_variable("kinfL2", "REAL")
 
         # Temperature variables
         temps = self._extract_cle2000_temperatures()
@@ -1673,7 +1703,7 @@ class DragonCase:
         proc.add_body_line("")
 
         # --- USS call (SSH tracking) ---
-        uss_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
+        uss_keyword = solution_keyword(ssh_step.spatial_method)
         proc.add_body_line("*" * 50)
         proc.add_body_line("* USS: self-shielding")
         proc.add_body_line("*" * 50)
@@ -1687,54 +1717,18 @@ class DragonCase:
         proc.add_body_line(";")
         proc.add_body_line("")
 
-        if mixeq_procedures:
-            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
-                if current_step_name == ssh_step.name and next_step_name == l1_step.name:
-                    proc.add_body_line(
-                        f"* MIXEQ: {current_step_name} → {next_step_name}"
-                    )
-                    mixeq_call = (
-                        f"LIBEQL1 := {proc_name} LIBRARY2 ;"
-                    )
-                    proc.add_body_line(
-                        wrap_cle2000_line(
-                            f"{mixeq_call}"
-                        )
-                    )
-                    proc.add_body_line("")
-                    flux_level1_library = "LIBEQL1"
-                else:
-                    flux_level1_library = "LIBRARY2"
-        else:
-            flux_level1_library = "LIBRARY2"
+        # SSH and L1 share the same numbering strategy (enforced by
+        # _check_supported_mixeq_transitions), so L1 uses the
+        # self-shielded library directly.
+        flux_level1_library = "LIBRARY2"
 
         # --- ASM L1 + FLU L1 ---
-        l1_asm_keyword = "PIJ" if l1_step.spatial_method == "CP" else "ARM"
-        proc.add_body_line("*" * 50)
-        proc.add_body_line("* ASM: + FLU: — first level")
-        proc.add_body_line("*" * 50)
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"SYS := ASM: {flux_level1_library} {l1_trk} {l1_trkfil} ::"
-            )
+        l1_asm_keyword = solution_keyword(l1_step.spatial_method)
+        self._emit_asm_flu(
+            proc, l1_step, flux_level1_library, l1_trk, l1_trkfil,
+            flux_name="FLUXL1", kinf_var="kinfL1",
+            title="ASM: + FLU: — first level", echo_tag="L1 ",
         )
-        proc.add_body_line(f"    EDIT 1 {l1_asm_keyword}")
-        proc.add_body_line(";")
-        proc.add_body_line("")
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"FLUXL1 := FLU: SYS {flux_level1_library} {l1_trk} {l1_trkfil} ::"
-            )
-        )
-        proc.add_body_line("    EDIT 1 TYPE K B1 SIGS")
-        proc.add_body_line(";")
-        proc.add_body_line(
-            wrap_cle2000_line(
-                "GREP: FLUXL1 :: GETVAL 'K-EFFECTIVE' 1 1 1 >>keffL1<< ;"
-            )
-        )
-        proc.add_body_line(f'ECHO "{self.case_name} L1 keff=" keffL1 ;')
-        proc.add_body_line("")
 
         # --- EDI condensation ---
         proc.add_body_line("*" * 50)
@@ -1765,55 +1759,18 @@ class DragonCase:
         proc.add_body_line(wrap_cle2000_line(delete_l1))
         proc.add_body_line("")
 
-        if mixeq_procedures:
-            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
-                if current_step_name == l1_step.name and next_step_name == l2_step.name:
-                    proc.add_body_line(
-                        f"* MIXEQ: {current_step_name} → {next_step_name}"
-                    )
-                    mixeq_call = (
-                        f"LIBEQL2 := {proc_name} {edi_cond.lib_name} ;"
-                    )
-                    proc.add_body_line(
-                        wrap_cle2000_line(
-                            f"{mixeq_call}"
-                        )
-                    )
-                    proc.add_body_line("")
-                    flux_level2_library = "LIBEQL2"
-                else:
-                    flux_level2_library = edi_cond.lib_name
-        else:
-            flux_level2_library = edi_cond.lib_name
+        flux_level2_library = self._emit_mixeq(
+            proc, mixeq_procedures, l1_step.name, l2_step.name,
+            in_lib=edi_cond.lib_name, out_lib="LIBEQL2",
+            default_lib=edi_cond.lib_name,
+        )
 
         # --- ASM L2 + FLU L2 ---
-        l2_asm_keyword = "PIJ" if l2_step.spatial_method == "CP" else "ARM"
-        proc.add_body_line("*" * 50)
-        proc.add_body_line("* ASM: + FLU: — second level")
-        proc.add_body_line("*" * 50)
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"SYS := ASM: {flux_level2_library} {l2_trk} {l2_trkfil} ::"
-            )
+        self._emit_asm_flu(
+            proc, l2_step, flux_level2_library, l2_trk, l2_trkfil,
+            flux_name="FLUXL2", kinf_var="kinfL2",
+            title="ASM: + FLU: — second level", echo_tag="L2 ",
         )
-        proc.add_body_line(f"    {l2_asm_keyword} EDIT 1")
-        proc.add_body_line(";")
-        proc.add_body_line("")
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"FLUXL2 := FLU: {flux_level2_library} SYS "
-                f"{l2_trk} {l2_trkfil} ::"
-            )
-        )
-        proc.add_body_line("    EDIT 1 TYPE K B1 SIGS")
-        proc.add_body_line(";")
-        proc.add_body_line(
-            wrap_cle2000_line(
-                "GREP: FLUXL2 :: GETVAL 'K-EFFECTIVE' 1 1 1 >>keffL2<< ;"
-            )
-        )
-        proc.add_body_line(f'ECHO "{self.case_name} L2 keff=" keffL2 ;')
-        proc.add_body_line("")
 
         # --- EDIR call (uses coarse library and L2 tracking) ---
         proc.add_body_line("*" * 50)
@@ -1908,8 +1865,8 @@ class DragonCase:
             proc.add_variable("N_H", "REAL")
             proc.add_variable("N_O", "REAL")
 
-        proc.add_variable("keffL1", "REAL")
-        proc.add_variable("keffL2", "REAL")
+        proc.add_variable("kinfL1", "REAL")
+        proc.add_variable("kinfL2", "REAL")
 
         # --- TDT SEQ_ASCII imports ---
         tdt_map = trk.get_tdt_file_mapping()
@@ -2086,7 +2043,7 @@ class DragonCase:
         proc.add_body_line("")
 
         # --- USS ---
-        uss_keyword = "PIJ" if ssh_step.spatial_method == "CP" else "ARM"
+        uss_keyword = solution_keyword(ssh_step.spatial_method)
         proc.add_body_line(f"{inner_indent}* USS: self-shielding")
         proc.add_body_line(
             wrap_cle2000_line(
@@ -2099,72 +2056,32 @@ class DragonCase:
         proc.add_body_line(f"{inner_indent};")
         proc.add_body_line("")
 
-        if mixeq_procedures:
-            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
-                if current_step_name == ssh_step.name and next_step_name == l1_step.name:
-                    proc.add_body_line(
-                        f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
-                    )
-                    mixeq_call = (
-                        f"{inner_indent}LIBEQL1 := {proc_name} LIBRARY2 ;"
-                    )
-                    proc.add_body_line(
-                        wrap_cle2000_line(
-                            f"{mixeq_call}"
-                        )
-                    )
-                    proc.add_body_line("")
-                    flux_level1_library = "LIBEQL1"
-                else:
-                    flux_level1_library = "LIBRARY2"
-        else:
-            flux_level1_library = "LIBRARY2"
+        # SSH and L1 share the same numbering strategy (enforced by
+        # _check_supported_mixeq_transitions), so L1 uses the
+        # self-shielded library directly.
+        flux_level1_library = "LIBRARY2"
 
         # --- ASM L1 + FLU L1 ---
-        l1_asm_keyword = "PIJ" if l1_step.spatial_method == "CP" else "ARM"
-        proc.add_body_line(f"{inner_indent}* ASM: + FLU: — first level")
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"{inner_indent}SYS := ASM: {flux_level1_library} "
-                f"{l1_trk} {l1_trkfil} ::"
-            )
+        l1_asm_keyword = solution_keyword(l1_step.spatial_method)
+        self._emit_asm_flu(
+            proc, l1_step, flux_level1_library, l1_trk, l1_trkfil,
+            flux_name="FLUXL1", kinf_var="kinfL1", indent=inner_indent,
+            title="ASM: + FLU: — first level", banner=False,
+            echo_tag="L1 ",
         )
-        proc.add_body_line(f"{inner_indent}    EDIT 1 {l1_asm_keyword}")
-        proc.add_body_line(f"{inner_indent};")
-        proc.add_body_line("")
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"{inner_indent}FLUXL1 := FLU: SYS {flux_level1_library} "
-                f"{l1_trk} {l1_trkfil} ::"
-            )
-        )
-        proc.add_body_line(f"{inner_indent}    EDIT 1 TYPE K B1 SIGS")
-        proc.add_body_line(f"{inner_indent};")
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"{inner_indent}GREP: FLUXL1 :: GETVAL "
-                f"'K-EFFECTIVE' 1 1 1 >>keffL1<< ;"
-            )
-        )
-        proc.add_body_line(
-            f'{inner_indent}ECHO "{self.case_name} L1 keff=" keffL1 ;'
-        )
-        proc.add_body_line("")
 
         # --- EDI condensation ---
         proc.add_body_line(
             f"{inner_indent}* EDI: energy condensation (L1 → coarse)"
         )
 
-        def _indent_block(block, indent):
-            return "".join(
-                f"{indent}{line}\n" if line.strip() else "\n"
-                for line in block.rstrip("\n").split("\n")
-            )
+        _indent_block = self._indent_block
 
         proc.add_body_block(
             _indent_block(
-                edi_cond.build_edi_call("FLUXL1", "LIBRARY2", l1_trk),
+                edi_cond.build_edi_call(
+                    "FLUXL1", flux_level1_library, l1_trk
+                ),
                 inner_indent,
             )
         )
@@ -2197,58 +2114,19 @@ class DragonCase:
         )
         proc.add_body_line("")
 
-        if mixeq_procedures:
-            for proc_name, _, current_step_name, next_step_name in mixeq_procedures:
-                if current_step_name == l1_step.name and next_step_name == l2_step.name:
-                    proc.add_body_line(
-                        f"{inner_indent}* MIXEQ: {current_step_name} → {next_step_name}"
-                    )
-                    mixeq_call = (
-                        f"{inner_indent} LIBEQL2 := "
-                        f"{proc_name} {edi_cond.lib_name} ;"
-                    )
-                    proc.add_body_line(
-                        wrap_cle2000_line(
-                            f"{mixeq_call}"
-                        )
-                    )
-                    proc.add_body_line("")
-                    flux_level2_library = "LIBEQL2"
-                else:
-                    flux_level2_library = edi_cond.lib_name
-        else:
-            flux_level2_library = edi_cond.lib_name
+        flux_level2_library = self._emit_mixeq(
+            proc, mixeq_procedures, l1_step.name, l2_step.name,
+            in_lib=edi_cond.lib_name, out_lib="LIBEQL2",
+            default_lib=edi_cond.lib_name, indent=inner_indent,
+        )
 
         # --- ASM L2 + FLU L2 ---
-        l2_asm_keyword = "PIJ" if l2_step.spatial_method == "CP" else "ARM"
-        proc.add_body_line(f"{inner_indent}* ASM: + FLU: — second level")
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"{inner_indent}SYS := ASM: {flux_level2_library} "
-                f"{l2_trk} {l2_trkfil} ::"
-            )
+        self._emit_asm_flu(
+            proc, l2_step, flux_level2_library, l2_trk, l2_trkfil,
+            flux_name="FLUXL2", kinf_var="kinfL2", indent=inner_indent,
+            title="ASM: + FLU: — second level", banner=False,
+            echo_tag="L2 ",
         )
-        proc.add_body_line(f"{inner_indent}    {l2_asm_keyword} EDIT 1")
-        proc.add_body_line(f"{inner_indent};")
-        proc.add_body_line("")
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"{inner_indent}FLUXL2 := FLU: {flux_level2_library} SYS "
-                f"{l2_trk} {l2_trkfil} ::"
-            )
-        )
-        proc.add_body_line(f"{inner_indent}    EDIT 1 TYPE K B1 SIGS")
-        proc.add_body_line(f"{inner_indent};")
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"{inner_indent}GREP: FLUXL2 :: GETVAL "
-                f"'K-EFFECTIVE' 1 1 1 >>keffL2<< ;"
-            )
-        )
-        proc.add_body_line(
-            f'{inner_indent}ECHO "{self.case_name} L2 keff=" keffL2 ;'
-        )
-        proc.add_body_line("")
 
         # --- EDIR call (coarse library + L2 tracking) ---
         proc.add_body_line(f"{inner_indent}* EDI/COMPO call")
@@ -2267,13 +2145,13 @@ class DragonCase:
 
         # --- Cleanup per statepoint ---
         proc.add_body_line(f"{inner_indent}* Cleanup")
-        proc.add_body_line(
-            wrap_cle2000_line(
-                f"{inner_indent}LIBRARY LIBRARY2 "
-                f"{flux_level2_library} := "
-                f"DELETE: LIBRARY LIBRARY2 "
-                f"{flux_level2_library} ;"
-            )
+        # Delete every library created in the loop body (including the
+        # condensed library when a MIXEQ produced LIBEQL2 from it), so
+        # that the next statepoint can re-create them
+        self._emit_delete(
+            proc,
+            ["LIBRARY", "LIBRARY2", edi_cond.lib_name, flux_level2_library],
+            indent=inner_indent,
         )
         proc.add_body_line(
             f"{inner_indent}FLUXL2 := DELETE: FLUXL2 ;"

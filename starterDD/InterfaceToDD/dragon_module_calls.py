@@ -1830,29 +1830,90 @@ class TRK:
         return filepath
 
 
+def solution_keyword(spatial_method):
+    """ASM:/USS:/SPH: solution keyword: ``PIJ`` for CP, ``ARM`` for IC/MOC."""
+    return "PIJ" if spatial_method == "CP" else "ARM"
+
+
 class ASM:
     """
-    Defintion of the ASM: module calls for Dragon calculations
-    Given a calculation step, determine the appropriate ASM: call and generate the corresponding c2m procedure.
+    Generate the DRAGON5 ``ASM:`` call assembling the system matrices
+    of a flux calculation step.
+
+    Produces::
+
+        SYS := ASM: <lib> <trk> <trkfil> ::
+            EDIT 1 ARM|PIJ
+        ;
     """
 
-    def __init__(self, calculation_step, track_name=None, title=None):
+    def __init__(self, calculation_step, lib_name, trk_name, trkfil_name,
+                 sys_name="SYS"):
         self.step = calculation_step
-        step_tag = self.step.name.upper()
-        self.track_name = track_name or f"TRK{step_tag}"
-        self.solution_method = "PIJ" if self.step.spatial_method == "CP" else "ARM"
-        
+        self.lib_name = lib_name
+        self.trk_name = trk_name
+        self.trkfil_name = trkfil_name
+        self.sys_name = sys_name
+        self.solution_method = solution_keyword(calculation_step.spatial_method)
 
-    def build_asm_call(self):
+    def build_call(self):
         """Return the full ``ASM:`` call block as a string."""
-        s = self.step
-        lines = []
-        lines.append(
-            f"ASM: {self.track_name} ::"
-        )
-        lines.append("    EDIT 1")
-        lines.append(f"    {self.solution_method}")
-        lines.append(";")
+        lines = [
+            f"{self.sys_name} := ASM: {self.lib_name} "
+            f"{self.trk_name} {self.trkfil_name} ::",
+            f"    EDIT 1 {self.solution_method}",
+            ";",
+        ]
+        return "\n".join(lines) + "\n"
+
+
+class FLU:
+    """
+    Generate the DRAGON5 ``FLU:`` call solving a fundamental mode
+    (``TYPE K``) eigenvalue problem for a flux calculation step.
+
+    The leakage options come from the step's ``leakage_model`` and
+    ``leakage_correction`` attributes (IGE335 §3.7, descleak structure):
+
+    * neither set        → ``TYPE K``
+    * model only         → ``TYPE K B1`` (DRAGON applies SIGS by default)
+    * model + correction → ``TYPE K B1 SIGS``
+
+    Produces::
+
+        <flux> := FLU: SYS <lib> <trk> <trkfil> ::
+            EDIT 1 TYPE K [<model> [<correction>]]
+        ;
+    """
+
+    def __init__(self, calculation_step, flux_name, lib_name, trk_name,
+                 trkfil_name, sys_name="SYS"):
+        self.step = calculation_step
+        self.flux_name = flux_name
+        self.lib_name = lib_name
+        self.trk_name = trk_name
+        self.trkfil_name = trkfil_name
+        self.sys_name = sys_name
+
+    def build_type_line(self):
+        """Return the ``TYPE K [model [correction]]`` option string."""
+        parts = ["TYPE", "K"]
+        model = getattr(self.step, "leakage_model", None)
+        correction = getattr(self.step, "leakage_correction", None)
+        if model:
+            parts.append(model)
+            if correction:
+                parts.append(correction)
+        return " ".join(parts)
+
+    def build_call(self):
+        """Return the full ``FLU:`` call block as a string."""
+        lines = [
+            f"{self.flux_name} := FLU: {self.sys_name} {self.lib_name} "
+            f"{self.trk_name} {self.trkfil_name} ::",
+            f"    EDIT 1 {self.build_type_line()}",
+            ";",
+        ]
         return "\n".join(lines) + "\n"
 
 

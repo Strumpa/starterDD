@@ -6,8 +6,11 @@
 # R.Guasch
 # Date : 19/02/2026 [created]
 
+import logging
 import yaml
 from copy import deepcopy
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -21,6 +24,10 @@ VALID_SPATIAL_METHODS = ("CP", "IC", "MOC")
 VALID_TRACKING_OPTIONS = ("TISO", "TSPC")
 VALID_RADIAL_SCHEMES = ("Santamarina", "Santamarina_fine_Gd", "automatic", "user_defined")
 VALID_MIX_NUMBERING_STRATEGIES = ("by_material", "by_pin")
+# FLU: leakage options (IGE335 §3.7, descleak structure). Only the TYPE K + B1 + SIGS
+# combination is enabled for now; extend these tuples to enable more models.
+VALID_LEAKAGE_MODELS = ("B1",)        # descleak group 1: leakage coefficients model
+VALID_LEAKAGE_CORRECTIONS = ("SIGS",) # descleak group 2: how the leakage correction is applied
 
 
 # ---------------------------------------------------------------------------
@@ -954,6 +961,16 @@ class CalculationStep:
         n_rows by n_cols table ordered in x-increasing, y-increasing logic with GEOM.yaml::lattice_description dimensions 
         Entries should be strings that will be used as glow's PropertyType.MACRO property.
         If None : by default each fuel cell, water rod and strip rectangle gets an independent macro assigned.
+    leakage_model : str or None
+        Flux steps only.  Model used by ``FLU:`` to compute the leakage
+        coefficients in a fundamental mode (``TYPE K``) calculation with
+        conservative boundary conditions.  Supported: ``"B1"``.
+        When ``None`` (default) the flux calculation is a plain ``TYPE K``
+        (infinite lattice, no leakage).
+    leakage_correction : str or None
+        Flux steps only.  How the leakage correction is applied
+        (supported: ``"SIGS"``).  Requires ``leakage_model``.  When ``None``
+        with a ``leakage_model`` set, DRAGON applies ``SIGS`` by default.
     """
 
     VALID_POLAR_QUADRATURES = ("GAUS", "CACA", "CACB", "LCMD", "OPP1", "OGAU")
@@ -989,7 +1006,9 @@ class CalculationStep:
         number_of_polar_angles=None,
         mix_numbering_strategy="by_material",
         tdt_file_id=None,
-        macro_assignment=None
+        macro_assignment=None,
+        leakage_model=None,
+        leakage_correction=None,
     ):
         # --- Validate step type ---
         if step_type not in VALID_STEP_TYPES:
@@ -1091,6 +1110,40 @@ class CalculationStep:
                     "number_of_polar_angles is required for MOC steps."
                 )
 
+        # --- Validate FLU: leakage options (flux steps only) ---
+        if step_type != "flux" and (
+            leakage_model is not None or leakage_correction is not None
+        ):
+            raise ValueError(
+                f"leakage_model / leakage_correction are only valid for "
+                f"flux steps, but step '{name}' has step_type '{step_type}'."
+            )
+        if leakage_model is not None and leakage_model not in VALID_LEAKAGE_MODELS:
+            raise ValueError(
+                f"Invalid leakage_model '{leakage_model}' in step '{name}'. "
+                f"Valid options: {VALID_LEAKAGE_MODELS}"
+            )
+        if leakage_correction is not None:
+            if leakage_model is None:
+                raise ValueError(
+                    f"leakage_correction '{leakage_correction}' in step "
+                    f"'{name}' requires a leakage_model (the FLU: descleak "
+                    f"structure needs the leakage coefficients model first). "
+                    f"Valid leakage_model options: {VALID_LEAKAGE_MODELS}"
+                )
+            if leakage_correction not in VALID_LEAKAGE_CORRECTIONS:
+                raise ValueError(
+                    f"Invalid leakage_correction '{leakage_correction}' in "
+                    f"step '{name}'. "
+                    f"Valid options: {VALID_LEAKAGE_CORRECTIONS}"
+                )
+        elif leakage_model is not None:
+            log.info(
+                f"FLU step '{name}': leakage_model {leakage_model} set "
+                f"without leakage_correction; DRAGON will apply SIGS by "
+                f"default (IGE335 §3.7)."
+            )
+
         self.name = name
         self.step_type = step_type
         self.self_shielding_module = self_shielding_module
@@ -1120,6 +1173,8 @@ class CalculationStep:
         self.mix_numbering_strategy = mix_numbering_strategy
         self.tdt_file_id = tdt_file_id
         self.macro_assignment = macro_assignment
+        self.leakage_model = leakage_model
+        self.leakage_correction = leakage_correction
 
     # ------------------------------------------------------------------
     # Radii application
@@ -1258,6 +1313,10 @@ class CalculationStep:
             method_str = f"module={self.self_shielding_module}, method={self.self_shielding_method}, spatial={self.spatial_method}"
         else:
             method_str = f"spatial={self.spatial_method}"
+            if self.leakage_model:
+                method_str += f", leakage={self.leakage_model}"
+                if self.leakage_correction:
+                    method_str += f" {self.leakage_correction}"
         return (
             f"CalculationStep(name='{self.name}', "
             f"type='{self.step_type}', "
@@ -2068,6 +2127,12 @@ class DragonCalculationScheme:
         )
 
         if step_type == "self_shielding":
+            for key in ("leakage_model", "leakage_correction"):
+                if key in d:
+                    raise ValueError(
+                        f"'{key}' is only valid for flux steps, but was "
+                        f"given for self_shielding step '{d['name']}'."
+                    )
             return CalculationStep(
                 name=d["name"],
                 step_type=step_type,
@@ -2086,6 +2151,8 @@ class DragonCalculationScheme:
                 name=d["name"],
                 step_type=step_type,
                 spatial_method=d.get("spatial_method", "CP"),
+                leakage_model=d.get("leakage_model", None),
+                leakage_correction=d.get("leakage_correction", None),
                 **common_kwargs,
             )
 
@@ -2340,6 +2407,11 @@ class DragonCalculationScheme:
                 lines.append(f"  SSH module:  {step.self_shielding_module}")
                 lines.append(f"  SSH method:  {step.self_shielding_method}")
             lines.append(f"  Method:     {step.spatial_method}")
+            if step.step_type == "flux":
+                leak = step.leakage_model or "none"
+                if step.leakage_model and step.leakage_correction:
+                    leak += f" {step.leakage_correction}"
+                lines.append(f"  Leakage:    {leak}")
             lines.append(f"  Tracking:   {step.tracking}")
             if step.flux_level is not None:
                 lines.append(f"  Flux level: {step.flux_level}")

@@ -45,7 +45,7 @@ class RunResult:
         Process return code (0 = ok).
     listing_path : str
         Path to the ``.result`` listing file.
-    keff : float or None
+    kinf : float or None
         Effective multiplication factor parsed from the listing,
         or ``None`` if not found.
     """
@@ -56,7 +56,7 @@ class RunResult:
     wall_time_seconds: float
     return_code: int
     listing_path: str
-    keff: Optional[float] = None
+    kinf: Optional[float] = None
 
 
 # -------------------------------------------------------------------
@@ -103,26 +103,26 @@ def _build_scheme_descriptor(scheme):
     return "_".join(parts)
 
 
-def _parse_keff_from_listing(listing_path):
-    """Parse the last keff value from a Dragon listing file.
+def _parse_kinf_from_listing(listing_path):
+    """Parse the last kinf value from a Dragon listing file.
 
-    Looks for lines like ``keff= 1.08234`` (printed by the
+    Looks for lines like ``kinf= 1.08234`` (printed by the
     generated x2m procedures).
 
     Returns
     -------
     float or None
     """
-    keff = None
+    kinf = None
     try:
         with open(listing_path) as f:
             for line in f:
-                m = re.search(r'keff\s*=\s*([0-9]+\.[0-9]+(?:[eE][+-]?\d+)?)', line)
+                m = re.search(r'kinf\s*=\s*([0-9]+\.[0-9]+(?:[eE][+-]?\d+)?)', line)
                 if m:
-                    keff = float(m.group(1))
+                    kinf = float(m.group(1))
     except (OSError, ValueError):
         pass
-    return keff
+    return kinf
 
 
 def _check_normal_end(listing_path):
@@ -775,7 +775,7 @@ class DragonRunner:
             "wall_time_seconds": round(
                 run_result.wall_time_seconds, 2
             ),
-            "keff": run_result.keff,
+            "kinf": run_result.kinf,
         }
         with open(manifest_path, "w") as f:
             yaml.dump(
@@ -969,7 +969,7 @@ class DragonRunner:
                     wall_time_seconds=0.0,
                     return_code=0,
                     listing_path="",
-                    keff=None,
+                    kinf=None,
                 )
 
             # Copy executable into staging dir
@@ -1022,7 +1022,7 @@ class DragonRunner:
                 run_dir, result_filename
             )
             success = _check_normal_end(listing_final)
-            keff = _parse_keff_from_listing(listing_final)
+            kinf = _parse_kinf_from_listing(listing_final)
 
             result = RunResult(
                 success=success,
@@ -1031,7 +1031,7 @@ class DragonRunner:
                 wall_time_seconds=wall_time,
                 return_code=proc.returncode,
                 listing_path=listing_final,
-                keff=keff,
+                kinf=kinf,
             )
 
             # Update manifest with results

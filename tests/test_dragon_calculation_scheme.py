@@ -1754,3 +1754,75 @@ class TestYAMLValidation:
                 )
         finally:
             os.unlink(tmp_path)
+
+
+# =====================================================================
+#  FLU: leakage options (leakage_model / leakage_correction)
+# =====================================================================
+
+class TestLeakageOptions:
+    """Parsing and validation of the flux-step FLU: leakage keys."""
+
+    @staticmethod
+    def _flux_dict(**extra):
+        d = {"name": "FLUX", "step_type": "flux",
+             "spatial_method": "IC", "tracking": "TISO"}
+        d.update(extra)
+        return d
+
+    @staticmethod
+    def _ssh_dict(**extra):
+        d = {"name": "SSH", "step_type": "self_shielding",
+             "self_shielding_module": "USS", "self_shielding_method": "PT",
+             "spatial_method": "IC", "tracking": "TISO"}
+        d.update(extra)
+        return d
+
+    def test_default_is_no_leakage(self):
+        step = DragonCalculationScheme._parse_step(self._flux_dict())
+        assert step.leakage_model is None
+        assert step.leakage_correction is None
+
+    def test_b1_sigs_parsed(self):
+        step = DragonCalculationScheme._parse_step(
+            self._flux_dict(leakage_model="B1", leakage_correction="SIGS"))
+        assert step.leakage_model == "B1"
+        assert step.leakage_correction == "SIGS"
+
+    def test_b1_without_correction_logs_sigs_default(self, caplog):
+        with caplog.at_level("INFO"):
+            step = DragonCalculationScheme._parse_step(
+                self._flux_dict(leakage_model="B1"))
+        assert step.leakage_model == "B1"
+        assert step.leakage_correction is None
+        assert "SIGS by default" in caplog.text
+
+    def test_invalid_leakage_model(self):
+        with pytest.raises(ValueError, match="Invalid leakage_model"):
+            DragonCalculationScheme._parse_step(
+                self._flux_dict(leakage_model="P1"))
+
+    def test_invalid_leakage_correction(self):
+        with pytest.raises(ValueError, match="Invalid leakage_correction"):
+            DragonCalculationScheme._parse_step(
+                self._flux_dict(leakage_model="B1", leakage_correction="ECCO"))
+
+    def test_correction_requires_model(self):
+        with pytest.raises(ValueError, match="requires a leakage_model"):
+            DragonCalculationScheme._parse_step(
+                self._flux_dict(leakage_correction="SIGS"))
+
+    @pytest.mark.parametrize("key,val", [
+        ("leakage_model", "B1"), ("leakage_correction", "SIGS"),
+    ])
+    def test_rejected_on_self_shielding_step(self, key, val):
+        with pytest.raises(ValueError, match="only valid for flux steps"):
+            DragonCalculationScheme._parse_step(self._ssh_dict(**{key: val}))
+
+    def test_rejected_on_self_shielding_step_constructor(self):
+        with pytest.raises(ValueError, match="only valid for flux steps"):
+            CalculationStep(
+                name="SSH", step_type="self_shielding", spatial_method="IC",
+                self_shielding_module="USS", self_shielding_method="PT",
+                leakage_model="B1",
+            )

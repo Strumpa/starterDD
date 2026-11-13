@@ -2,7 +2,7 @@
 # Covers: executable resolution, draglib resolution, scheme descriptor
 #         building, run directory structure, manifest generation,
 #         input staging, config archival, dry_run mode, latest symlink,
-#         and keff/normal-end parsing.
+#         and kinf/normal-end parsing.
 #
 # R.Guasch — 12/03/2026
 
@@ -16,7 +16,7 @@ from starterDD.InterfaceToDD.dragon_runner import (
     DragonRunner,
     RunResult,
     _build_scheme_descriptor,
-    _parse_keff_from_listing,
+    _parse_kinf_from_listing,
     _check_normal_end,
 )
 from starterDD.InterfaceToDD.case_generator import DragonCase
@@ -155,39 +155,39 @@ class TestSchemeDescriptor:
 
 
 # =========================================================
-# keff and normal-end parsing
+# kinf and normal-end parsing
 # =========================================================
 
 class TestListingParsing:
     """Tests for parsing Dragon listing output."""
 
-    def test_parse_keff(self, tmp_path):
-        """keff value is extracted from listing."""
+    def test_parse_kinf(self, tmp_path):
+        """kinf value is extracted from listing."""
         listing = tmp_path / "test.result"
         listing.write_text(
             "some output\n"
-            "GE14_DOM keff= 1.08234\n"
+            "GE14_DOM kinf= 1.08234\n"
             "more output\n"
         )
-        assert _parse_keff_from_listing(str(listing)) == 1.08234
+        assert _parse_kinf_from_listing(str(listing)) == 1.08234
 
-    def test_parse_keff_scientific(self, tmp_path):
-        """keff in scientific notation."""
+    def test_parse_kinf_scientific(self, tmp_path):
+        """kinf in scientific notation."""
         listing = tmp_path / "test.result"
-        listing.write_text("keff= 1.082e+00\n")
+        listing.write_text("kinf= 1.082e+00\n")
         assert abs(
-            _parse_keff_from_listing(str(listing)) - 1.082
+            _parse_kinf_from_listing(str(listing)) - 1.082
         ) < 1e-6
 
-    def test_parse_keff_missing(self, tmp_path):
-        """No keff in listing → None."""
+    def test_parse_kinf_missing(self, tmp_path):
+        """No kinf in listing → None."""
         listing = tmp_path / "test.result"
-        listing.write_text("no keff here\n")
-        assert _parse_keff_from_listing(str(listing)) is None
+        listing.write_text("no kinf here\n")
+        assert _parse_kinf_from_listing(str(listing)) is None
 
-    def test_parse_keff_nonexistent_file(self):
+    def test_parse_kinf_nonexistent_file(self):
         """Non-existent file → None."""
-        assert _parse_keff_from_listing("/nonexistent") is None
+        assert _parse_kinf_from_listing("/nonexistent") is None
 
     def test_normal_end_success(self, tmp_path):
         """Listing with 'normal end' → True."""
@@ -618,7 +618,7 @@ class TestManifest:
             wall_time_seconds=127.4,
             return_code=0,
             listing_path="test.result",
-            keff=1.08234,
+            kinf=1.08234,
         )
         runner._update_manifest_with_results(
             manifest, manifest_path, result
@@ -629,7 +629,7 @@ class TestManifest:
 
         assert loaded["execution"]["success"] is True
         assert loaded["execution"]["wall_time_seconds"] == 127.4
-        assert loaded["execution"]["keff"] == 1.08234
+        assert loaded["execution"]["kinf"] == 1.08234
         assert loaded["execution"]["return_code"] == 0
 
 

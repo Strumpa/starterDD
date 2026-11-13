@@ -121,7 +121,7 @@ if run_dragon:
     print(f"Draglibs path used: {DRAGLIBS_PATH / 'draglibendfb8r1SHEM295_v5p1'}")
     print("Dragon run completed.")
     print(f"Success: {run_result.success}")
-    print(f"keff:    {run_result.keff}")
+    print(f"keff:    {run_result.kinf}")
     print(f"Time:    {run_result.wall_time_seconds:.1f}s")
     print(f"Results: {run_result.run_directory}")
 #

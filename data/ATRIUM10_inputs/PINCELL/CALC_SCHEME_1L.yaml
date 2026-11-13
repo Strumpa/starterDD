@@ -45,6 +45,12 @@ FLUX_CALCULATION_SCHEME:
     - name: "FLUX"
       step_type: "flux"
       mix_numbering_strategy: "by_pin"
+      # FLU: leakage options (IGE335 §3.7, descleak). Omitted -> plain "TYPE K" (no leakage).
+      # leakage_model: model for the fundamental mode leakage coefficients (supported: "B1")
+      # leakage_correction: how the leakage correction is applied (supported: "SIGS",
+      #   DRAGON default when only leakage_model is given)
+      # leakage_model: "B1"
+      # leakage_correction: "SIGS"
       spatial_method: "MOC"
       tracking: "TSPC"
       num_angles_2d: 12
