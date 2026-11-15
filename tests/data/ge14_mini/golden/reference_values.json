@@ -1,0 +1,12 @@
+{
+ "keff_dragon_EDIHOM_COND": 0.989089489,
+ "keff_serpent_IMP_KEFF": 0.990261,
+ "keff_serpent_IMP_KEFF_rel_err": 7.2e-06,
+ "delta_keff_pcm": -117.1510999999903,
+ "statepoint": {
+  "TFuel": 900.0,
+  "TCool": 600.0,
+  "DCool": 0.73669,
+  "label": "00"
+ }
+}

@@ -22,6 +22,9 @@ import yaml
 
 log = logging.getLogger(__name__)
 
+#: Name of the resolved scheme archived in each run's ``inputs/``.
+RESOLVED_SCHEME_FILENAME = "CALC_SCHEME_resolved.yaml"
+
 
 # -------------------------------------------------------------------
 # RunResult – lightweight container for execution outcome
@@ -73,34 +76,10 @@ def _build_scheme_descriptor(scheme):
     * 1-level MOC:  ``RSE_IC_1L_MOC``
     * 2-level IC+MOC:  ``RSE_IC_2L_IC_MOC``
     * CP-based:  ``PT_CP_1L_CP``
+
+    Now implemented by ``DragonCalculationScheme.descriptor()``.
     """
-    ssh_steps = scheme.get_self_shielding_steps()
-    flux_steps = scheme.get_flux_steps()
-
-    # Self-shielding descriptor
-    if ssh_steps:
-        ssh = ssh_steps[0]
-        ssh_method = (ssh.self_shielding_method or "RSE").upper()
-        ssh_spatial = (ssh.spatial_method or "CP").upper()
-    else:
-        ssh_method = "UNK"
-        ssh_spatial = "UNK"
-
-    # Flux descriptor
-    n_levels = len(flux_steps) if flux_steps else 0
-    flux_methods = "_".join(
-        s.spatial_method.upper() for s in flux_steps
-    ) if flux_steps else "NONE"
-
-    # Statepoint count
-    n_sp = scheme.get_total_statepoints()
-    sp_tag = f"{n_sp}sp" if n_sp > 1 else ""
-
-    parts = [ssh_method, ssh_spatial, f"{n_levels}L", flux_methods]
-    if sp_tag:
-        parts.append(sp_tag)
-
-    return "_".join(parts)
+    return scheme.descriptor()
 
 
 def _parse_kinf_from_listing(listing_path):
@@ -645,7 +624,11 @@ class DragonRunner:
         """Copy the original configuration YAML files into the
         run directory's ``inputs/`` sub-directory.
 
-        This provides a frozen snapshot of what was run.
+        This provides a frozen snapshot of what was run. The scheme actually
+        used is also written as ``inputs/CALC_SCHEME_resolved.yaml``
+        (:meth:`DragonCalculationScheme.to_yaml`, every parameter explicit),
+        including when the case was given a scheme object instead of a
+        file, so every run can be reproduced.
         """
         inputs_dir = os.path.join(run_dir, "inputs")
         for key, yaml_path in self.case.config_yamls.items():
@@ -656,6 +639,12 @@ class DragonRunner:
                         inputs_dir, os.path.basename(src)
                     )
                     shutil.copy2(src, dst)
+        scheme = self._scheme or getattr(self.case, "scheme", None)
+        if scheme is not None:
+            scheme.to_yaml(
+                os.path.join(inputs_dir, RESOLVED_SCHEME_FILENAME),
+                header=f"case: {self.case.case_name}",
+            )
 
     # -----------------------------------------------------------
     # Run manifest
@@ -758,6 +747,8 @@ class DragonRunner:
         return {
             "name": scheme.name,
             "descriptor": self._get_scheme_descriptor(),
+            "variant_tag": scheme.variant_tag,
+            "resolved_yaml": RESOLVED_SCHEME_FILENAME,
             "steps": steps_info,
             "branches": branches_info,
             "total_statepoints": scheme.get_total_statepoints(),

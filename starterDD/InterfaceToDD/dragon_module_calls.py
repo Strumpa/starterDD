@@ -84,13 +84,15 @@ class LIB:
             3. Optionally, TDT indices enforced
                (``enforce_material_mixture_indices_from_tdt``).
         density_branch : bool
-            When ``True``, COOLANT mix H1/O16 densities
-            are replaced by ``<<N_H>>`` / ``<<N_O>>`` CLE2000 variables
-            and the procedure receives two extra REAL input parameters.
+            When ``True``, the COOLANT number densities of the isotopes set by
+            :meth:`set_coolant_branch_isotopes` (default H1, O16) are replaced
+            by ``<<N_H1>>``, ``<<N_O16>>``, ... CLE2000 variables, received as
+            extra REAL input parameters in that order.
         """
         self.assembly = assembly_model
         self.density_branch = density_branch
         self.ssh_calculation_step = ssh_calculation_step
+        self.coolant_branch_isotopes = ["H1", "O16"]
 
         # Fuel self-shielding configuration
         self.self_shielded_fuel_isotopes = list(self.DEFAULT_SELF_SHIELDED_FUEL_ISOTOPES)
@@ -256,6 +258,15 @@ class LIB:
     def set_varying_density_materials(self, list_of_materials_with_varying_density):
         self.materials_with_varying_density = list_of_materials_with_varying_density
 
+    def set_coolant_branch_isotopes(self, isotopes):
+        """Isotopes whose coolant number density is a statepoint input
+        (``CalculationBranch.composition_isotopes()``), in argument order."""
+        self.coolant_branch_isotopes = list(isotopes)
+
+    def _density_vars(self):
+        from ..DDModel.DragonCalculationScheme import coolant_density_var
+        return [coolant_density_var(i) for i in self.coolant_branch_isotopes]
+
     # ------------------------------------------------------------------
     #  Build blocks
     # ------------------------------------------------------------------
@@ -331,12 +342,12 @@ class LIB:
                  extra["composition"], extra["temp_var"])
             )
 
-        # Isotopes whose density is replaced by CLE2000 variables
-        # when coolant-density branching is active.
-        _WATER_ISO_MAPPING = {
-            "H1": "N_H", "H2": "N_H",
-            "O16": "N_O", "O17": "N_O",
-        }
+        # Isotopes whose density is replaced by CLE2000 variables when
+        # coolant-density branching is active: one variable per isotope
+        # (N_H1, N_O16, ...). The former H2 -> N_H / O17 -> N_O mapping gave
+        # those isotopes the H1 / O16 densities.
+        _WATER_ISO_MAPPING = dict(zip(self.coolant_branch_isotopes,
+                                      self._density_vars()))
         # Materials affected by coolant-density branching
         _WATER_MATERIALS = {"COOLANT", "MODERATOR"}
         _COOLANT_MATERIAL = {"COOLANT"}
@@ -357,7 +368,13 @@ class LIB:
                 and mat_name in _WATER_MATERIALS
             )
 
-            for isotope, density in iso_comp.items():
+            iso_items = list(iso_comp.items())
+            if use_density_vars:
+                # Branch isotopes missing from the material YAML are added
+                # (their density comes from the statepoint composition).
+                iso_items += [(i, 0.0) for i in _WATER_ISO_MAPPING
+                              if i not in iso_comp]
+            for isotope, density in iso_items:
                 lib_name = self.isotope_aliases.get(
                     (mat_name, isotope), isotope
                 )
@@ -555,9 +572,12 @@ class LIB:
         """
         # Extra REAL parameters for coolant density branch
         if self.density_branch:
+            from .CLE2000 import wrap_cle2000_line
+            dvars = self._density_vars()
             density_param_block = (
-                "REAL N_H N_O ;\n"
-                ":: >>N_H<< >>N_O<< ;\n"
+                wrap_cle2000_line(f"REAL {' '.join(dvars)} ;") + "\n"
+                + wrap_cle2000_line(
+                    ":: " + " ".join(f">>{v}<<" for v in dvars) + " ;") + "\n"
             )
         else:
             density_param_block = ""
@@ -1201,11 +1221,15 @@ class EDI_COMPO:
     def _build_statepoint_guard(self, output_spec):
         """Build a CLE2000 IF condition for selective state-point outputs.
 
-        Generates conditions like::
+        Each value is matched with a relative tolerance, because the
+        statepoint values travel as single-precision CLE2000 REALs::
 
-            IF DCool 0.73669000 = TCool 600.0 = * TFuel 900.0 = * * THEN
+            IF DCool 0.7 - ABS 7.000E-06 < THEN
 
-        using CLE2000 reverse-Polish notation.
+        Several values of one parameter are OR-ed (``+`` on LOGICALs) and
+        several parameters AND-ed (``*`` on LOGICALs), in CLE2000
+        reverse-Polish notation. (CLE2000 rejects comparisons of LOGICALs,
+        so the former ``... + 0 >`` form could not compile.)
 
         Parameters
         ----------
@@ -1217,8 +1241,17 @@ class EDI_COMPO:
             CLE2000 ``IF ... THEN`` line.
         """
         from ..DDModel.DragonCalculationScheme import (
-            BRANCH_TYPE_TO_PARA_NAME,
+            BRANCH_TYPE_TO_PARA_NAME, STATEPOINT_RTOL,
         )
+
+        def real(v):
+            # CLE2000 REAL literal: needs a '.', no Python 'e' shorthand.
+            r = repr(float(v))
+            return r if ("e" not in r and "." in r) else f"{float(v):.8E}"
+
+        def close_to(para, v):
+            tol = STATEPOINT_RTOL * max(abs(float(v)), 1.0)
+            return f"{para} {real(v)} - ABS {tol:.3E} <"
 
         conditions = []
         sp = output_spec.state_points
@@ -1227,20 +1260,11 @@ class EDI_COMPO:
                 para = BRANCH_TYPE_TO_PARA_NAME.get(branch_type)
                 if para is None:
                     continue
-                # Build OR over the allowed values for this branch type
-                # CLE2000 RPN: val1 var = val2 var = + val3 var = + ...
-                # (sum > 0 means at least one matched)
-                if len(values) == 1:
-                    conditions.append(f"{para} {values[0]} =")
-                else:
-                    parts = []
-                    for v in values:
-                        parts.append(f"{para} {v} =")
-                    # Combine with OR (+ in RPN, then check > 0)
-                    combined = " ".join(parts)
-                    combined += " " + "+ " * (len(parts) - 1)
-                    combined += "0 >"
-                    conditions.append(combined)
+                parts = [close_to(para, v) for v in values]
+                combined = " ".join(parts)
+                if len(parts) > 1:
+                    combined += " " + " ".join(["+"] * (len(parts) - 1))
+                conditions.append(combined)
 
         if not conditions:
             return ""
@@ -1248,7 +1272,7 @@ class EDI_COMPO:
         # AND all conditions together
         cond_str = " ".join(conditions)
         if len(conditions) > 1:
-            cond_str += " " + "* " * (len(conditions) - 1)
+            cond_str += " " + " ".join(["*"] * (len(conditions) - 1))
 
         from .CLE2000 import wrap_cle2000_line as _wrap_guard
         return _wrap_guard(f"IF {cond_str} THEN") + "\n"

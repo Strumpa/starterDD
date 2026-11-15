@@ -1,0 +1,44 @@
+For the absorption rate in the energy group 1:
+    - Minimal absolute error: 0.015001329640139564 %
+    - Maximum errors (bounds): (-1.0474567529917527 %, 2.0811202201467913 %)
+    - Average error: 0.1859902955441731 %
+    - Weighted average error: 0.08883006889880718 %
+    - RMS error: 0.5729916038760476 %
+    - Weighted RMS error: 0.4475496472585706 %
+
+For the absorption rate in the energy group 2:
+    - Minimal absolute error: 0.006998846355709505 %
+    - Maximum errors (bounds): (-0.2828789201961544 %, 0.6578035187193615 %)
+    - Average error: 0.200069684211851 %
+    - Weighted average error: 0.22436503383645887 %
+    - RMS error: 0.3069933383198261 %
+    - Weighted RMS error: 0.3307069150127898 %
+
+For the fission rate in the energy group 1:
+    - Minimal absolute error: 0.0004731997221645748 %
+    - Maximum errors (bounds): (-1.072156870769516 %, 2.1249208556869394 %)
+    - Average error: -0.007592402999515432 %
+    - Weighted average error: 0.04803670956053471 %
+    - RMS error: 0.7094085399400551 %
+    - Weighted RMS error: 0.563140122754812 %
+
+For the fission rate in the energy group 2:
+    - Minimal absolute error: 0.0011068703578328831 %
+    - Maximum errors (bounds): (-1.1414040321822927 %, 0.10548936751410075 %)
+    - Average error: -0.20789137525101192 %
+    - Weighted average error: -0.19955071281804482 %
+    - RMS error: 0.3161838093424764 %
+    - Weighted RMS error: 0.29902062719182887 %
+
+For the fission over absorption rate in the energy group 1:
+    - Minimal absolute error: 0.02180672266317308 %
+    - Maximum errors (bounds): (-1.200056085429137 %, 0.04290767523484701 %)
+    - Average error: -0.1932581929235084 %
+    - RMS error: 0.4888205510219083 %
+
+For the fission over absorption rate in the energy group 2:
+    - Minimal absolute error: 0.2414518546572549 %
+    - Maximum errors (bounds): (-0.8609605880007986 %, -0.2414518546572549 %)
+    - Average error: -0.40709352166062823 %
+    - RMS error: 0.4235091537802487 %
+

@@ -1,0 +1,44 @@
+For the absorption rate in the energy group 1:
+    - Minimal absolute error: 0.021355197824842242 %
+    - Maximum errors (bounds): (-1.1508185515184493 %, 2.047289431900474 %)
+    - Average error: -0.07425576282693465 %
+    - Weighted average error: -0.0146206461294898 %
+    - RMS error: 0.7148890518758657 %
+    - Weighted RMS error: 0.5589432157322067 %
+
+For the absorption rate in the energy group 2:
+    - Minimal absolute error: 0.00477859683702278 %
+    - Maximum errors (bounds): (-0.36248311858022114 %, 0.2585872163068945 %)
+    - Average error: 0.022347064525222143 %
+    - Weighted average error: 0.031439784417790835 %
+    - RMS error: 0.12518134483906604 %
+    - Weighted RMS error: 0.12061328207234415 %
+
+For the fission rate in the energy group 1:
+    - Minimal absolute error: 0.001586152629879271 %
+    - Maximum errors (bounds): (-1.1104854165485607 %, 2.08535379553493 %)
+    - Average error: -0.04633330325591582 %
+    - Weighted average error: 0.009274340409679173 %
+    - RMS error: 0.7106052554799583 %
+    - Weighted RMS error: 0.5609468545656288 %
+
+For the fission rate in the energy group 2:
+    - Minimal absolute error: 0.0012722984356258477 %
+    - Maximum errors (bounds): (-0.43223987548060194 %, 0.17259214231408737 %)
+    - Average error: -0.048178625449014544 %
+    - Weighted average error: -0.03963167316612307 %
+    - RMS error: 0.13395195412305227 %
+    - Weighted RMS error: 0.12420106666982055 %
+
+For the fission over absorption rate in the energy group 1:
+    - Minimal absolute error: 0.01649376978109251 %
+    - Maximum errors (bounds): (0.01649376978109251 %, 0.044244622414547546 %)
+    - Average error: 0.027958983642019476 %
+    - RMS error: 0.02916965011553787 %
+
+For the fission over absorption rate in the energy group 2:
+    - Minimal absolute error: 0.026300071559388526 %
+    - Maximum errors (bounds): (-0.08983396415449968 %, -0.026300071559388526 %)
+    - Average error: -0.07051070712679462 %
+    - RMS error: 0.07273865929583449 %
+

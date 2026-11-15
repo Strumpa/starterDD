@@ -1,0 +1,61 @@
+{
+ "built": "2026-11-14",
+ "builder": "tests/data/ge14_mini/build_fixture.py",
+ "pins": [
+  1,
+  2,
+  15,
+  28
+ ],
+ "compo_entries": [
+  "SIGNATURE",
+  "EDIHOM_COND",
+  "EDIR_2G"
+ ],
+ "sources": {
+  "temp_examples/GE14_DOM/results/coolant_density_1L_PT_3x3_HFP/GE14_DOM_DIAG/PT_IC_1L_MOC/2026-07-19T10-46-27/_CPO_GE14_DOM_DIAG": {
+   "size": 366755658,
+   "sha256": "5209b6e034e54ba4819329d11fd20393db26467c86f84b4fc69ba3f700308b71"
+  },
+  "temp_examples/GE14_DOM/Serpent/GE14_DOM_00_endfb8r1.serp": {
+   "size": 110889,
+   "sha256": "61071eb7992cc2a8734d48b723b5e90c0cfdcdbaaa67c12730e02979fba40019"
+  },
+  "temp_examples/GE14_DOM/Serpent/GE14_DOM_00_endfb8r1.serp_det0.m": {
+   "size": 22390238,
+   "sha256": "7475da608dfda2c1010a0013265b0e8234b12c82a7a299d9525f84bb8304e9c0"
+  },
+  "temp_examples/GE14_DOM/Serpent/GE14_DOM_00_endfb8r1.serp_res.m": {
+   "size": 37915,
+   "sha256": "38f199e148da6834a936d37737df95e94fdd5d2aa02842ae4e656572813920e4"
+  },
+  "temp_examples/GE14_DOM/results/coolant_density_1L_PT_3x3_HFP/GE14_DOM_DIAG/PT_IC_1L_MOC/2026-07-19T10-46-27/2G_data.npz": {
+   "size": 8631,
+   "sha256": "b19ff1807d390e7e08de240661d48c4c5b70bda811164e85a937e314c8189d1c"
+  },
+  "temp_examples/GE14_DOM/results/coolant_density_1L_PT_3x3_HFP/GE14_DOM_DIAG/PT_IC_1L_MOC/2026-07-19T10-46-27/density_00_0.txt": {
+   "size": 1991,
+   "sha256": "75379556ad8363f11ac1a35d9f0a013d09fa598773fca825fb9e2869f78487e5"
+  },
+  "temp_examples/GE14_DOM/results/coolant_density_1L_PT_3x3_HFP/GE14_DOM_DIAG/PT_IC_1L_MOC/2026-07-19T10-46-27/density_00_1.txt": {
+   "size": 1965,
+   "sha256": "c2edf139c35b8e8d999199ff99c5dbb81a1a541b3931d2cdff2631739ab40498"
+  },
+  "temp_examples/GE14_DOM/results/coolant_density_1L_PT_3x3_HFP/GE14_DOM_DIAG/PT_IC_1L_MOC/2026-07-19T10-46-27/density_00_2.txt": {
+   "size": 712,
+   "sha256": "b42631d73b73106b6d267cd3020b3d01f0e369a8e31f64360a8696d24faf4c8c"
+  },
+  "temp_examples/GE14_DOM/results/coolant_density_1L_PT_3x3_HFP/GE14_DOM_DIAG/PT_IC_1L_MOC/2026-07-19T10-46-27/density_00_3.txt": {
+   "size": 1972,
+   "sha256": "7cbc2273fdacca8ea062e8dd5d133feff3c6de179beacaae16762f14b5ff5eaf"
+  },
+  "temp_examples/GE14_DOM/results/coolant_density_1L_PT_3x3_HFP/GE14_DOM_DIAG/PT_IC_1L_MOC/2026-07-19T10-46-27/run_manifest.yaml": {
+   "size": 1391,
+   "sha256": "733a19e7d07b5b06462453929a4ca16940a40be8fbb8de3d8bb9566c421bcb21"
+  },
+  "temp_examples/GE14_DOM/results/coolant_density_1L_PT_3x3_HFP/GE14_DOM_DIAG/PT_IC_1L_MOC/sortie_DOM_1L_PT_3x3_HFP.csv": {
+   "size": 13931,
+   "sha256": "fb250e229d36248c160b39098c5e9cf447a62ef2a9ad47b860b694502d2da4d0"
+  }
+ }
+}

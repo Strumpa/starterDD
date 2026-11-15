@@ -7,10 +7,129 @@
 # Date : 19/02/2026 [created]
 
 import logging
+import re
 import yaml
 from copy import deepcopy
 
 log = logging.getLogger(__name__)
+
+
+def _plain(obj):
+    """Convert *obj* to plain YAML-safe Python types (tuples -> lists,
+    numpy scalars/arrays -> floats/lists), recursively."""
+    if isinstance(obj, dict):
+        return {k: _plain(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_plain(v) for v in obj]
+    if hasattr(obj, "tolist"):          # numpy scalar or array
+        return _plain(obj.tolist())
+    return obj
+
+
+def _deep_merge(base, updates):
+    """Return a copy of dict *base* with *updates* merged in. Nested dicts
+    are merged key by key; every other value replaces the base value."""
+    out = deepcopy(base)
+    for k, v in updates.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = deepcopy(v)
+    return out
+
+
+#: Relative tolerance used to match branch values (output state points,
+#: CLE2000 statepoint guards). CLE2000 REALs are single precision (~6e-8).
+STATEPOINT_RTOL = 1.0e-5
+
+
+def values_match(a, b, rtol=STATEPOINT_RTOL):
+    """True if two branch values are equal within *rtol* (absolute *rtol*
+    when both are zero)."""
+    a, b = float(a), float(b)
+    return abs(a - b) <= rtol * max(abs(a), abs(b), 1.0e-30) or (a == b)
+
+
+# ---------------------------------------------------------------------------
+# Statepoint compositions (plan §3.4, P3)
+# ---------------------------------------------------------------------------
+
+_ISO_NAME_RE = re.compile(r"^([A-Z][a-z]?)(\d{1,3})$")
+
+
+def normalise_composition(composition):
+    """``{ZAID or isotope name: N}`` -> ``{isotope name: float}``.
+
+    ZAIDs (``"1001"``, ``8016``) become DRAGON/starterDD isotope names
+    (``"H1"``, ``"O16"``), as in ``Composition.zaid_to_isotope``. Number
+    densities are in atoms/(barn·cm) and must be non-negative.
+    """
+    from ..MaterialProperties.material_mixture import get_element_symbol
+    out = {}
+    for key, n in composition.items():
+        k = str(key).strip()
+        if k.isdigit():
+            z, a = divmod(int(k), 1000)
+            if a == 0:
+                raise ValueError(f"Natural-element ZAID '{k}' is not supported.")
+            name = f"{get_element_symbol(z)}{a}"
+        elif _ISO_NAME_RE.match(k):
+            name = k
+        else:
+            raise ValueError(f"Cannot read isotope '{k}' (use a ZAID or e.g. 'H1').")
+        if name in out:
+            raise ValueError(f"Isotope {name} given twice in a composition.")
+        n = float(n)
+        if n < 0.0:
+            raise ValueError(f"Negative number density for {name}: {n}")
+        out[name] = n
+    return out
+
+
+def composition_mass_density(composition):
+    """Mass density (g/cm³) of a composition in atoms/(barn·cm), from the
+    starterDD isotopic masses (``material_mixture.ISOTOPIC_MASSES``)."""
+    from ..MaterialProperties.material_mixture import (
+        AVOGADRO, CM2_TO_BARN, get_element_symbol, get_isotope_atomic_mass,
+    )
+    symbol_to_z = {get_element_symbol(z): z for z in range(1, 104)}
+    total = 0.0
+    for name, n in normalise_composition(composition).items():
+        sym, a = _ISO_NAME_RE.match(name).groups()
+        total += n * get_isotope_atomic_mass(str(symbol_to_z[sym] * 1000 + int(a)))
+    return total * CM2_TO_BARN / AVOGADRO
+
+
+def read_material_composition(materials_yaml, material="COOLANT"):
+    """Isotopic composition of *material* in a starterDD material YAML
+    (``MIX_COMPOSITIONS`` entry with an ``isotopic_composition`` block),
+    normalised to isotope names."""
+    with open(materials_yaml) as f:
+        data = yaml.safe_load(f)
+    for entry in data.get("MIX_COMPOSITIONS", []):
+        if entry.get("name") == material:
+            comp = entry.get("isotopic_composition")
+            if not comp:
+                raise ValueError(
+                    f"{materials_yaml}: '{material}' has no isotopic_composition "
+                    f"(number densities are required for statepoint compositions).")
+            return normalise_composition(comp)
+    raise KeyError(f"No material '{material}' in {materials_yaml}.")
+
+
+def coolant_density_var(isotope):
+    """CLE2000 REAL variable holding the coolant number density of
+    *isotope* at the current statepoint (``N_H1``, ``N_O16``)."""
+    name = f"N_{isotope}"
+    if len(f"{name}_arr") > 12:
+        raise ValueError(f"CLE2000 name '{name}_arr' for {isotope} exceeds 12 characters.")
+    return name
+
+
+def coolant_density_array(isotope):
+    """CLE2000 ``UTL:`` array of the coolant number densities of *isotope*
+    over the coolant_density branch (``N_H1_arr``)."""
+    return f"{coolant_density_var(isotope)}_arr"
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +342,19 @@ class SectorConfig:
         return (f"SectorConfig(sectors={self.sectors}, "
                 f"angles={self.angles}, windmill={self.windmill}{extra})")
 
+    def to_dict(self):
+        """YAML entry of a ``sectorization`` sub-block (``fuel_pins``,
+        ``Gd_pins``, ``water_rods``). ``windmill`` lives one level up."""
+        d = {"sectors": list(self.sectors), "angles": list(self.angles)}
+        if self.splits is not None:
+            d["splits"] = list(self.splits)
+        if self.additional_radial_splits_in_moderator is not None:
+            d["additional_radial_splits_in_moderator"] = (
+                self.additional_radial_splits_in_moderator)
+        if self.subdivisions_coolant_corners is not None:
+            d["subdivisions_coolant_corners"] = self.subdivisions_coolant_corners
+        return _plain(d)
+
 
 # ---------------------------------------------------------------------------
 # ControlCrossSubmeshConfig – sub-meshing options for the control cross wings
@@ -341,6 +473,16 @@ class ControlCrossSubmeshConfig:
             f"extend_tube_boundaries={self.extend_splits_at_tube_boundaries}, "
             f"split_tubes_in_half={self.split_tubes_in_half})"
         )
+
+    def to_dict(self):
+        """YAML ``control_cross_submesh`` dict (inverse of :meth:`from_yaml`)."""
+        return _plain({
+            "enabled": self.enabled,
+            "control_cross_corner_splits": self.control_cross_corner_splits,
+            "central_structure_splits": self.central_structure_splits,
+            "extend_splits_at_tube_boundaries": self.extend_splits_at_tube_boundaries,
+            "split_tubes_in_half": self.split_tubes_in_half,
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +627,14 @@ class CrossModeratorDiscretizationConfig:
             f"{self.moderator_at_cross_corner_splits}, "
             f"stub_splits={self.stub_splits})"
         )
+
+    def to_dict(self):
+        """YAML ``cross_moderator_discretization`` dict."""
+        return _plain({
+            "cross_side_gap_splits": self.cross_side_gap_splits,
+            "moderator_at_cross_corner_splits": self.moderator_at_cross_corner_splits,
+            "stub_splits": self.stub_splits,
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -804,6 +954,27 @@ class BoxDiscretizationConfig:
                 f"control_cross_submesh={self.control_cross_submesh}, "
                 f"reassign_materials={self.reassign_materials})")
 
+    def to_dict(self):
+        """YAML ``box_discretization`` dict."""
+        d = {
+            "enabled": self.enabled,
+            "corner_splits": self.corner_splits,
+            "gap_splits": self.gap_splits,
+            "gap_wide_splits": self.gap_wide_splits,
+            "gap_narrow_splits": self.gap_narrow_splits,
+            "wide_wide_corner_splits": self.wide_wide_corner_splits,
+            "narrow_narrow_corner_splits": self.narrow_narrow_corner_splits,
+            "mixed_corner_splits": self.mixed_corner_splits,
+            "reassign_materials": self.reassign_materials,
+            "control_cross_submesh": (self.control_cross_submesh.to_dict()
+                                      if self.control_cross_submesh is not None
+                                      else False),
+        }
+        if self.cross_moderator_discretization is not None:
+            d["cross_moderator_discretization"] = (
+                self.cross_moderator_discretization.to_dict())
+        return _plain(d)
+
 # -------------------------------------------------------------------------------
 # VanishedRodDiscretizationConfig – sub-meshing options for vanished rod regions
 # -------------------------------------------------------------------------------
@@ -839,6 +1010,14 @@ class VanishedRodDiscretizationConfig:
     def __repr__(self):
         return (f"VanishedRodDiscretizationConfig(base_radius={self.base_radius}, "
                 f"radial_splits={self.radial_splits}, sector_config={self.sector_config.__repr__()})")
+
+    def to_dict(self):
+        """YAML ``vanished_rods`` entry of a ``sectorization`` block."""
+        d = {"base_radius": self.base_radius, "radial_splits": self.radial_splits,
+             "sectors": list(self.sector_config.sectors)}
+        if self.sector_config.angles:
+            d["angles"] = list(self.sector_config.angles)
+        return _plain(d)
 
     def resolve_radii_and_sectors(self, radius=None):
         """
@@ -1325,6 +1504,59 @@ class CalculationStep:
             f"mix_numbering='{self.mix_numbering_strategy}'{level_str})"
         )
 
+    # ------------------------------------------------------------------
+    # Serialisation
+    # ------------------------------------------------------------------
+
+    def to_dict(self):
+        """YAML step entry; ``DragonCalculationScheme._parse_step`` of it
+        rebuilds an identical step (every value is written explicitly, so
+        the parser defaults never apply)."""
+        d = {
+            "name": self.name,
+            "step_type": self.step_type,
+            "spatial_method": self.spatial_method,
+            "tracking": self.tracking,
+            "mix_numbering_strategy": self.mix_numbering_strategy,
+            "tdt_file_id": self.tdt_file_id,
+            "flux_level": self.flux_level,
+            "num_angles_2d": self.num_angles_2d,
+            "line_density": self.line_density,
+            "anisotropy_level": self.anisotropy_level,
+            "polar_angles_quadrature": self.polar_angles_quadrature,
+            "number_of_polar_angles": self.number_of_polar_angles,
+            "batch_size": self.batch_size,
+            "radial_scheme": self.radial_scheme,
+            "radial_params": self.radial_params,
+            "radial_overrides": self.radial_overrides,
+            "export_macros": self.export_macros,
+        }
+        if self.step_type == "self_shielding":
+            d["self_shielding_module"] = self.self_shielding_module
+            d["self_shielding_method"] = self.self_shielding_method
+            d["transport_correction"] = self.transport_correction
+            d["fuel_self_shielded_isotopes"] = self.fuel_self_shielded_isotopes
+            d["clad_self_shielded_isotopes"] = self.clad_self_shielded_isotopes
+        else:
+            d["leakage_model"] = self.leakage_model
+            d["leakage_correction"] = self.leakage_correction
+        sect = {"enabled": bool(self.sectorization_enabled)}
+        if self.sectorization_enabled:
+            cfgs = {"fuel_pins": self.fuel_sectors, "Gd_pins": self.gd_sectors,
+                    "water_rods": self.water_rod_sectors,
+                    "vanished_rods": self.vanished_rods_sectors}
+            windmills = [c.windmill for c in cfgs.values() if c is not None]
+            sect["windmill"] = bool(windmills[0]) if windmills else False
+            for key, cfg in cfgs.items():
+                if cfg is not None:
+                    sect[key] = cfg.to_dict()
+        d["sectorization"] = sect
+        if self.box_discretization is not None:
+            d["box_discretization"] = self.box_discretization.to_dict()
+        if self.macro_assignment is not None:
+            d["macro_assignment"] = self.macro_assignment
+        return _plain(d)
+
 
 # ---------------------------------------------------------------------------
 # CalculationBranch – parameter variation for branch calculations
@@ -1397,10 +1629,19 @@ class CalculationBranch:
         One of ``"coolant_density"``, ``"fuel_temperature"``,
         ``"coolant_temperature"``, ``"burnup"``.
     values : list[float]
-        Parameter values to iterate over.
+        Parameter values to iterate over (stored as floats: they are
+        written to CLE2000 REAL arrays).
+    labels : list[str] or None
+        Optional statepoint labels, one per value (e.g. ``["00", "40",
+        "80"]``), used in folder names, HDF5 groups and plots.
+    compositions : list[dict] or None
+        ``coolant_density`` only. One coolant composition per value,
+        ``{ZAID or isotope name: N [atoms/(barn·cm)]}``, written verbatim to
+        the MIX procedure (e.g. the exact benchmark isotopics). Without it the
+        H1/O16 densities are computed from the mass density (pure H2O).
     """
 
-    def __init__(self, name, branch_type, values):
+    def __init__(self, name, branch_type, values, labels=None, compositions=None):
         if branch_type not in VALID_BRANCH_TYPES:
             raise ValueError(
                 f"Invalid branch type '{branch_type}'. "
@@ -1414,7 +1655,76 @@ class CalculationBranch:
             )
         self.name = name
         self.type = branch_type
-        self.values = list(values)
+        self.values = [float(v) for v in values]
+        if labels is not None:
+            labels = [str(l) for l in labels]
+            if len(labels) != len(self.values):
+                raise ValueError(
+                    f"Branch '{name}': {len(labels)} labels for "
+                    f"{len(self.values)} values.")
+            if len(set(labels)) != len(labels):
+                raise ValueError(f"Branch '{name}': duplicate labels {labels}.")
+        self.labels = labels
+        if compositions is not None:
+            if branch_type != "coolant_density":
+                raise ValueError(
+                    f"Branch '{name}': compositions are only supported for "
+                    f"coolant_density branches, not '{branch_type}'.")
+            if len(compositions) != len(self.values):
+                raise ValueError(
+                    f"Branch '{name}': {len(compositions)} compositions for "
+                    f"{len(self.values)} values.")
+            compositions = [normalise_composition(c) for c in compositions]
+            for name_iso in {i for c in compositions for i in c}:
+                coolant_density_var(name_iso)          # CLE2000 name length
+        self.compositions = compositions
+
+    def coolant_compositions(self):
+        """Coolant composition at each value, ``[{isotope: N}, ...]``: the
+        explicit :attr:`compositions`, or H1/O16 computed from the mass
+        density (``compute_water_iso_densities_at_densities``, pure H2O).
+        Isotopes absent from one statepoint get 0."""
+        if self.type != "coolant_density":
+            raise ValueError(f"Branch '{self.name}' is not a coolant_density branch.")
+        if self.compositions is None:
+            from ..MaterialProperties.water_properties import (
+                compute_water_iso_densities_at_densities,
+            )
+            comps = compute_water_iso_densities_at_densities(self.values)
+        else:
+            comps = self.compositions
+        isotopes = self.composition_isotopes()
+        return [{iso: float(c.get(iso, 0.0)) for iso in isotopes} for c in comps]
+
+    def composition_isotopes(self):
+        """Ordered isotopes whose coolant density varies with this branch."""
+        if self.compositions is None:
+            return ["H1", "O16"]
+        seen = []
+        for c in self.compositions:
+            seen += [i for i in c if i not in seen]
+        return seen
+
+    def label_of(self, value):
+        """Label of the statepoint *value* (``None`` without labels)."""
+        i = self.index_of(value)
+        return None if (i is None or self.labels is None) else self.labels[i]
+
+    def index_of(self, value, rtol=STATEPOINT_RTOL):
+        """Index of *value* in :attr:`values` (within *rtol*), or ``None``."""
+        for i, v in enumerate(self.values):
+            if values_match(v, value, rtol):
+                return i
+        return None
+
+    def to_dict(self):
+        """YAML ``CALCULATION_BRANCHES`` entry."""
+        d = {"name": self.name, "type": self.type, "values": list(self.values)}
+        if self.labels is not None:
+            d["labels"] = list(self.labels)
+        if self.compositions is not None:
+            d["compositions"] = [dict(c) for c in self.compositions]
+        return _plain(d)
 
     @property
     def para_name(self):
@@ -1465,6 +1775,8 @@ class CalculationBranch:
             name=entry["name"],
             branch_type=entry["type"],
             values=entry["values"],
+            labels=entry.get("labels"),
+            compositions=entry.get("compositions"),
         )
 
 
@@ -1519,7 +1831,7 @@ class CalculationOutput:
             self.state_points = "ALL"
         elif isinstance(state_points, dict):
             self.state_points = {
-                k: list(v) for k, v in state_points.items()
+                k: [float(x) for x in v] for k, v in state_points.items()
             }
         else:
             self.state_points = "ALL"
@@ -1543,9 +1855,20 @@ class CalculationOutput:
             current = statepoint_dict.get(branch_type)
             if current is None:
                 continue
-            if current not in required_values:
+            if not any(values_match(current, v) for v in required_values):
                 return False
         return True
+
+    def to_dict(self):
+        """YAML ``CALCULATION_OUTPUTS`` entry."""
+        return _plain({
+            "name": self.name,
+            "comment": self.comment,
+            "isotopes": list(self.isotopes),
+            "spatial_integration_mode": self.spatial_integration_mode,
+            "energy_bounds": self.energy_bounds,
+            "state_points": self.state_points,
+        })
 
     def __repr__(self):
         return (
@@ -1650,10 +1973,23 @@ class EditionBetweenLevelsStep:
             f"EditionBetweenLevelsStep("
             f"name='{self.name}', "
             f"n_groups={self.number_of_macro_groups}, "
-            f"sph={self.sph_correction})",
-            f"max_iterations : {self.max_iterations}",
-            f"Tolerance for convergence : {self.tolerance}"
+            f"sph={self.sph_correction}, "
+            f"max_iterations={self.max_iterations}, "
+            f"tolerance={self.tolerance})"
         )
+
+    def to_dict(self):
+        """YAML step entry (inverse of ``DragonCalculationScheme._parse_step``)."""
+        return _plain({
+            "name": self.name,
+            "step_type": self.step_type,
+            "number_of_macro_groups": self.number_of_macro_groups,
+            "energy_groups_bounds": self.energy_groups_bounds,
+            "SPH_correction": self.sph_correction,
+            "max_SPH_group": self.max_sph_group,
+            "max_iterations": self.max_iterations,
+            "tolerance": self.tolerance,
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -1686,12 +2022,15 @@ class DragonCalculationScheme:
         Scheme identifier.
     """
 
-    def __init__(self, name="default"):
+    def __init__(self, name="default", tag=None):
         self.name = name
         self.steps = []
         self.branches = []   # list[CalculationBranch]
         self.outputs = []    # list[CalculationOutput]
         self.branch_loop_order = list(DEFAULT_BRANCH_LOOP_ORDER)
+        self.tag = None
+        if tag is not None:
+            self.set_tag(tag)
 
     # ------------------------------------------------------------------
     # Step management
@@ -1806,6 +2145,316 @@ class DragonCalculationScheme:
         return total
 
     # ------------------------------------------------------------------
+    # Serialisation, copies and programmatic variants (plan §3.8, P2)
+    # ------------------------------------------------------------------
+
+    def to_dict(self):
+        """Plain dict in the YAML layout read by :meth:`from_dict` /
+        :meth:`from_yaml`. ``from_dict(to_dict())`` rebuilds a scheme that
+        generates identical CLE2000 procedures."""
+        head = {"name": self.name}
+        if self.tag is not None:
+            head["tag"] = self.tag
+        head["steps"] = [st.to_dict() for st in self.steps]
+        return _plain({
+            "DRAGON_CALCULATION_SCHEME": head,
+            "CALCULATION_BRANCHES": [b.to_dict() for b in self.branches],
+            "CALCULATION_OUTPUTS": [o.to_dict() for o in self.outputs],
+            "BRANCH_LOOP_ORDER": list(self.branch_loop_order),
+        })
+
+    def to_yaml(self, path=None, header=None):
+        """YAML text of :meth:`to_dict`; also written to *path* if given.
+
+        Every parameter is written explicitly (parser defaults included), so
+        the file is a complete, resolved description of the scheme.
+        """
+        lines = [
+            "# Resolved DRAGON calculation scheme written by starterDD",
+            f"# scheme: {self.name}   variant_tag: {self.variant_tag}",
+        ]
+        if header:
+            lines += [f"# {l}" for l in str(header).splitlines()]
+        text = "\n".join(lines) + "\n" + yaml.safe_dump(
+            self.to_dict(), sort_keys=False, default_flow_style=None, width=100)
+        if path is not None:
+            with open(path, "w") as f:
+                f.write(text)
+        return text
+
+    def copy(self):
+        """Independent deep copy."""
+        return deepcopy(self)
+
+    #: YAML step keys accepted by :meth:`set_step` (everything
+    #: :meth:`_parse_step` reads).
+    STEP_KEYS = frozenset({
+        "name", "step_type", "spatial_method", "tracking", "mix_numbering_strategy",
+        "tdt_file_id", "flux_level", "num_angles_2d", "line_density",
+        "anisotropy_level", "polar_angles_quadrature", "number_of_polar_angles",
+        "batch_size", "radial_scheme", "radial_params", "radial_overrides",
+        "export_macros", "self_shielding_module", "self_shielding_method",
+        "transport_correction", "fuel_self_shielded_isotopes",
+        "clad_self_shielded_isotopes", "leakage_model", "leakage_correction",
+        "sectorization", "box_discretization", "macro_assignment",
+        "number_of_macro_groups", "energy_groups_bounds", "SPH_correction",
+        "max_SPH_group", "max_iterations", "tolerance",
+    })
+
+    def set_step(self, name, **params):
+        """Change parameters of step *name* **in place** and return ``self``.
+
+        *params* use the YAML step keys (e.g. ``num_angles_2d=12``,
+        ``spatial_method="CP"``, ``macro_assignment=[[...]]``). Nested dicts
+        such as ``sectorization`` are merged key by key, so
+        ``sectorization={"enabled": False}`` keeps the sub-blocks. The step is
+        rebuilt by the YAML parser, so every validation applies.
+
+        Raises:
+            KeyError: unknown step or parameter name.
+        """
+        unknown = set(params) - self.STEP_KEYS
+        if unknown:
+            raise KeyError(
+                f"Unknown step parameter(s) {sorted(unknown)}. "
+                f"Known: {sorted(self.STEP_KEYS)}")
+        for i, st in enumerate(self.steps):
+            if st.name == name:
+                self.steps[i] = self._parse_step(_deep_merge(st.to_dict(), params))
+                return self
+        raise KeyError(f"No step named '{name}' in scheme '{self.name}'.")
+
+    def with_step(self, name, **params):
+        """Copy of the scheme with :meth:`set_step` applied."""
+        return self.copy().set_step(name, **params)
+
+    def with_branch_values(self, branch_type, values, labels=None,
+                           selective_outputs="keep", name=None,
+                           compositions=None):
+        """Copy of the scheme with new values for one branch axis.
+
+        Selective outputs (``state_points`` dicts) are kept **in sync**, so an
+        output can no longer disappear silently because its CLE2000 guard
+        never fires.
+
+        Parameters
+        ----------
+        branch_type : str
+            One of ``VALID_BRANCH_TYPES``. The branch is created if absent.
+        values : list[float]
+        labels : list[str] or None
+            Statepoint labels, one per value.
+        selective_outputs : ``"keep"`` | ``"all"`` | dict
+            ``"keep"`` (default): an output that requested **every** old
+            value of the axis gets every new value; otherwise it keeps the
+            requested values that are still present (matched within
+            ``STATEPOINT_RTOL``). Outputs left with none raise
+            ``ValueError`` (all listed). ``"all"``: drop the restriction on
+            this axis.
+            ``{output_name: [values]}``: explicit new values for those
+            outputs (the others follow ``"keep"``).
+        name : str or None
+            Name of a new branch (default: *branch_type*).
+        compositions : list[dict] or None
+            ``coolant_density`` only: one coolant composition per value (see
+            :class:`CalculationBranch`). Compositions of the replaced branch
+            are **not** carried over, since they belong to the old values.
+        """
+        if not isinstance(selective_outputs, dict) and selective_outputs not in ("keep", "all"):
+            raise ValueError(
+                f"selective_outputs must be 'keep', 'all' or a dict, "
+                f"got {selective_outputs!r}.")
+        new = self.copy()
+        br = new.get_branch(branch_type)
+        old_values = list(br.values) if br is not None else []
+        if br is None:
+            br = CalculationBranch(name or branch_type, branch_type, values, labels,
+                                   compositions)
+            new.branches.append(br)
+        else:
+            idx = new.branches.index(br)
+            br = new.branches[idx] = CalculationBranch(br.name, branch_type, values,
+                                                       labels, compositions)
+        explicit = selective_outputs if isinstance(selective_outputs, dict) else {}
+        unknown = set(explicit) - {o.name for o in new.outputs}
+        if unknown:
+            raise KeyError(f"Unknown output(s) in selective_outputs: {sorted(unknown)}")
+        lost = []
+        for out in new.outputs:
+            if out.name in explicit:
+                if not isinstance(out.state_points, dict):
+                    out.state_points = {}
+                out.state_points[branch_type] = [float(v) for v in explicit[out.name]]
+                continue
+            sp = out.state_points
+            if not isinstance(sp, dict) or branch_type not in sp:
+                continue
+            if selective_outputs == "all":
+                del sp[branch_type]
+                if not sp:
+                    out.state_points = "ALL"
+                continue
+            requested = sp[branch_type]
+            if old_values and all(any(values_match(o, r) for r in requested)
+                                  for o in old_values):
+                sp[branch_type] = list(br.values)    # meant "every statepoint"
+                continue
+            kept = []
+            for v in requested:
+                j = br.index_of(v)
+                if j is not None and br.values[j] not in kept:
+                    kept.append(br.values[j])
+            if not kept:
+                lost.append(f"'{out.name}' ({branch_type} = {requested})")
+                continue
+            sp[branch_type] = kept
+        if lost:
+            raise ValueError(
+                f"These outputs request no value of the new {branch_type} "
+                f"values {br.values} and would never be generated: "
+                f"{', '.join(lost)}. Pass selective_outputs={{name: [values]}} "
+                f"for them, or selective_outputs='all'.")
+        return new.validate()
+
+    def with_coolant_statepoints(self, statepoints, densities=None,
+                                 material="COOLANT", selective_outputs="keep"):
+        """Copy of the scheme whose ``coolant_density`` branch carries the
+        **exact** coolant isotopics of each statepoint (plan §3.4).
+
+        Parameters
+        ----------
+        statepoints : dict
+            ``{label: source}`` in statepoint order, e.g. ``{"00":
+            "material_compos_00.yaml", "40": ..., "80": ...}``. A source is a
+            starterDD material YAML (its *material* entry is read) or a
+            composition dict ``{ZAID or isotope: N}``.
+        densities : dict or None
+            ``{label: rho [g/cm³]}`` used as the ``DCool`` PARA value. By
+            default rho is computed from the isotopics
+            (:func:`composition_mass_density`), so the PARA value and the
+            isotopics are consistent by construction.
+        material : str
+            Material name read from the YAML sources.
+        selective_outputs
+            As in :meth:`with_branch_values`.
+
+        The compositions are written verbatim to the MIX procedure, one
+        ``UTL:`` array per isotope, so a single multi-statepoint COMPO uses
+        the same isotopics as separate per-statepoint runs (and as Serpent).
+        """
+        if not statepoints:
+            raise ValueError("No statepoints given.")
+        labels, comps, values = [], [], []
+        for label, src in statepoints.items():
+            if isinstance(src, dict):
+                comp = normalise_composition(src)
+            else:
+                comp = read_material_composition(src, material)
+            labels.append(str(label))
+            comps.append(comp)
+            if densities is not None and label in densities:
+                values.append(float(densities[label]))
+            else:
+                values.append(composition_mass_density(comp))
+        for i in range(len(values)):
+            for j in range(i):
+                if values_match(values[i], values[j]):
+                    raise ValueError(
+                        f"Statepoints '{labels[j]}' and '{labels[i]}' have the same "
+                        f"coolant density {values[i]:.7g} g/cm3 (within "
+                        f"{STATEPOINT_RTOL:g}); they cannot be told apart in the COMPO.")
+        return self.with_branch_values(
+            "coolant_density", values, labels=labels, compositions=comps,
+            selective_outputs=selective_outputs, name="Coolant density variation")
+
+    def validate(self):
+        """Check that branches and selective outputs are consistent.
+
+        Every ``state_points`` entry of an output must name an existing
+        branch and list values present in that branch (within
+        ``STATEPOINT_RTOL``). Otherwise the generated CLE2000 guard never
+        fires (or uses an undeclared parameter) and the output is missing
+        from the COMPO. Without branches no guard is generated (single
+        statepoint, every output produced), so nothing is checked. Returns
+        ``self``.
+        """
+        if not self.branches:
+            return self
+        problems = []
+        for out in self.outputs:
+            if not isinstance(out.state_points, dict):
+                continue
+            for btype, vals in out.state_points.items():
+                br = self.get_branch(btype)
+                if br is None:
+                    problems.append(
+                        f"output '{out.name}': state_points on '{btype}', "
+                        f"which is not a branch of the scheme")
+                    continue
+                if not vals:
+                    problems.append(f"output '{out.name}': empty {btype} list")
+                missing = [v for v in vals if br.index_of(v) is None]
+                if missing:
+                    problems.append(
+                        f"output '{out.name}': {btype} value(s) {missing} not "
+                        f"in the branch values {br.values}")
+        if problems:
+            raise ValueError(
+                "Inconsistent calculation outputs (they would never be "
+                "generated):\n  - " + "\n  - ".join(problems))
+        return self
+
+    def descriptor(self):
+        """Short scheme descriptor ``<SSH_method>_<SSH_spatial>_<N>L_<flux
+        methods>[_<n>sp]``, e.g. ``PT_IC_2L_IC_MOC`` (run directory name)."""
+        ssh_steps = self.get_self_shielding_steps()
+        flux_steps = self.get_flux_steps()
+        if ssh_steps:
+            ssh_method = (ssh_steps[0].self_shielding_method or "RSE").upper()
+            ssh_spatial = (ssh_steps[0].spatial_method or "CP").upper()
+        else:
+            ssh_method = ssh_spatial = "UNK"
+        flux_methods = ("_".join(st.spatial_method.upper() for st in flux_steps)
+                        if flux_steps else "NONE")
+        parts = [ssh_method, ssh_spatial, f"{len(flux_steps)}L", flux_methods]
+        n_sp = self.get_total_statepoints()
+        if n_sp > 1:
+            parts.append(f"{n_sp}sp")
+        return "_".join(parts)
+
+    def content_hash(self, length=8):
+        """Hash of everything that changes the generated procedures (steps,
+        branches, outputs, loop order), not of the scheme name or tag."""
+        import hashlib
+        import json
+        d = self.to_dict()
+        d["DRAGON_CALCULATION_SCHEME"].pop("name", None)
+        d["DRAGON_CALCULATION_SCHEME"].pop("tag", None)
+        blob = json.dumps(d, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(blob.encode()).hexdigest()[:length]
+
+    @property
+    def variant_tag(self):
+        """Identifier of this scheme variant: the user :attr:`tag` if set,
+        otherwise ``<descriptor>_<content hash>`` (e.g.
+        ``PT_IC_2L_IC_MOC_3sp_1a2b3c4d``). Two schemes share an automatic tag
+        only if they generate the same procedures."""
+        if self.tag is not None:
+            return self.tag
+        return f"{self.descriptor()}_{self.content_hash()}"
+
+    def set_tag(self, tag):
+        """Set a user variant tag (letters, digits, ``_ - . +``; it is used in
+        directory names). ``None`` restores the automatic tag. Returns
+        ``self``."""
+        import re
+        if tag is not None and not re.fullmatch(r"[A-Za-z0-9_.+-]+", str(tag)):
+            raise ValueError(
+                f"Invalid tag {tag!r}: use letters, digits and _ - . + only.")
+        self.tag = None if tag is None else str(tag)
+        return self
+
+    # ------------------------------------------------------------------
     # YAML construction
     # ------------------------------------------------------------------
 
@@ -1888,7 +2537,13 @@ class DragonCalculationScheme:
         """
         with open(yaml_path, "r") as f:
             data = yaml.safe_load(f)
+        return cls.from_dict(data)
 
+    @classmethod
+    def from_dict(cls, data):
+        """Build a scheme from a dict with the :meth:`from_yaml` layout
+        (e.g. the output of :meth:`to_dict`)."""
+        data = deepcopy(data)
         # Accept multiple top-level key names for the flux scheme
         scheme_data = (
             data.get("DRAGON_CALCULATION_SCHEME")
@@ -1896,7 +2551,7 @@ class DragonCalculationScheme:
             or data
         )
         scheme_name = scheme_data.get("name", "from_yaml")
-        scheme = cls(name=scheme_name)
+        scheme = cls(name=scheme_name, tag=scheme_data.get("tag"))
 
         for step_data in scheme_data.get("steps", []):
             step = cls._parse_step(step_data)

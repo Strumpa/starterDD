@@ -56,3 +56,23 @@ PB2_INPUTS_DIR = DATA_DIR / "BWRProgressionProblems" / "PB2_inputs"
 PB2_UNCONTROLLED_GEOMETRY_YAML = str(PB2_INPUTS_DIR / "PB2_Type6" / "GEOM.yaml")
 PB2_CONTROLLED_GEOMETRY_YAML = str(PB2_INPUTS_DIR / "PB2_Type6-C" / "GEOM.yaml")
 PB2_INPUTS_DIR_STR = str(PB2_INPUTS_DIR)
+
+# ── Post-treatment test data (see tests/data/README.md) ──────────────────────
+# Tier 2: small real GE14 subset, committed.
+GE14_MINI_DIR = TESTS_DIR / "data" / "ge14_mini"
+GE14_MATERIAL_COMPOS_00_YAML = str(GE14_INPUTS_DIR / "ASSEMBLY" / "material_compos_00.yaml")
+# Tier 3: full local data, never committed. Tests needing it are marked
+# ``fulldata`` and skipped when it is absent.
+import os as _os
+FULL_DATA_DIR = Path(_os.environ.get("STARTERDD_TEST_DATA",
+                                     TESTS_DIR.parent / "temp_examples"))
+DONJON_DATA_DIR = Path(_os.environ.get("DONJON_DATA_DIR",
+                                       TESTS_DIR.parents[3] / "5.1" / "Donjon" / "data"))
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "fulldata: needs large local data ($STARTERDD_TEST_DATA, "
+        "$DONJON_DATA_DIR); skipped when absent. Deselect with -m 'not fulldata'.",
+    )

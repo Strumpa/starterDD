@@ -21,13 +21,12 @@ from .dragon_module_calls import (
 from ..DDModel.DragonCalculationScheme import (
     DragonCalculationScheme,
     BRANCH_TYPE_TO_PARA_NAME,
+    coolant_density_array,
+    coolant_density_var,
 )
 from ..DDModel.helpers import associate_material_to_rod_ID
 from ..MaterialProperties.material_mixture import (
     parse_all_compositions_from_yaml,
-)
-from ..MaterialProperties.water_properties import (
-    compute_water_iso_densities_at_densities
 )
 from ..GeometryAnalysis.tdt_parser import (
     read_material_mixture_indices_from_tdt_file,
@@ -383,6 +382,54 @@ class DragonCase:
 
         return mixeq_procedures
 
+    # -----------------------------------------------------------
+    # Coolant-density statepoints (shared by the 1L / 2L builders)
+    # -----------------------------------------------------------
+
+    @staticmethod
+    def _declare_coolant_density_vars(proc, density_branch):
+        """REAL variables ``N_<iso>`` holding the current coolant isotopics."""
+        for iso in density_branch.composition_isotopes():
+            proc.add_variable(coolant_density_var(iso), "REAL")
+
+    @staticmethod
+    def _coolant_density_utl_block(proc, density_branch):
+        """``UTL:`` arrays ``N_<iso>_arr``, one value per statepoint, from
+        the branch compositions (exact benchmark isotopics when given,
+        otherwise pure H2O from the mass density)."""
+        comps = density_branch.coolant_compositions()
+        proc.add_variable("n_dens", "INTEGER", len(comps))
+        block = "PARAMS := UTL: PARAMS ::\n"
+        for iso in density_branch.composition_isotopes():
+            vals = [f"{c[iso]:.10E}" for c in comps]
+            rows = "\n".join("            " + " ".join(vals[i:i + 3])
+                             for i in range(0, len(vals), 3))
+            block += (f"    CREA\n"
+                      f"        {coolant_density_array(iso)} <<n_dens>> =\n"
+                      f"{rows}\n")
+        return block + ";\n"
+
+    @staticmethod
+    def _coolant_density_grep_lines(density_branch, indent):
+        """``GREP:`` lines loading the current statepoint's isotopics."""
+        return [
+            wrap_cle2000_line(
+                f"{indent}    GREP: PARAMS :: "
+                f"GETVAL '{coolant_density_array(iso)}' "
+                f"<<{density_branch.counter_var}>> "
+                f">>{coolant_density_var(iso)}<< ;"
+            )
+            for iso in density_branch.composition_isotopes()
+        ]
+
+    @staticmethod
+    def _coolant_density_mix_args(density_branch):
+        """Extra MIX procedure arguments, in the LIB parameter order."""
+        if not density_branch:
+            return ""
+        return " " + " ".join(f"<<{coolant_density_var(iso)}>>"
+                              for iso in density_branch.composition_isotopes())
+
     @staticmethod
     def _check_supported_mixeq_transitions(scheme):
         """Reject numbering-strategy transitions the x2m builders cannot
@@ -562,6 +609,9 @@ class DragonCase:
         else:
             scheme = self.calc_scheme_yaml
         self.scheme = scheme
+        # Selective outputs must match branch values, otherwise their
+        # CLE2000 guard never fires and they are silently missing.
+        scheme.validate()
         self._check_supported_mixeq_transitions(scheme)
 
         # 2. Build assembly model
@@ -714,6 +764,9 @@ class DragonCase:
 
                 lib = LIB(assembly, density_branch=has_density, ssh_calculation_step=ssh_step)
                 lib.set_varying_density_materials(materials_with_varying_density)
+                if has_density:
+                    lib.set_coolant_branch_isotopes(
+                        scheme.get_branch("coolant_density").composition_isotopes())
                 mix_path = lib.write_to_c2m(
                     self.output_path, mix_proc_name,
                 )
@@ -1212,8 +1265,7 @@ class DragonCase:
         # Coolant density isotopic density variables
         density_branch = scheme.get_branch("coolant_density")
         if density_branch:
-            proc.add_variable("N_H", "REAL")
-            proc.add_variable("N_O", "REAL")
+            self._declare_coolant_density_vars(proc, density_branch)
 
         # kinf
         proc.add_variable("kinf", "REAL")
@@ -1276,31 +1328,10 @@ class DragonCase:
         utl_block += ";\n"
         proc.add_body_block(utl_block)
 
-        # Pre-compute N_H and N_O arrays for coolant density branch
+        # Coolant isotopic densities at each coolant density statepoint
         if density_branch:
-            iso_densities = compute_water_iso_densities_at_densities(
-                density_branch.values
-            )
-            nh_vals = " ".join(
-                f"{d['H1']:.8E}" for d in iso_densities
-            )
-            no_vals = " ".join(
-                f"{d['O16']:.8E}" for d in iso_densities
-            )
-            n_dens = len(density_branch.values)
-            proc.add_variable("n_dens", "INTEGER", n_dens)
-
-            nh_utl = (
-                f"PARAMS := UTL: PARAMS ::\n"
-                f"    CREA\n"
-                f"        N_H_arr <<n_dens>> =\n"
-                f"            {nh_vals}\n"
-                f"    CREA\n"
-                f"        N_O_arr <<n_dens>> =\n"
-                f"            {no_vals}\n"
-                f";\n"
-            )
-            proc.add_body_block(nh_utl)
+            proc.add_body_block(
+                self._coolant_density_utl_block(proc, density_branch))
 
         proc.add_body_line("")
 
@@ -1344,24 +1375,10 @@ class DragonCase:
                     f">>{branch.para_name}<< ;"
                 )
             )
-            # If this is the coolant density branch, also GREP N_H, N_O
+            # If this is the coolant density branch, also GREP the isotopics
             if branch.type == "coolant_density":
-                proc.add_body_line(
-                    wrap_cle2000_line(
-                        f"{indent}    GREP: PARAMS :: "
-                        f"GETVAL 'N_H_arr' "
-                        f"<<{branch.counter_var}>> "
-                        f">>N_H<< ;"
-                    )
-                )
-                proc.add_body_line(
-                    wrap_cle2000_line(
-                        f"{indent}    GREP: PARAMS :: "
-                        f"GETVAL 'N_O_arr' "
-                        f"<<{branch.counter_var}>> "
-                        f">>N_O<< ;"
-                    )
-                )
+                for line in self._coolant_density_grep_lines(branch, indent):
+                    proc.add_body_line(line)
 
         # Inner body (deepest indentation)
         inner_indent = "    " * len(ordered_branches)
@@ -1408,24 +1425,15 @@ class DragonCase:
         else:
             transport_correction = "NONE"
 
-        # Build MIX call — pass N_H N_O if density branch exists
-        if density_branch:
-            mix_call_line = (
-                f"LIBRARY := {mix_proc_name} :: "
-                f"<<Draglib>> '{ssh_method}' <<o_anis>> "
-                f"'{transport_correction}' "
-                f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
-                f"<<TCOOL>> <<TMODE>> <<TCTRL>> "
-                f"<<N_H>> <<N_O>> ;"
-            )
-        else:
-            mix_call_line = (
-                f"LIBRARY := {mix_proc_name} :: "
-                f"<<Draglib>> '{ssh_method}' <<o_anis>> "
-                f"'{transport_correction}' "
-                f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
-                f"<<TCOOL>> <<TMODE>> <<TCTRL>> ;"
-            )
+        # Build MIX call — pass the coolant isotopics if density branch exists
+        mix_call_line = (
+            f"LIBRARY := {mix_proc_name} :: "
+            f"<<Draglib>> '{ssh_method}' <<o_anis>> "
+            f"'{transport_correction}' "
+            f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
+            f"<<TCOOL>> <<TMODE>> <<TCTRL>>"
+            f"{self._coolant_density_mix_args(density_branch)} ;"
+        )
         proc.add_body_line(
             f"{inner_indent}* LIB: creation"
         )
@@ -1862,8 +1870,7 @@ class DragonCase:
 
         density_branch = scheme.get_branch("coolant_density")
         if density_branch:
-            proc.add_variable("N_H", "REAL")
-            proc.add_variable("N_O", "REAL")
+            self._declare_coolant_density_vars(proc, density_branch)
 
         proc.add_variable("kinfL1", "REAL")
         proc.add_variable("kinfL2", "REAL")
@@ -1915,27 +1922,8 @@ class DragonCase:
         proc.add_body_block(utl_block)
 
         if density_branch:
-            iso_densities = compute_water_iso_densities_at_densities(
-                density_branch.values
-            )
-            nh_vals = " ".join(
-                f"{d['H1']:.8E}" for d in iso_densities
-            )
-            no_vals = " ".join(
-                f"{d['O16']:.8E}" for d in iso_densities
-            )
-            n_dens = len(density_branch.values)
-            proc.add_variable("n_dens", "INTEGER", n_dens)
             proc.add_body_block(
-                f"PARAMS := UTL: PARAMS ::\n"
-                f"    CREA\n"
-                f"        N_H_arr <<n_dens>> =\n"
-                f"            {nh_vals}\n"
-                f"    CREA\n"
-                f"        N_O_arr <<n_dens>> =\n"
-                f"            {no_vals}\n"
-                f";\n"
-            )
+                self._coolant_density_utl_block(proc, density_branch))
 
         proc.add_body_line("")
 
@@ -1972,20 +1960,8 @@ class DragonCase:
                 )
             )
             if branch.type == "coolant_density":
-                proc.add_body_line(
-                    wrap_cle2000_line(
-                        f"{indent}    GREP: PARAMS :: "
-                        f"GETVAL 'N_H_arr' "
-                        f"<<{branch.counter_var}>> >>N_H<< ;"
-                    )
-                )
-                proc.add_body_line(
-                    wrap_cle2000_line(
-                        f"{indent}    GREP: PARAMS :: "
-                        f"GETVAL 'N_O_arr' "
-                        f"<<{branch.counter_var}>> >>N_O<< ;"
-                    )
-                )
+                for line in self._coolant_density_grep_lines(branch, indent):
+                    proc.add_body_line(line)
 
         inner_indent = "    " * len(ordered_branches)
 
@@ -2019,23 +1995,14 @@ class DragonCase:
         else:
             transport_correction = "NONE"
 
-        if density_branch:
-            mix_line = (
-                f"LIBRARY := {mix_proc_name} :: "
-                f"<<Draglib>> '{ssh_method}' <<o_anis>> "
-                f"'{transport_correction}' "
-                f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
-                f"<<TCOOL>> <<TMODE>> <<TCTRL>> "
-                f"<<N_H>> <<N_O>> ;"
-            )
-        else:
-            mix_line = (
-                f"LIBRARY := {mix_proc_name} :: "
-                f"<<Draglib>> '{ssh_method}' <<o_anis>> "
-                f"'{transport_correction}' "
-                f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
-                f"<<TCOOL>> <<TMODE>> <<TCTRL>> ;"
-            )
+        mix_line = (
+            f"LIBRARY := {mix_proc_name} :: "
+            f"<<Draglib>> '{ssh_method}' <<o_anis>> "
+            f"'{transport_correction}' "
+            f"<<TFUEL>> <<TBOX>> <<TCLAD>> "
+            f"<<TCOOL>> <<TMODE>> <<TCTRL>>"
+            f"{self._coolant_density_mix_args(density_branch)} ;"
+        )
         proc.add_body_line(f"{inner_indent}* LIB: creation")
         proc.add_body_line(
             wrap_cle2000_line(f"{inner_indent}{mix_line}")

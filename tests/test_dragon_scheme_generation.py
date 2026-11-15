@@ -738,9 +738,8 @@ class TestEDICOMPOWithBranches:
         ]
         edi_compo = EDI_COMPO(assembly, branches=branches, outputs=outputs)
         guard = edi_compo._build_statepoint_guard(outputs[0])
-        assert "IF " in guard
-        assert "DCool 0.7 =" in guard
-        assert "THEN" in guard
+        # Tolerant match |DCool - 0.7| < 1e-5 * 0.7 (single-precision REALs)
+        assert guard.strip() == "IF DCool 0.7 - ABS 1.000E-05 < THEN"
 
     def test_statepoint_guard_multiple_values(self):
         """Guard for multiple allowed values uses OR (RPN addition)."""
@@ -756,11 +755,46 @@ class TestEDICOMPOWithBranches:
         ]
         edi_compo = EDI_COMPO(assembly, branches=branches, outputs=outputs)
         guard = edi_compo._build_statepoint_guard(outputs[0])
-        # Should have two equality tests combined with +
-        assert "DCool 0.7 =" in guard
-        assert "DCool 0.5 =" in guard
-        assert "+" in guard
-        assert "0 >" in guard
+        # Two tolerant tests OR-ed with + ; no comparison of the LOGICAL
+        # result (CLE2000 rejects "<logical> 0 >").
+        assert guard.strip() == (
+            "IF DCool 0.7 - ABS 1.000E-05 < DCool 0.5 - ABS 1.000E-05 < + THEN")
+        assert "0 >" not in guard
+
+    def test_statepoint_guard_is_well_typed_rpn(self):
+        """Simulate CLE2000's type check (clestk.c): REAL operands for
+        - / ABS / <, LOGICAL operands for + and * between conditions, and
+        no comparison of a LOGICAL. The stack must end with one LOGICAL."""
+        assembly = self._make_mock_assembly()
+        branches = [
+            CalculationBranch("CD", "coolant_density", [0.7, 0.5, 0.3]),
+            CalculationBranch("FT", "fuel_temperature", [900, 1200]),
+        ]
+        outputs = [CalculationOutput(
+            "SEL", "", ["U235"], "FUEL", [],
+            state_points={"coolant_density": [0.7, 0.3],
+                          "fuel_temperature": [900]})]
+        guard = EDI_COMPO(assembly, branches=branches, outputs=outputs) \
+            ._build_statepoint_guard(outputs[0])
+        tokens = guard.split()[1:-1]          # strip IF / THEN
+        stack = []
+        for tok in tokens:
+            if tok == "ABS":
+                assert stack[-1] == "R"
+            elif tok in ("-", "<"):
+                b, a = stack.pop(), stack.pop()
+                assert a == b == "R", f"{tok} on {a},{b}"
+                stack.append("R" if tok == "-" else "L")
+            elif tok in ("+", "*"):
+                b, a = stack.pop(), stack.pop()
+                assert a == b == "L", f"{tok} on {a},{b}"
+                stack.append("L")
+            else:                              # variable or REAL literal
+                assert tok in ("DCool", "TFuel") or "." in tok, tok
+                stack.append("R")
+        assert stack == ["L"]
+        # int branch value -> REAL literal (long guards are wrapped at 72 cols)
+        assert "TFuel 900.0 -" in " ".join(guard.split())
 
     def test_statepoint_guard_multi_branch(self):
         """Guard for multiple branch types uses AND (* in RPN)."""
@@ -866,9 +900,10 @@ def test_x2m_with_branches_has_while_loops(tmp_path):
     # COMPO export (after all loops)
     assert "_COMPO := COMPO" in x2m
 
-    # Coolant density N_H / N_O arrays
-    assert "N_H_arr" in x2m
-    assert "N_O_arr" in x2m
+    # Coolant isotopic density arrays, one per isotope (pure H2O default)
+    assert "N_H1_arr" in x2m
+    assert "N_O16_arr" in x2m
+    assert "<<N_H1>> <<N_O16>> ;" in " ".join(x2m.split())
 
     # Verify line-length for the x2m
     for i, line in enumerate(x2m.splitlines(), 1):
@@ -958,7 +993,7 @@ def test_edir_with_branches_has_correct_editions(tmp_path):
 
 def test_mix_with_density_branch_has_nh_no_parameters(tmp_path):
     """MIX procedure generated when coolant_density branch is present
-    should accept N_H and N_O as additional REAL parameters."""
+    should accept N_H1 and N_O16 as additional REAL parameters."""
     case = DragonCase(
         case_name="GE14_MX",
         call_glow=False,
@@ -979,9 +1014,12 @@ def test_mix_with_density_branch_has_nh_no_parameters(tmp_path):
     with open(result["mix"]) as f:
         mix = f.read()
 
-    # The MIX procedure should reference N_H and N_O variables
-    assert "N_H" in mix
-    assert "N_O" in mix
+    # The MIX procedure receives one REAL per varying coolant isotope
+    assert "REAL N_H1 N_O16 ;" in mix
+    assert ":: >>N_H1<< >>N_O16<< ;" in mix
+    flat = " ".join(mix.split())
+    assert "H1 = H1_H2O <<N_H1>>" in flat         # thermal-scattering alias kept
+    assert "O16 = O16 <<N_O16>>" in flat
 
 
 def test_line_length_constraint_all_files(tmp_path):

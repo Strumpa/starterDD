@@ -1,0 +1,54 @@
+starterDD_version: 0.1.0
+run_timestamp: 2026-07-19T10-46-27
+case_name: GE14_DOM_DIAG
+assembly_id: GE14_DOM_DIAG
+dragon_executable: /path/to/Version5/Dragon/bin/Linux_aarch64/Dragon
+draglibs:
+  draglibendfb8r1SHEM295_v5p1: endfb8r1295
+draglib_paths:
+  draglibendfb8r1SHEM295_v5p1: /path/to/libraries/l_endian/draglibendfb8r1SHEM295_v5p1
+calculation_scheme:
+  name: GE14_1L_scheme_IC_PT_MOC
+  descriptor: PT_IC_1L_MOC
+  steps:
+  - name: SSH
+    type: self_shielding
+    method: IC
+    tracking: TISO
+    ssh_module: USS
+    ssh_method: PT
+  - name: FLUX
+    type: flux
+    method: MOC
+    tracking: TSPC
+  branches:
+    fuel_temperature:
+    - 900.0
+    coolant_temperature:
+    - 600.0
+    coolant_density:
+    - 0.73669
+  total_statepoints: 1
+  outputs:
+  - EDIHOM_COND
+  - EDIHOM_295
+  - EDIR_2G
+  - EDIR_295
+  tdt_files:
+  - step_name: SSH
+    actual_filename: GE14_DOM_DIAG_SSH_3x3_IC_TISO_MACRO.dat
+    standardized_filename: GE14_DOM_DIAG_SSH_IC_TISO_MACRO.dat
+    names_match: false
+  - step_name: FLUX
+    actual_filename: GE14_DOM_DIAG_FLUXL2_8_sectors_8_subd_water_rod_30_8_moder_2_sp_wrc_MOC_TSPC.dat
+    standardized_filename: GE14_DOM_DIAG_FLUX_MOC_TSPC.dat
+    names_match: false
+config_yamls:
+  MATS: material_compos_00.yaml
+  GEOM: GEOM_DIAG.yaml
+num_threads: 10
+execution:
+  success: true
+  return_code: 0
+  wall_time_seconds: 18002.01
+  keff: 0.9890895

@@ -84,6 +84,7 @@ NATURAL_ABUNDANCES = {
 ISOTOPIC_MASSES = {
     # H
     "1001": 1.007825,
+    "1002": 2.014102,      # AME2020 (coolant statepoint isotopics)
     # He
     "2004": 4.00260,
     # B
@@ -93,6 +94,7 @@ ISOTOPIC_MASSES = {
     "6012":   11.99671,
     # O
     "8016": 15.994915,
+    "8017": 16.999132, "8018": 17.999160,   # AME2020 (coolant statepoint isotopics)
     # Si 
     "14028": 27.977340, "14029": 28.976927, "14030": 29.973488,
     # Cr

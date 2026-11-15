@@ -942,7 +942,15 @@ class TestDryRun:
             result.run_directory, "inputs"
         )
         assert os.path.isdir(inputs_dir)
-        assert len(os.listdir(inputs_dir)) == 3
+        # MATS, GEOM, CALC_SCHEME + the resolved scheme (P2)
+        assert len(os.listdir(inputs_dir)) == 4
+        resolved = os.path.join(inputs_dir, "CALC_SCHEME_resolved.yaml")
+        assert os.path.isfile(resolved)
+        reloaded = DragonCalculationScheme.from_yaml(resolved)
+        assert reloaded.to_dict() == case.scheme.to_dict()
+        scheme_info = manifest["calculation_scheme"]
+        assert scheme_info["variant_tag"] == case.scheme.variant_tag
+        assert scheme_info["resolved_yaml"] == "CALC_SCHEME_resolved.yaml"
 
         # Procedures should be archived
         proc_dir = os.path.join(

@@ -20,3 +20,9 @@ tutorials/__pycache__/
 tutorials/results/
 
 tests/outputs
+
+# Local-only data: GE14 full samples and other large results (never committed)
+temp_examples/
+
+# HDF5 caches of DRAGON COMPOs written next to the ASCII files by CompoReader
+_CPO_*.h5

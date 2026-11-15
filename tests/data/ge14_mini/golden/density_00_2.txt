@@ -1,0 +1,16 @@
+For the absorption rate in the energy group 1:
+    - Minimal absolute error: 0.007819799476245394 %
+    - Maximum errors (bounds): (-0.16677282291905543 %, 0.21323722053481026 %)
+    - Average error: -0.030380091629632497 %
+    - Weighted average error: -0.04039525095352677 %
+    - RMS error: 0.11344870470605592 %
+    - Weighted RMS error: 0.10979531386711294 %
+
+For the absorption rate in the energy group 2:
+    - Minimal absolute error: 0.27946599935811 %
+    - Maximum errors (bounds): (0.27946599935811 %, 0.4059739225456481 %)
+    - Average error: 0.316881366489386 %
+    - Weighted average error: 0.32087032345311584 %
+    - RMS error: 0.319797013033724 %
+    - Weighted RMS error: 0.323865877596963 %
+
