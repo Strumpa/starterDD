@@ -146,6 +146,11 @@ class DragonRunner:
     create_latest_symlink : bool
         If ``True``, maintain a ``latest`` symlink pointing
         to the most recent run directory.
+    run_subdirs : list[str] or None
+        Folders between *results_root* and the timestamp. ``None``
+        (default) gives ``<case_name>/<scheme_descriptor>``; ``[]`` puts
+        the timestamped runs directly in *results_root* (used by the
+        study layer, which builds its own tree).
     """
 
     def __init__(
@@ -156,6 +161,7 @@ class DragonRunner:
         results_root="./results",
         num_threads=1,
         create_latest_symlink=True,
+        run_subdirs=None,
     ):
         self.case = dragon_case
         # Store raw arguments — resolution is deferred to run()
@@ -168,6 +174,7 @@ class DragonRunner:
         self.results_root = os.path.abspath(results_root)
         self.num_threads = num_threads
         self.create_latest_symlink = create_latest_symlink
+        self.run_subdirs = None if run_subdirs is None else [str(s) for s in run_subdirs]
 
         # Populated after generate_cle2000_procedures
         self._procedure_files = None
@@ -292,6 +299,9 @@ class DragonRunner:
                 └── <scheme_descriptor>/
                     └── <timestamp>/
 
+        or ``<results_root>/<run_subdirs...>/<timestamp>/`` when
+        *run_subdirs* was given.
+
         Parameters
         ----------
         timestamp : str
@@ -302,13 +312,11 @@ class DragonRunner:
         str
             Absolute path to the run directory.
         """
-        scheme_desc = self._get_scheme_descriptor()
-        run_dir = os.path.join(
-            self.results_root,
-            self.case.case_name,
-            scheme_desc,
-            timestamp,
-        )
+        if self.run_subdirs is None:
+            subdirs = [self.case.case_name, self._get_scheme_descriptor()]
+        else:
+            subdirs = self.run_subdirs
+        run_dir = os.path.join(self.results_root, *subdirs, timestamp)
         os.makedirs(run_dir, exist_ok=True)
         os.makedirs(
             os.path.join(run_dir, "inputs"), exist_ok=True

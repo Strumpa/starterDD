@@ -541,6 +541,7 @@ class DragonCase:
         num_threads=1,
         create_latest_symlink=True,
         dry_run=False,
+        run_subdirs=None,
     ):
         """Generate CLE2000 procedures and execute the Dragon case.
 
@@ -564,6 +565,9 @@ class DragonCase:
         dry_run : bool
             If ``True``, stage inputs and write manifest but
             do not execute Dragon.
+        run_subdirs : list[str] or None
+            Folders between *results_root* and the timestamp (see
+            ``DragonRunner``). ``None``: ``<case_name>/<descriptor>``.
 
         Returns
         -------
@@ -581,6 +585,7 @@ class DragonCase:
             results_root=results_root,
             num_threads=num_threads,
             create_latest_symlink=create_latest_symlink,
+            run_subdirs=run_subdirs,
         )
         return runner.run(dry_run=dry_run)
 
@@ -805,9 +810,12 @@ class DragonCase:
         # ----- EDIR.c2m (EDI/COMPO) -----
         edir_proc_name = f"EDIR"
         if scheme.has_branches():
+            # Loop order, the order in which the main x2m passes the
+            # statepoint values: EDIR.c2m reads them positionally, so both
+            # sides must use this same list (the YAML order may differ).
             edi_compo = EDI_COMPO(
                 assembly,
-                branches=scheme.branches,
+                branches=scheme.get_ordered_branches(),
                 outputs=scheme.outputs,
             )
         else:
@@ -1489,10 +1497,11 @@ class DragonCase:
                 f"{inner_indent}* EDI/COMPO call"
             )
             # Build the EDIR call with branch params
-            # COMPO is passed as I/O data structure
+            # COMPO is passed as I/O data structure. CLE-2000 passes them
+            # by position: same list as the >>...<< reads of EDIR.c2m.
             para_args = " ".join(
                 f"<<{b.para_name}>>"
-                for b in ordered_branches
+                for b in edi_compo.branches
             )
             edir_call = (
                 f"COMPO := {edir_proc_name} FLUX {flux_library} "
@@ -2097,8 +2106,9 @@ class DragonCase:
 
         # --- EDIR call (coarse library + L2 tracking) ---
         proc.add_body_line(f"{inner_indent}* EDI/COMPO call")
+        # Positional: same list as the >>...<< reads of EDIR.c2m.
         para_args = " ".join(
-            f"<<{b.para_name}>>" for b in ordered_branches
+            f"<<{b.para_name}>>" for b in edi_compo.branches
         )
         proc.add_body_line(
             wrap_cle2000_line(

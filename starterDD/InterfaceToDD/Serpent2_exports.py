@@ -716,8 +716,9 @@ class S2_Material:
             for zaid, frac in self.composition.items():
                 lines.append(f"    {zaid}{suffix} {frac}")
         else:
+            fmt = getattr(self, "density_format", ".6E")
             for zaid, density in self.composition.items():
-                lines.append(f"    {zaid}{suffix} {density:.6E}")
+                lines.append(f"    {zaid}{suffix} {density:{fmt}}")
         
         return "\n".join(lines)
     
@@ -3450,6 +3451,151 @@ class Serpent2Model:
         # Internal tracking
         self._pin_universe_map = {}  # pin_idx -> S2_PinUniverse
         self._built = False
+        # Manifest entries of detectors added through a ComparisonSpec
+        # (PostTreatment.spec); written as <input>.detectors.json by write().
+        self.detector_manifest_entries = []
+
+    # ── reference model of one DRAGON statepoint ──────────────────────────
+    #: Serpent names of the compositions of the starterDD material YAMLs
+    #: (the names used by the GE14 references).
+    DEFAULT_MATERIAL_NAMES = {"COOLANT": "coolant", "CLAD": "zr2", "GAP": "gap",
+                              "MODERATOR": "moderator", "CHANNEL_BOX": "zr4"}
+
+    @classmethod
+    def from_dragon_case(cls, case, statepoint=None, spec=None,
+                         library: str = "endfb8r1", settings: 'S2_Settings' = None,
+                         material_names: dict = None,
+                         apply_self_shielding: str = "from_yaml",
+                         structural_temperature: float = 600.0):
+        """Serpent2 reference model of one statepoint of a ``DragonCase``.
+
+        The geometry and fuel compositions come from the case's GEOM/MATS
+        YAMLs, with the same per-pin material numbering as DRAGON
+        (``number_fuel_material_mixtures_by_pin``). The statepoint is applied
+        as in the DRAGON ``MIX`` procedure:
+
+        - ``COOLANT``: the branch isotopics of that statepoint
+          (``CalculationBranch.coolant_compositions()``, i.e. exactly the
+          ``N_<iso>_arr`` values of the x2m), written with 11 significant
+          digits like the CLE-2000 arrays, at the coolant temperature;
+        - ``MODERATOR``: YAML isotopics, at the coolant temperature
+          (``TMODE := TCool``);
+        - fuel and ``GAP``: the fuel temperature (``MIX 3 <<TFUEL>>``);
+        - other materials: *structural_temperature*.
+
+        Args:
+            case: ``DragonCase`` (its scheme object, or its CALC_SCHEME).
+            statepoint: See ``DragonCalculationScheme.statepoint_values``
+                (a label such as ``"40"``, a ``{branch_type: value}`` dict,
+                or ``None`` for a single-statepoint scheme).
+            spec: ``ComparisonSpec`` whose detectors are added
+                (``spec.configure_serpent``); the manifest is written by
+                :meth:`write`.
+            library: Nuclear-data evaluation (suffixes, detector reactions).
+            settings: ``S2_Settings`` (default: new settings for *library*).
+            material_names: Overrides of :attr:`DEFAULT_MATERIAL_NAMES`.
+            apply_self_shielding: Radial zoning of the fuel
+                (``analyze_lattice_description``).
+            structural_temperature: Temperature of the other materials (K).
+
+        The model has ``statepoint`` (``{branch_type: value}``) and
+        ``coolant_composition`` (``{isotope: N}`` or ``None``) attributes.
+        """
+        from ..DDModel.DragonCalculationScheme import DragonCalculationScheme
+        from ..DDModel.DragonModel import CartesianAssemblyModel
+        from ..DDModel.helpers import associate_material_to_rod_ID
+        from ..MaterialProperties.material_mixture import parse_all_compositions_from_yaml
+
+        scheme = getattr(case, "scheme", None)
+        if scheme is None:
+            src = case.calc_scheme_yaml
+            scheme = (src if isinstance(src, DragonCalculationScheme)
+                      else DragonCalculationScheme.from_yaml(src))
+        values = scheme.statepoint_values(statepoint) if scheme.has_branches() else {}
+        t_fuel = float(values.get("fuel_temperature", 900.0))
+        t_cool = float(values.get("coolant_temperature", 600.0))
+        names = {**cls.DEFAULT_MATERIAL_NAMES, **(material_names or {})}
+
+        assembly = CartesianAssemblyModel(name=case.case_name, tdt_file="",
+                                          geometry_description_yaml=case.geom_yaml)
+        assembly.set_rod_ID_to_material_mapping(
+            associate_material_to_rod_ID(case.mats_yaml, case.geom_yaml))
+        assembly.set_uniform_temperatures(
+            fuel_temperature=t_fuel, gap_temperature=t_fuel,
+            coolant_temperature=t_cool, moderator_temperature=t_cool,
+            structural_temperature=structural_temperature)
+        assembly.analyze_lattice_description(build_pins=True,
+                                             apply_self_shielding=apply_self_shielding)
+        assembly.set_material_compositions(parse_all_compositions_from_yaml(case.mats_yaml))
+        assembly.number_fuel_material_mixtures_by_pin()
+
+        if settings is None:
+            settings = S2_Settings()
+            settings.set_nuclear_data_evaluation(library)
+            sp_txt = ", ".join(f"{k}={v:g}" for k, v in values.items()) or "single statepoint"
+            settings.title = f"{case.case_name} - starterDD reference ({sp_txt})"
+        model = cls(assembly, settings)
+        model.build(gap_material_name=names["GAP"], clad_material_name=names["CLAD"],
+                    coolant_material_name=names["COOLANT"],
+                    outer_water_material_name=names["MODERATOR"],
+                    channel_box_material_name=names["CHANNEL_BOX"])
+        model.build_structural_materials_from_assembly(
+            name_map=names,
+            temperature_map={"COOLANT": t_cool, "MODERATOR": t_cool, "GAP": t_fuel},
+            default_temperature=structural_temperature)
+
+        model.statepoint = dict(values)
+        model.coolant_composition = None
+        branch = scheme.get_branch("coolant_density")
+        if branch is not None:
+            comp = branch.coolant_compositions()[branch.index_of(values["coolant_density"])]
+            cname = names["COOLANT"]
+            k = next(i for i, m in enumerate(model.materials) if m.name == cname)
+            new = S2_Material.from_raw(cname, {i: n for i, n in comp.items() if n > 0.0},
+                                       t_cool, is_burnable=False,
+                                       moder=model.materials[k].moder)
+            new.density_format = ".10E"          # CLE-2000 UTL arrays: 11 digits
+            model.materials[k] = new
+            model.coolant_composition = dict(comp)
+        if spec is not None:
+            spec.configure_serpent(model, library, response_temperature=t_fuel)
+        return model
+
+    # ── shared helpers (deduplicated cards) ───────────────────────────────
+    def ensure_energy_grid(self, name: str, boundaries_MeV: list = None) -> 'S2_EnergyGrid':
+        """Return the ``ene`` grid *name*, creating it if needed (from
+        *boundaries_MeV*, or the preset of that name, or a single bin).
+
+        Raises ``ValueError`` if a grid of that name exists with other bounds,
+        so that one name never stands for two meshes."""
+        if boundaries_MeV is not None:
+            new = S2_EnergyGrid(name, list(boundaries_MeV))
+        elif name in SUPPORTED_ENERGY_MESHES:
+            new = S2_EnergyGrid.from_preset(name)
+        else:
+            new = S2_EnergyGrid.full_range(name=name)
+        for eg in self.energy_grids:
+            if eg.name == name:
+                same = (len(eg.boundaries) == len(new.boundaries) and all(
+                    abs(a - b) <= 1e-8 * abs(b) for a, b in zip(eg.boundaries, new.boundaries)))
+                if not same:
+                    raise ValueError(f"Energy grid '{name}' already exists with "
+                                     f"{eg.n_groups} different groups.")
+                return eg
+        self.energy_grids.append(new)
+        return new
+
+    def ensure_response_material(self, isotope: str, temperature: float = 900.0,
+                                 xs_suffix: str = None) -> 'S2_IsotopeResponseMaterial':
+        """Return the single-isotope response material of *isotope*,
+        creating it if needed."""
+        for rm in self.isotope_response_materials:
+            if rm.isotope_name == isotope:
+                return rm
+        rm = S2_IsotopeResponseMaterial(isotope_name=isotope, temperature=temperature,
+                                        xs_suffix=xs_suffix)
+        self.isotope_response_materials.append(rm)
+        return rm
     
     def build(self, gap_material_name: str = "gap",
               clad_material_name: str = "clad",
@@ -3604,7 +3750,17 @@ class Serpent2Model:
             if comp_name in fuel_base_names or s2_name in fuel_base_names:
                 continue
             
-            temp = temperature_map.get(comp_name, default_temperature)
+            temp = self._dragon_temperature(comp_name, default_temperature)
+            if comp_name in temperature_map:
+                given = float(temperature_map[comp_name])
+                if temp is not None and abs(given - temp) > 1e-9:
+                    warnings.warn(
+                        f"{comp_name} at {given} K in Serpent, but DRAGON's MIX uses "
+                        f"{temp} K for it (LIB.DEFAULT_TEMPERATURE_MAP); the codes "
+                        "will differ.", stacklevel=2)
+                temp = given
+            elif temp is None:
+                temp = default_temperature
             iso_dict = composition.get_isotope_name_composition()
             if not iso_dict:
                 continue
@@ -3638,6 +3794,24 @@ class Serpent2Model:
             self.materials.append(mat)
             existing_names.add(s2_name)
     
+    def _dragon_temperature(self, composition_name: str, structural: float):
+        """Temperature DRAGON's ``MIX`` gives a non-fuel composition
+        (``LIB.DEFAULT_TEMPERATURE_MAP``: GAP -> TFUEL, COOLANT -> TCOOL,
+        MODERATOR -> TMODE, others -> structural), from the assembly
+        defaults; ``None`` for a name DRAGON does not map."""
+        from .dragon_module_calls import LIB
+        var = LIB.DEFAULT_TEMPERATURE_MAP.get(composition_name.upper())
+        a = self.assembly
+        values = {
+            "TFUEL": getattr(a, "default_fuel_temperature", None),
+            "TCOOL": getattr(a, "default_coolant_temperature", None),
+            "TMODE": getattr(a, "default_moderator_temperature", None),
+        }
+        if var is None:
+            return None
+        return values.get(var) if values.get(var) is not None else \
+            getattr(a, "default_structural_temperature", structural)
+
     def add_thermal_scattering(self, name: str, library_name: str = None,
                                 temperature: float = None,
                                 evaluation: str = None):
@@ -3869,31 +4043,14 @@ class Serpent2Model:
                 "Example: {'fission': ['U235', 'U238'], 'absorption': ['Gd155']}"
             )
         
-        # Build energy grid
+        # Energy grid (reused if already present; same name = same bounds)
         # Priority: explicit bounds > preset by name > single full-range bin
-        if energy_bounds is not None:
-            eg = S2_EnergyGrid(name=energy_grid_name, boundaries=energy_bounds)
-        elif energy_grid_name in SUPPORTED_ENERGY_MESHES:
-            eg = S2_EnergyGrid.from_preset(energy_grid_name)
-        else:
-            eg = S2_EnergyGrid.full_range(name=energy_grid_name)
-        self.energy_grids.append(eg)
-        
-        # Collect all unique isotopes from the map
-        all_isotopes = set()
+        self.ensure_energy_grid(energy_grid_name, energy_bounds)
+
+        # Isotope response materials (one per unique isotope)
         for isotope_list in reaction_isotope_map.values():
-            all_isotopes.update(isotope_list)
-        
-        # Build isotope response materials (one per unique isotope)
-        existing_response_names = {rm.isotope_name for rm in self.isotope_response_materials}
-        for iso in all_isotopes:
-            if iso not in existing_response_names:
-                resp_mat = S2_IsotopeResponseMaterial(
-                    isotope_name=iso,
-                    temperature=fuel_temperature,
-                    xs_suffix=xs_suffix,
-                )
-                self.isotope_response_materials.append(resp_mat)
+            for iso in isotope_list:
+                self.ensure_response_material(iso, fuel_temperature, xs_suffix)
         
         # Build detectors — one per unique fuel pin
         for univ in self.pin_universes:
@@ -3969,33 +4126,12 @@ class Serpent2Model:
             )
         
         # ── Energy grid (reuse if already present) ──
-        existing_grids = {eg.name for eg in self.energy_grids}
-        if energy_grid_name not in existing_grids:
-            if energy_bounds is not None:
-                eg = S2_EnergyGrid(name=energy_grid_name,
-                                   boundaries=energy_bounds)
-            elif energy_grid_name in SUPPORTED_ENERGY_MESHES:
-                eg = S2_EnergyGrid.from_preset(energy_grid_name)
-            else:
-                eg = S2_EnergyGrid.full_range(name=energy_grid_name)
-            self.energy_grids.append(eg)
-        
+        self.ensure_energy_grid(energy_grid_name, energy_bounds)
+
         # ── Isotope response materials (dedup) ──
-        all_isotopes = set()
         for isotope_list in reaction_isotope_map.values():
-            all_isotopes.update(isotope_list)
-        
-        existing_response_names = {
-            rm.isotope_name for rm in self.isotope_response_materials
-        }
-        for iso in all_isotopes:
-            if iso not in existing_response_names:
-                resp_mat = S2_IsotopeResponseMaterial(
-                    isotope_name=iso,
-                    temperature=fuel_temperature,
-                    xs_suffix=xs_suffix,
-                )
-                self.isotope_response_materials.append(resp_mat)
+            for iso in isotope_list:
+                self.ensure_response_material(iso, fuel_temperature, xs_suffix)
         
         # ── Collect all fuel materials across every pin ──
         all_fuel_mats = []
@@ -4038,20 +4174,40 @@ class Serpent2Model:
                           If provided and no matching grid already exists,
                           a new grid is created.
         """
-        # Ensure an energy grid exists
-        existing_grids = {eg.name for eg in self.energy_grids}
-        if energy_grid_name not in existing_grids:
-            if energy_bounds is not None:
-                eg = S2_EnergyGrid(name=energy_grid_name,
-                                   boundaries=energy_bounds)
-            elif energy_grid_name in SUPPORTED_ENERGY_MESHES:
-                eg = S2_EnergyGrid.from_preset(energy_grid_name)
-            else:
-                eg = S2_EnergyGrid.two_group(name=energy_grid_name)
-            self.energy_grids.append(eg)
-        
+        # Ensure an energy grid exists (unknown names default to 2 groups)
+        if (energy_bounds is None and energy_grid_name not in SUPPORTED_ENERGY_MESHES
+                and energy_grid_name not in {eg.name for eg in self.energy_grids}):
+            energy_bounds = list(SUPPORTED_ENERGY_MESHES["2g"])
+        self.ensure_energy_grid(energy_grid_name, energy_bounds)
+
         det = S2_Detector(name=name, energy_grid_name=energy_grid_name)
         self.detectors.append(det)
+
+    def add_pin_flux_detectors(self, energy_grid_name: str = "295g",
+                               pins: list = None, name_prefix: str = "det_flux",
+                               energy_bounds: list = None,
+                               detector_type: int = -4):
+        """One flux detector per fuel pin (``dm`` = the pin's fuel zones,
+        ``dt -4``), as the ``det_flux_<grid>_<universe>`` detectors of the
+        GE14 references.
+
+        Args:
+            energy_grid_name: Energy grid (preset name or *energy_bounds*).
+            pins: Pin indices (default: every fuel pin).
+            name_prefix: Detector names are ``<prefix>_<grid>_<universe>``.
+            energy_bounds: Explicit bounds (MeV) for a new grid.
+            detector_type: ``dt`` flag.
+        """
+        self.ensure_energy_grid(energy_grid_name, energy_bounds)
+        wanted = None if pins is None else set(pins)
+        for pin_idx, univ in sorted(self._pin_universe_map.items()):
+            if wanted is not None and pin_idx not in wanted:
+                continue
+            self.detectors.append(S2_Detector(
+                name=f"{name_prefix}_{energy_grid_name}_{univ.universe_name}",
+                energy_grid_name=energy_grid_name,
+                domain_materials=univ.get_fuel_material_names(),
+                detector_type=detector_type))
     
     def write(self, filepath: str):
         """Write the complete Serpent2 input file.
@@ -4143,8 +4299,25 @@ class Serpent2Model:
         content = "\n".join(sections)
         with open(filepath, 'w', encoding='ascii', errors='replace') as f:
             f.write(content)
-        
+
         print(f"Serpent2 input written to: {filepath}")
+        if self.detector_manifest_entries:
+            self.write_detector_manifest(filepath)
+
+    def write_detector_manifest(self, filepath: str):
+        """Write ``<filepath>.detectors.json``: the manifest of the detectors
+        added through a ``ComparisonSpec`` (``spec.configure_serpent``).
+        Post-processing (``SerpentRun``) reads it instead of inferring it."""
+        from ..PostTreatment.serpent_reader import (
+            DetectorManifest, _sha256, default_manifest_path)
+        from pathlib import Path
+        names = {d.name for d in self.detectors}
+        entries = [e for e in self.detector_manifest_entries if e.detector in names]
+        manifest = DetectorManifest(entries, source={
+            "input": str(filepath), "input_sha256": _sha256(Path(filepath)),
+            "title": self.settings.title, "inferred": False})
+        manifest.validate()
+        return manifest.write(default_manifest_path(filepath))
     
     def summary(self) -> str:
         """Print a summary of the model.
