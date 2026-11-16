@@ -1,0 +1,149 @@
+# Code-to-code study: GE14 DOM, DOM-C and VAN, 2-level scheme
+#   SSH  : PT (USS), IC, 3x3 macro grouping
+#   L1   : IC, 3x3_6x6 macro grouping, 295 groups, SPH -> 26 groups
+#   L2   : MOC (TSPC), 26 groups
+# under
+#   HZP  : TFuel = 600 K, 0 % void
+#   HFP  : TFuel = 900 K, 0 / 40 / 80 % void
+#
+# 3 lattices x 1 variant x 2 conditions = 6 DRAGON cases (6 COMPOs),
+# 3 x (1 + 3) = 12 statepoints, each with its Serpent2 reference
+# (labels HZP_00, HFP_00, HFP_40, HFP_80).
+#
+# Usage (see tutorials/code_to_code_study.py):
+#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml status
+#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml run --dry-run
+#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml run \
+#          --assembly GE14_DOM --condition HFP --threads 10        # one case per job
+#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml serpent
+#
+# ${NAME} values come from: --set NAME=value / variables={...}, then the
+# environment, then the block below. Relative paths are relative to this file.
+
+variables:
+  # Cluster work tree of the NSE GE14 runs: GE14_<A>/tdt_files, GE14_<A>/Serpent.
+  # Locally: --set GE14_WORK=/path/to/NSE_paper/work/GE14
+  GE14_WORK: /path/to/NSE_paper/work/GE14
+  STUDY_ROOT: ${GE14_WORK}/studies
+  DRAGLIB_DIR: /path/to/libraries/l_endian
+  SERPENT_XS: /path/to/Serpent2/xs/endfb8r1
+
+study:
+  name: GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP
+  root: ${STUDY_ROOT}
+  library: endfb8r1
+
+dragon:
+  executable: null                    # null: $dragon_exec / $DRAGON_EXEC
+  draglib:
+    draglibendfb8r1SHEM295_v5p1: endfb8r1295
+  draglib_dir: ${DRAGLIB_DIR}
+  num_threads: 10
+  structural_temperature: 600.0       # clad, channel box (K)
+
+serpent:
+  # references_root: ${GE14_WORK}/references   # default: <study>/references
+  settings:                           # S2_Settings attributes (as the NSE references)
+    acelib: ${SERPENT_XS}/endfb8r1_pynjoy2012_KERMA.xsdata
+    declib: ${SERPENT_XS}/endfb8r1.dec
+    nfylib: ${SERPENT_XS}/endfb8r1.nfy
+    neutrons_per_cycle: 2000000
+    active_cycles: 5000
+    inactive_cycles: 1000
+  # Existing NSE runs (legacy detectors, legacy 295g grid), registered without
+  # re-running by `import-serpent` / study.import_serpent_references(). A label
+  # that is imported is not generated again by `serpent` (and vice versa) unless
+  # --force / overwrite=True.
+  import:
+    GE14_DOM:
+      HZP_00: ${GE14_WORK}/GE14_DOM/Serpent/GE14_DOM_HZP_endfb8r1.serp
+      HFP_00: ${GE14_WORK}/GE14_DOM/Serpent/GE14_DOM_00_endfb8r1.serp
+      HFP_40: ${GE14_WORK}/GE14_DOM/Serpent/GE14_DOM_40_endfb8r1.serp
+      HFP_80: ${GE14_WORK}/GE14_DOM/Serpent/GE14_DOM_80_endfb8r1.serp
+    GE14_DOM-C:
+      HZP_00: ${GE14_WORK}/GE14_DOM-C/Serpent/GE14_DOM-C_HZP_endfb8r1.serp
+      HFP_00: ${GE14_WORK}/GE14_DOM-C/Serpent/GE14_DOM-C_00_endfb8r1.serp
+      HFP_40: ${GE14_WORK}/GE14_DOM-C/Serpent/GE14_DOM-C_40_endfb8r1.serp
+      HFP_80: ${GE14_WORK}/GE14_DOM-C/Serpent/GE14_DOM-C_80_endfb8r1.serp
+    GE14_VAN:
+      HZP_00: ${GE14_WORK}/GE14_VAN/Serpent/GE14_VAN_HZP_endfb8r1.serp
+      HFP_00: ${GE14_WORK}/GE14_VAN/Serpent/GE14_VAN_00_endfb8r1.serp
+      HFP_40: ${GE14_WORK}/GE14_VAN/Serpent/GE14_VAN_40_endfb8r1.serp
+      HFP_80: ${GE14_WORK}/GE14_VAN/Serpent/GE14_VAN_80_endfb8r1.serp
+
+# DRAGON outputs of every case (replaces the schemes' CALCULATION_OUTPUTS):
+# FUEL_1G (fuel inventory; keff), PIN_2G, PIN_26G (per pin), FUEL_26G, ALL_26G.
+# fuel_isotopes_inventory: isotopes whose fuel-averaged densities and 1-group
+# cross sections FUEL_1G keeps (zero densities in fresh fuel are edited too).
+# serpent_fine_pins (reference_spec): e.g. diagonal, to limit the Serpent
+# PIN_295G detectors to the symmetry axis (DRAGON still edits every pin).
+spec:
+  preset: pin_rates_and_spectra
+  isotopes: [U234, U235, U236, U238, Gd155, Gd157]
+  fuel_isotopes_inventory: [U234, U235, U236, U238, Pu239, Pu240, Pu241, Pu242, Gd155, Gd157, Xe135, Sm149]
+  fine_mesh: 26g
+
+# Serpent2 detectors: same observables on the SHEM295 mesh, so that the
+# references also serve 1L variants (295g refines 26g and 2g).
+reference_spec:
+  preset: pin_rates_and_spectra
+  isotopes: [U234, U235, U236, U238, Gd155, Gd157]
+  fuel_isotopes_inventory: [U234, U235, U236, U238, Pu239, Pu240, Pu241, Pu242, Gd155, Gd157, Xe135, Sm149]
+  fine_mesh: 295g
+
+assemblies:
+  GE14_DOM:
+    case_name: GE14_DOM_DIAG          # x2m, _CPO_<case_name>, TDT prefix
+    geometry: ../ASSEMBLY/GEOM_GE14_DOM_DIAG.yaml
+    materials: ../ASSEMBLY/material_compos_00.yaml
+    scheme: schemes/CALC_SCHEME_2L_PT_3x3_IC_3x3_6x6_DOM.yaml
+    tdt_path: ${GE14_WORK}/GE14_DOM/tdt_files
+  GE14_DOM-C:
+    case_name: GE14_DOM-C_DIAG
+    geometry: ../ASSEMBLY/GEOM_GE14_DOM-C_DIAG.yaml
+    materials: ../ASSEMBLY/material_compos_00.yaml
+    scheme: schemes/CALC_SCHEME_2L_PT_3x3_IC_3x3_6x6_DOM-C.yaml
+    tdt_path: ${GE14_WORK}/GE14_DOM-C/tdt_files
+  GE14_VAN:
+    case_name: GE14_VAN_DIAG
+    geometry: ../ASSEMBLY/GEOM_GE14_VAN_DIAG.yaml
+    materials: ../ASSEMBLY/material_compos_00.yaml
+    scheme: schemes/CALC_SCHEME_2L_PT_3x3_IC_3x3_6x6_VAN.yaml
+    tdt_path: ${GE14_WORK}/GE14_VAN/tdt_files
+
+# The base schemes already are the 2L PT 3x3 / IC 3x3_6x6 / MOC scheme of each
+# lattice. Other variants go here, e.g.
+#   2L_PT1x1_IC3x3_6x6:
+#     steps: {SSH: {tdt_file_id: SSH_1x1, macro_assignment: [[...]]}}
+variants:
+  2L_PT3x3_IC3x3_6x6:
+    description: "SSH PT/IC 3x3, L1 IC 3x3_6x6 (295g, SPH 26g), L2 MOC 26g"
+
+# Coolant isotopics: exact benchmark values (COOLANT entry of each file).
+# TCool = TMODE = 600 K in both conditions, as in the NSE runs.
+conditions:
+  HZP:
+    description: "Hot zero power: TFuel 600 K, 0 % void"
+    coolant:
+      "00": ../ASSEMBLY/material_compos_00.yaml
+    fuel_temperature: [600.0]
+    coolant_temperature: [600.0]
+  HFP:
+    description: "Hot full power: TFuel 900 K, 0 / 40 / 80 % void"
+    coolant:
+      "00": ../ASSEMBLY/material_compos_00.yaml
+      "40": ../ASSEMBLY/material_compos_40.yaml
+      "80": ../ASSEMBLY/material_compos_80.yaml
+    fuel_temperature: [900.0]
+    coolant_temperature: [600.0]
+
+# normalisation: fission_source (sum of nu-fission over the assembly). The
+# imported NSE references have no 'void' responses, so they fall back to
+# power_subset (the legacy normalisation), reported in summary.csv / study.h5.
+post_processing:
+  normalisation: fission_source
+  isotope_sets:
+    - [U235]
+    - [U238]
+    - [Gd155, Gd157]
+    - [U235, U238, Gd155, Gd157]

@@ -168,8 +168,16 @@ class TestNormalisation:
     def test_power_normalisation_matches_totals(self, dom_lattice):
         c = _synthetic(dom_lattice)
         k = c.normalisation_factor("power")
+        assert c.normalisation_factor("power_subset") == k        # legacy name
         assert (c.dragon.total("power").sum() * k) == pytest.approx(c.serpent.total("power").sum())
-        assert c.normalisation_factor("absorption") != pytest.approx(k)
+        assert c.normalisation_factor("absorption_subset") != pytest.approx(k)
+        assert c.normalisation_factor("pin_average", "fission") == \
+            pytest.approx(c.normalisation_factor("fission_subset"))
+        # whole-assembly methods need the external factor
+        with pytest.raises(NormalisationError, match="factor="):
+            c.normalisation_factor("fission_source")
+        np.testing.assert_allclose(c.errors("absorption", factor=2.0 * k),
+                                   (1 + c.errors("absorption", "power") / 100) * 200 - 100)
 
     def test_distribution_mean_one_over_physical_pins(self, dom_lattice):
         c = _synthetic(dom_lattice)

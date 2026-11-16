@@ -24,7 +24,11 @@ from .lattice_maps import PinLattice
 from .comparison import (
     KeffComparison, PinRateComparison, SpectrumComparison,
     compare_keff, compare_spectra, compute_pin_rates,
+    MacroRateComparison, compute_macro_rates,
+    Normalisation, NormalisationError, global_normalisation,
 )
+from .spec import ComparisonSpec, Observable, find_output
+from .references import ReferenceRegistry, SerpentReference, ReferenceCoverageError
 
 # Figures: ``from starterDD.PostTreatment import plotting`` (needs matplotlib).
 
@@ -36,4 +40,8 @@ __all__ = [
     "DetectorManifest", "ManifestEntry", "PinResolver", "SerpentRun", "Tally",
     "parse_serpent_input", "read_det", "read_res",
     "physics_data",
+    "ComparisonSpec", "Observable", "find_output",
+    "MacroRateComparison", "compute_macro_rates",
+    "Normalisation", "NormalisationError", "global_normalisation",
+    "ReferenceRegistry", "SerpentReference", "ReferenceCoverageError",
 ]

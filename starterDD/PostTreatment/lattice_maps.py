@@ -182,6 +182,13 @@ class PinLattice:
         *pin* (1/2 on a diagonal symmetry axis, 1 otherwise)."""
         return 0.5 if self.on_axis(pin) else 1.0
 
+    @property
+    def dragon_geometry_fraction(self) -> float:
+        """Fraction of the full assembly modelled by the DRAGON geometry
+        (1/2 with a diagonal symmetry, 1 otherwise). Converts the totals of
+        FUEL/ALL outputs to the full assembly modelled by Serpent."""
+        return 0.5 if self.symmetry is not None else 1.0
+
     def dragon_fractions(self, pins: Optional[Sequence[int]] = None) -> np.ndarray:
         return np.array([self.dragon_fraction(p) for p in (pins or self.ordered_pins)])
 

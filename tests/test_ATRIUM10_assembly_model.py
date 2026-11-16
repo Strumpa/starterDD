@@ -616,7 +616,7 @@ class TestAT10Serpent2Model:
             temperature_map={
                 "COOLANT": 600.0,
                 "CLAD": 600.0,
-                "GAP": 600.0,
+                # GAP: DRAGON's MIX uses TFUEL for the gap; left to the default.
                 "MODERATOR": 600.0,
                 "CHANNEL_BOX": 600.0,
             },

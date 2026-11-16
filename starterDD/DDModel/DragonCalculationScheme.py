@@ -2116,6 +2116,46 @@ class DragonCalculationScheme:
                 return b
         return None
 
+    def statepoint_values(self, statepoint=None):
+        """``{branch_type: value}`` of one statepoint of the branch grid.
+
+        *statepoint* is ``None`` (only if every branch has a single value),
+        a label of one labelled branch (e.g. ``"40"``; the other branches
+        must be single-valued), or ``{branch_type: value or label}`` (missing
+        single-valued branches are filled in). Values are matched within
+        ``STATEPOINT_RTOL``; the stored value is returned.
+        """
+        chosen = {}
+        if isinstance(statepoint, str):
+            owners = [b for b in self.branches if b.labels and statepoint in b.labels]
+            if len(owners) != 1:
+                raise KeyError(f"Label '{statepoint}' found in {len(owners)} branches.")
+            chosen[owners[0].type] = statepoint
+        elif statepoint is not None:
+            chosen = dict(statepoint)
+        unknown = set(chosen) - {b.type for b in self.branches}
+        if unknown:
+            raise KeyError(f"No branch of type {sorted(unknown)}.")
+        values = {}
+        for b in self.branches:
+            if b.type not in chosen:
+                if len(b.values) != 1:
+                    raise ValueError(f"Statepoint must give a value for '{b.type}' "
+                                     f"({len(b.values)} values).")
+                values[b.type] = b.values[0]
+                continue
+            sel = chosen[b.type]
+            if isinstance(sel, str):
+                if not b.labels or sel not in b.labels:
+                    raise KeyError(f"'{sel}' is not a label of branch '{b.type}'.")
+                values[b.type] = b.values[b.labels.index(sel)]
+            else:
+                i = b.index_of(float(sel))
+                if i is None:
+                    raise ValueError(f"{sel} is not a value of branch '{b.type}': {b.values}")
+                values[b.type] = b.values[i]
+        return values
+
     def get_ordered_branches(self):
         """Return branches in the configured loop order (outermost first).
 

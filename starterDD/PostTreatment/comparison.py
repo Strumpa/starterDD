@@ -18,10 +18,20 @@ Conventions
   ``NWT0`` flux, ``N``/``V`` the COMPO ``ISOTOPESDENS``/``ISOTOPESVOL``, and
   ``dragon_fraction`` = 1/2 for pins cut by the diagonal symmetry axis.
 
-**Normalisation** (method ``"power"``, the default): both codes are scaled to
-the same full-assembly total ``sum_p multiplicity(p) * power(p)``, where
-``power`` is the Q-weighted sum of the compared reactions of the studied
-isotopes (the ``power_subset`` of the plan; the legacy analysis does the same).
+**Normalisation.** DRAGON is scaled by one factor ``f = T_serpent / T_dragon``
+where ``T`` is a full-assembly total. Two families (plan §3.6):
+
+- *whole-assembly* methods (:data:`GLOBAL_NORMALISATIONS`), independent of
+  the compared isotopes, computed once per statepoint from macroscopic
+  (all-nuclide) rates by :func:`global_normalisation` and passed as
+  ``factor=``: ``fission_source`` (Σ ν·fission over the fuel, the usual
+  k-eigenvalue normalisation), ``fission`` and ``absorption`` (whole
+  assembly, ALL output);
+- *subset* methods, computed by each comparison from its own rates:
+  ``power_subset`` (Q-weighted rates of the studied isotopes; the legacy
+  analysis, also accepted as ``"power"``), ``absorption_subset``,
+  ``fission_subset`` and ``pin_average`` (same total of the compared
+  quantity: shape only). They depend on which isotopes are compared.
 
 These conventions give exactly the same relative differences as the original
 GE14 analysis, which carried a uniform hidden factor ``2*pi*r^2`` on every
@@ -133,6 +143,83 @@ class NormalisationError(ValueError):
     normalisation can be computed."""
 
 
+#: Whole-assembly normalisations: ``{method: (spatial, macroscopic quantity)}``
+#: of the macroscopic rates that give the total (:func:`global_normalisation`).
+GLOBAL_NORMALISATIONS: Dict[str, Tuple[str, str]] = {
+    "fission_source": ("PIN", "nufission"),
+    "fission": ("PIN", "fission"),
+    "absorption": ("ALL", "absorption"),
+}
+#: Normalisations computed by a comparison from its own rates.
+SUBSET_NORMALISATIONS = ("power_subset", "absorption_subset", "fission_subset", "pin_average")
+#: Legacy names accepted by :class:`PinRateComparison`.
+_SUBSET_ALIASES = {"power": "power_subset"}
+NORMALISATIONS = tuple(GLOBAL_NORMALISATIONS) + SUBSET_NORMALISATIONS
+
+
+@dataclass
+class Normalisation:
+    """A whole-assembly normalisation of one statepoint.
+
+    ``factor`` multiplies DRAGON values; ``dragon_total`` and
+    ``serpent_total`` are full-assembly totals (DRAGON already scaled from
+    the modelled fraction of the assembly to the full one)."""
+
+    method: str
+    factor: float
+    dragon_total: float
+    serpent_total: float
+    serpent_rel_err: float
+    observable: str = ""
+    output: str = ""
+    note: str = ""
+
+
+def global_normalisation(method: str, cmp: "MacroRateComparison",
+                         geometry_fraction: float = 1.0) -> Normalisation:
+    """Whole-assembly normalisation from macroscopic rates.
+
+    Args:
+        method: A :data:`GLOBAL_NORMALISATIONS` key.
+        cmp: Macroscopic rates of the matching observable: per pin (``PIN``,
+            ``nufission`` or ``fission``) for ``fission_source`` / ``fission``,
+            the assembly (``ALL``, ``absorption``) for ``absorption``.
+        geometry_fraction: Fraction of the full assembly modelled by DRAGON
+            (:attr:`PinLattice.dragon_geometry_fraction`, 1/2 for a diagonal
+            symmetry). Used for ``FUEL``/``ALL`` outputs only: per-pin rates
+            are already per physical pin in both codes.
+
+    Physics: in an infinite lattice, production / k∞ = absorption. With
+    ``fission_source`` both codes describe one source neutron, so their total
+    absorptions differ by about -Δk/k (the keff bias appears in the
+    absorption rates). With ``absorption`` the balance is matched and the
+    bias goes to production. A DRAGON flux with a leakage model and a
+    non-zero buckling adds a leakage term that Serpent's infinite lattice
+    does not have, which biases ``absorption``; prefer ``fission_source``.
+    """
+    if method not in GLOBAL_NORMALISATIONS:
+        raise ValueError(f"'{method}' is not a whole-assembly normalisation "
+                         f"({sorted(GLOBAL_NORMALISATIONS)}).")
+    spatial, q = GLOBAL_NORMALISATIONS[method]
+    if cmp.spatial != spatial:
+        raise NormalisationError(f"{method} needs a {spatial} observable, got "
+                                 f"{cmp.observable} ({cmp.spatial}).")
+    if q not in cmp.dragon:
+        raise NormalisationError(f"{method}: '{q}' is not scored by {cmp.observable} "
+                                 f"({cmp.quantities}).")
+    scale = 1.0 if spatial == "PIN" else 1.0 / float(geometry_fraction)
+    d = float(cmp.total("dragon", q).sum()) * scale
+    s = float(cmp.total("serpent", q).sum())
+    err = float(np.sqrt(np.sum((cmp.multiplicity[:, None] * cmp.serpent_err[q]) ** 2)))
+    if d <= 0 or s <= 0:
+        raise NormalisationError(f"{method}: non-positive total (DRAGON {d}, Serpent {s}).")
+    return Normalisation(method, s / d, d, s, err / s, cmp.observable, cmp.output)
+
+
+def _subset_method(method: str) -> str:
+    return _SUBSET_ALIASES.get(method, method)
+
+
 @dataclass
 class PinRateComparison:
     """Pin-wise fission/absorption rates of both codes for a set of isotopes."""
@@ -170,34 +257,45 @@ class PinRateComparison:
         return sorted(self.pins) == sorted(self.lattice.ordered_pins)
 
     # ── normalisation ──────────────────────────────────────────────────────
-    def normalisation_factor(self, method: str = "power") -> float:
+    def normalisation_factor(self, method: str = "power_subset",
+                             quantity: str = "absorption") -> float:
         """Factor applied to DRAGON rates so that both codes share the same
-        full-assembly total."""
+        full-assembly total of the studied isotopes: ``power_subset`` (alias
+        ``power``), ``absorption_subset``, ``fission_subset``, or
+        ``pin_average`` (the total of *quantity*: shape only). The
+        whole-assembly methods (:data:`GLOBAL_NORMALISATIONS`) do not depend
+        on the isotopes: compute them with :func:`global_normalisation` and
+        pass ``factor=`` to :meth:`errors` / :meth:`stats`."""
+        method = _subset_method(method)
+        if method in GLOBAL_NORMALISATIONS:
+            raise NormalisationError(
+                f"'{method}' is a whole-assembly normalisation: compute it with "
+                "global_normalisation() from macroscopic rates and pass factor=.")
         if not self.is_complete:
             raise NormalisationError(
                 f"Rates cover {len(self.pins)} of {self.lattice.n_pins} pins; "
                 "a global normalisation needs the whole assembly.")
-        if method == "power":
-            return float(self.serpent.total("power").sum() / self.dragon.total("power").sum())
-        if method == "absorption":
-            return float(self.serpent.total("absorption").sum()
-                         / self.dragon.total("absorption").sum())
-        if method == "fission":
-            return float(self.serpent.total("fission").sum()
-                         / self.dragon.total("fission").sum())
-        raise ValueError(f"Unknown normalisation method '{method}'.")
+        q = {"power_subset": "power", "absorption_subset": "absorption",
+             "fission_subset": "fission", "pin_average": quantity}.get(method)
+        if q is None:
+            raise ValueError(f"Unknown normalisation method '{method}' "
+                             f"({', '.join(NORMALISATIONS)}).")
+        return float(self.serpent.total(q).sum() / self.dragon.total(q).sum())
 
-    def errors(self, quantity: str = "absorption", method: str = "power") -> np.ndarray:
+    def errors(self, quantity: str = "absorption", method: str = "power_subset",
+               factor: Optional[float] = None) -> np.ndarray:
         """Relative difference DRAGON vs Serpent, in %, ``(n_pins, n_groups)``.
 
-        ``fission_over_absorption`` is normalisation-free. NaN where Serpent
-        scores zero.
+        *factor* (a whole-assembly :class:`Normalisation`'s ``factor``)
+        overrides *method*. ``fission_over_absorption`` is
+        normalisation-free. NaN where Serpent scores zero.
         """
         s = self.serpent.get(quantity)
         if quantity == "fission_over_absorption":
             d = self.dragon.get(quantity)
         else:
-            d = self.dragon.get(quantity) * self.normalisation_factor(method)
+            k = factor if factor is not None else self.normalisation_factor(method, quantity)
+            d = self.dragon.get(quantity) * k
         with np.errstate(divide="ignore", invalid="ignore"):
             e = (d - s) / s * 100.0
         e[~np.isfinite(e)] = np.nan
@@ -218,13 +316,14 @@ class PinRateComparison:
         return out
 
     # ── statistics ─────────────────────────────────────────────────────────
-    def stats(self, quantity: str = "absorption", method: str = "power") -> List[Dict[str, float]]:
+    def stats(self, quantity: str = "absorption", method: str = "power_subset",
+              factor: Optional[float] = None) -> List[Dict[str, float]]:
         """Per-group statistics over **physical** pins (each unique pin
         weighted by its multiplicity). Same definitions as the original
         analysis: min |err|, min, max, mean, mean weighted by the Serpent
         distribution, RMS and weighted RMS (no weighted values for
         ``fission_over_absorption``)."""
-        err = self.errors(quantity, method)
+        err = self.errors(quantity, method, factor)
         m = self.serpent.multiplicity.astype(float)
         dist = None if quantity == "fission_over_absorption" else \
             self.distribution(quantity, "serpent")
@@ -618,6 +717,202 @@ def _check_dragon_fractions(compo: CompoReader, output: str, sp: StatepointSel,
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Macroscopic (all-nuclide) rates: Serpent ``void`` responses
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class MacroRateComparison:
+    """Macroscopic rates of both codes, per region (pins, or one region for
+    FUEL/ALL observables), ascending energy, arrays ``(n_regions, n_groups)``.
+
+    Per physical pin for PIN observables (same convention as
+    :class:`PinRateComparison`). For FUEL/ALL the codes cover different
+    geometries (DRAGON's DIAG half vs Serpent's full assembly), so only
+    normalised values are compared.
+    """
+
+    observable: str
+    output: str
+    spatial: str
+    regions: List[Optional[int]]
+    bounds_eV: np.ndarray
+    multiplicity: np.ndarray
+    dragon: Dict[str, np.ndarray]
+    serpent: Dict[str, np.ndarray]
+    serpent_err: Dict[str, np.ndarray]
+    merged_eV: List[Tuple[float, float]] = field(default_factory=list)
+
+    @property
+    def quantities(self) -> List[str]:
+        return list(self.dragon)
+
+    @property
+    def n_groups(self) -> int:
+        return len(self.bounds_eV) - 1
+
+    def total(self, code: str, quantity: str) -> np.ndarray:
+        """Per-group total over regions (``sum_r multiplicity * rate``)."""
+        a = (self.dragon if code == "dragon" else self.serpent)[quantity]
+        return (self.multiplicity[:, None] * a).sum(axis=0)
+
+    def normalisation_factor(self, method: Optional[str] = None,
+                             quantity: Optional[str] = None) -> float:
+        """Factor applied to DRAGON so that both codes have the same total of
+        *method* over these regions: a compared quantity name, or
+        ``pin_average`` (*quantity* itself: shape only). Default: ``fission``
+        if compared, else *quantity*. For a whole-assembly normalisation pass
+        ``factor=`` to :meth:`errors` (:func:`global_normalisation`)."""
+        if method == "pin_average":
+            method = quantity
+        method = method or ("fission" if "fission" in self.dragon else quantity)
+        if method not in self.dragon:
+            raise NormalisationError(f"'{method}' is not compared ({self.quantities}).")
+        return float(self.total("serpent", method).sum() / self.total("dragon", method).sum())
+
+    def errors(self, quantity: str, method: Optional[str] = None,
+               factor: Optional[float] = None) -> np.ndarray:
+        """DRAGON vs Serpent in %, ``(n_regions, n_groups)``. *factor*
+        overrides *method*."""
+        s = self.serpent[quantity]
+        k = factor if factor is not None else self.normalisation_factor(method, quantity)
+        d = self.dragon[quantity] * k
+        with np.errstate(divide="ignore", invalid="ignore"):
+            e = (d - s) / s * 100.0
+        e[~np.isfinite(e)] = np.nan
+        return e
+
+    def rel_sigma(self, quantity: str) -> np.ndarray:
+        """Serpent 1σ in %."""
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return 100.0 * self.serpent_err[quantity] / self.serpent[quantity]
+
+    def stats(self, quantity: str, method: Optional[str] = None,
+              factor: Optional[float] = None) -> List[Dict[str, float]]:
+        """Per-group min/max/mean/RMS over physical regions."""
+        err = self.errors(quantity, method, factor)
+        out = []
+        for g in range(self.n_groups):
+            e = err[:, g]
+            ok = np.isfinite(e)
+            w, eg = self.multiplicity[ok], e[ok]
+            out.append({"min": float(eg.min()), "max": float(eg.max()),
+                        "mean": float(np.sum(w * eg) / w.sum()),
+                        "rms": float(np.sqrt(np.sum(w * eg ** 2) / w.sum()))})
+        return out
+
+
+def compute_macro_rates(compo: CompoReader, output: str, serpent: SerpentRun,
+                        observable: str, quantities: Optional[Sequence[str]] = None,
+                        lattice: Optional[PinLattice] = None, sp: StatepointSel = None,
+                        pins: Optional[Sequence[int]] = None,
+                        error_mode: str = "quadrature", mesh: str = "dragon",
+                        check_multiplicity: bool = True) -> MacroRateComparison:
+    """Macroscopic rates (:data:`physics_data.MACRO_REACTIONS`) of a DRAGON
+    output against Serpent ``dr <mt> void`` responses.
+
+    DRAGON: ``V · φ_g · Σ_i N_i Σ_k σ_i,k,g`` over the edited isotopes **and**
+    ``*MAC*RES`` (density 1, the macroscopic residual of every other
+    nuclide), so every nuclide of the region is included, as in Serpent's
+    collision-material response. PIN rates are per physical pin
+    (DRAGON ÷ ``dragon_fraction``, Serpent ÷ multiplicity).
+
+    Args:
+        output: DRAGON output (``by_pin`` for a PIN observable, one mixture
+            for FUEL/ALL).
+        observable: Serpent observable with ``void`` responses
+            (``ComparisonSpec.serpent_source`` / ``SerpentReference.source``).
+        quantities: Default: every macroscopic quantity whose MTs the
+            Serpent detectors score.
+        lattice: Required for PIN observables.
+        pins: Restrict PIN observables to these pins.
+    """
+    if error_mode not in ("quadrature", "linear"):
+        raise ValueError(f"Unknown error_mode '{error_mode}'.")
+    man = serpent.manifest
+    spatial = man.select(observable, "rr")[0].spatial if man.select(observable, "rr") else None
+    if spatial is None:
+        raise KeyError(f"No '{observable}' reaction-rate detector in the Serpent manifest.")
+    if spatial == "PIN":
+        if lattice is None:
+            raise ValueError("A PIN observable needs the lattice.")
+        regions: List[Optional[int]] = list(pins or lattice.ordered_pins)
+        entries = {p: man.find(observable, "rr", p) for p in regions}
+        mixtures = {p: lattice.mixture_of(p) for p in regions}
+        frac = np.array([lattice.dragon_fraction(p) for p in regions])
+        mult = np.array([lattice.multiplicity(p) for p in regions], dtype=float)
+        if compo.n_mixtures(output) != lattice.n_pins:
+            raise ValueError(f"{output} is not a by_pin output of this lattice.")
+        _check_dragon_fractions(compo, output, sp, lattice)
+    else:
+        if compo.n_mixtures(output) != 1:
+            raise ValueError(f"{output} has {compo.n_mixtures(output)} mixtures; a "
+                             f"{spatial} observable needs a homogenised output.")
+        regions = [None]
+        entries = {None: man.find(observable, "rr", None)}
+        mixtures = {None: 1}
+        frac = np.ones(1)
+        mult = np.ones(1)
+
+    void_mts = {r.mt for r in entries[regions[0]].responses if r.material == phys.VOID}
+    if quantities is None:
+        quantities = [q for q, m in phys.MACRO_REACTIONS.items()
+                      if set(m.serpent_mts) <= void_mts]
+    missing = [q for q in quantities if not set(phys.MACRO_REACTIONS[q].serpent_mts) <= void_mts]
+    if not quantities or missing:
+        raise KeyError(f"{observable}: no Serpent 'void' responses for {missing or 'any rate'} "
+                       f"(scored MTs: {sorted(void_mts)}).")
+
+    raw = {r: serpent.tally_of(e) for r, e in entries.items()}
+    d_bounds = compo.energy_bounds(output, sp)
+    bounds, merged = _target_mesh(d_bounds, raw[regions[0]].bounds_eV, mesh,
+                                  f"{output} vs {observable}")
+    d_idx = phys.condensation_indices(d_bounds, bounds)
+    tallies = {r: t.condense(bounds, error_mode=error_mode) for r, t in raw.items()}
+    if check_multiplicity and spatial == "PIN":
+        for k, p in enumerate(regions):
+            m_s = serpent.input.domain_multiplicity(entries[p].materials)
+            if m_s is not None and m_s != mult[k]:
+                raise ValueError(f"Pin {p}: Serpent detector covers {m_s} positions, "
+                                 f"the model {int(mult[k])}.")
+
+    ng, ngd = len(bounds) - 1, len(d_bounds) - 1
+    D = {q: np.zeros((len(regions), ngd)) for q in quantities}
+    S = {q: np.zeros((len(regions), ng)) for q in quantities}
+    E = {q: np.zeros((len(regions), ng)) for q in quantities}
+    for k, r in enumerate(regions):
+        mix = mixtures[r]
+        dens = compo.densities(output, sp, mix)
+        vol = compo.mixture_volume(output, sp, mix)
+        phi = compo.flux(output, sp, mixtures=mix)
+        xs_cache: Dict[Tuple[str, str], np.ndarray] = {}
+        for q in quantities:
+            macro = np.zeros(ngd)
+            for iso, n in dens.items():
+                for key in phys.MACRO_REACTIONS[q].dragon_keys:
+                    if (iso, key) not in xs_cache:
+                        v = compo.micro_xs(output, iso, key, sp, mixtures=mix)
+                        xs_cache[(iso, key)] = np.zeros(ngd) if v is None else v
+                    macro += n * xs_cache[(iso, key)]
+            D[q][k] = macro * phi * vol / frac[k]
+            t = tallies[r]
+            v_sum = np.zeros(ng)
+            a2 = np.zeros(ng)
+            a_lin = np.zeros(ng)
+            for mt in phys.MACRO_REACTIONS[q].serpent_mts:
+                v, rel = t.response(mt, None)
+                v_sum += v
+                a2 += (v * rel) ** 2
+                a_lin += np.abs(v * rel)
+            S[q][k] = v_sum / mult[k]
+            E[q][k] = (np.sqrt(a2) if error_mode == "quadrature" else a_lin) / mult[k]
+    if ngd != ng:
+        D = {q: phys.condense(v, d_idx, axis=1) for q, v in D.items()}
+    return MacroRateComparison(observable, output, spatial, regions, bounds, mult,
+                               D, S, E, merged)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Spectra
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -682,5 +977,8 @@ def compare_spectra(compo: CompoReader, output: str, serpent: SerpentRun,
 __all__ = [
     "KeffComparison", "compare_keff", "CodeRates", "ReactionCoverage",
     "PinRateComparison", "NormalisationError", "compute_pin_rates",
+    "Normalisation", "global_normalisation", "GLOBAL_NORMALISATIONS",
+    "SUBSET_NORMALISATIONS", "NORMALISATIONS",
+    "MacroRateComparison", "compute_macro_rates",
     "SpectrumComparison", "compare_spectra", "QUANTITIES",
 ]

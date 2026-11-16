@@ -91,6 +91,64 @@ REACTIONS_ABS = [(r.mt, r.dragon_key, r.absorption_factor)
 SERPENT_SUMMARY_MTS = {101: "disappearance", 27: "absorption", 1: "total",
                        452: "nubar"}
 
+#: MT numbers scored per isotope by the Serpent detectors that starterDD
+#: writes, per library: the partial reactions the evaluation provides, as in
+#: the GE14 references (e.g. U235 has no MT 103 in ENDF/B-VIII.1). Isotopes
+#: not listed get :data:`DEFAULT_DETECTOR_MTS`; Serpent scores zero for a
+#: reaction absent from the data, so the default is safe, only larger.
+SERPENT_DETECTOR_MTS: Dict[str, Dict[str, Tuple[int, ...]]] = {
+    "endfb8r1": {
+        "U235": (18, 102, 107, 16, 17),
+        "U238": (18, 102, 103, 107, 16, 17),
+        "Gd155": (102,),
+        "Gd157": (102,),
+    },
+    "jeff311": {
+        "U235": (18, 102, 16, 17, 37),
+        "U238": (18, 102, 16, 17, 37),
+        "Gd155": (102,),
+        "Gd157": (102,),
+    },
+}
+DEFAULT_DETECTOR_MTS: Tuple[int, ...] = (FISSION.mt,) + tuple(r.mt for r in ABSORPTION_REACTIONS)
+
+
+@dataclass(frozen=True)
+class MacroReaction:
+    """A macroscopic (all-nuclide) rate scored by a Serpent ``dr <mt> void``
+    response and rebuilt in DRAGON from the edited isotopes plus the
+    ``*MAC*RES`` residual pseudo-isotope (density 1, macroscopic data).
+
+    Serpent ``-2`` (and ``dr 101``) sums the partial reactions with no
+    outgoing neutron (ACE ``TY == 0``): capture only,
+    without fission (``TY = 19``) or (n,xn). Checked on the GE14 references:
+    ``101`` equals (n,γ)+(n,p)+(n,α) to < 4e-7.
+    """
+
+    name: str
+    serpent_mts: Tuple[int, ...]       # summed void responses
+    dragon_keys: Tuple[str, ...]       # summed DRAGON records
+
+
+#: Macroscopic quantities: ``absorption`` = capture + fission, the usual
+#: definition (and that of :func:`compute_pin_rates`, without (n,xn)).
+MACRO_REACTIONS: Dict[str, MacroReaction] = {
+    "fission": MacroReaction("fission", (-6,), ("NFTOT",)),
+    "capture": MacroReaction("capture", (-2,), ("NG", "NP", "ND", "NT", "NA", "N2A")),
+    "absorption": MacroReaction("absorption", (-2, -6),
+                                ("NG", "NP", "ND", "NT", "NA", "N2A", "NFTOT")),
+    "nufission": MacroReaction("nufission", (-7,), ("NUSIGF",)),
+    "total": MacroReaction("total", (-1,), ("NTOT0",)),
+}
+#: Material name of Serpent macroscopic (collision-material) responses.
+VOID = "void"
+
+
+def serpent_detector_mts(library: str, isotope: str) -> Tuple[int, ...]:
+    """MT numbers of the Serpent responses written for *isotope*."""
+    table = SERPENT_DETECTOR_MTS.get(canonical_library(library), {})
+    return table.get(isotope, DEFAULT_DETECTOR_MTS)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Q-values (MeV), per library
 # ─────────────────────────────────────────────────────────────────────────────

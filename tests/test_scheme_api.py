@@ -179,6 +179,50 @@ def test_branch_override_keeps_every_output_in_the_procedure(tmp_path):
     assert "DCool 0.5 - ABS" in edir
 
 
+GE14_CALC_SCHEME_2L_YAML = str(Path(GE14_CALC_SCHEME_1L_YAML).with_name("CALC_SCHEME_2L.yaml"))
+BRANCH_ORDERS = [("coolant_density", "fuel_temperature", "coolant_temperature"),
+                 ("fuel_temperature", "coolant_temperature", "coolant_density"),
+                 ("coolant_temperature", "fuel_temperature", "coolant_density"),
+                 ("fuel_temperature", "coolant_density", "coolant_temperature"),
+                 ("coolant_temperature", "coolant_density", "fuel_temperature"),
+                 ("coolant_density", "coolant_temperature", "fuel_temperature")]
+
+
+def _edir_reads_and_passes(files):
+    """(names read by EDIR.c2m, names passed by the main x2m), in order."""
+    import re
+    edir = next(c for n, c in files.items() if n.startswith("EDIR") and n.endswith(".c2m"))
+    x2m = next(c for n, c in files.items() if n.endswith(".x2m"))
+    reads = re.search(r"^REAL ([^;]*);\n:: (>>.*<<) ;$", edir, re.M)
+    call = re.search(r"COMPO\s*::\s*<<name_compo>>([^;]*);", x2m)
+    return (re.findall(r">>(\w+)<<", reads.group(2)),
+            re.findall(r"<<(\w+)>>", call.group(1)))
+
+
+_ABBR = {"fuel_temperature": "TFuel", "coolant_temperature": "TCool", "coolant_density": "DCool"}
+
+
+@pytest.mark.parametrize("yaml_path", [GE14_CALC_SCHEME_1L_YAML, GE14_CALC_SCHEME_2L_YAML],
+                         ids=["1L", "2L"])
+@pytest.mark.parametrize("order", BRANCH_ORDERS, ids=["-".join(_ABBR[t] for t in o)
+                                                      for o in BRANCH_ORDERS])
+def test_edir_reads_branch_values_in_the_order_they_are_passed(yaml_path, order, tmp_path):
+    """CLE-2000 passes procedure arguments by position: EDIR.c2m must read the
+    statepoint values in the order the main x2m passes them, whatever the
+    YAML declaration order. Before the fix EDIR.c2m used the YAML order and
+    the x2m the loop order, so COMPO stored e.g. TFuel under 'DCool'."""
+    d = DragonCalculationScheme.from_yaml(yaml_path).to_dict()
+    by_type = {b["type"]: b for b in d["CALCULATION_BRANCHES"]}
+    by_type["fuel_temperature"]["values"] = [600.0, 900.0]
+    by_type["coolant_temperature"]["values"] = [560.0, 600.0]
+    d["CALCULATION_BRANCHES"] = [by_type[t] for t in order] + \
+        [b for t, b in by_type.items() if t not in order]
+    s = DragonCalculationScheme.from_dict(d)
+    reads, passes = _edir_reads_and_passes(_generate(tmp_path, s, GE14_CASE))
+    assert reads == passes
+    assert passes == [b.para_name for b in s.get_ordered_branches()]
+
+
 def test_validate_reports_inconsistent_outputs():
     s = DragonCalculationScheme.from_yaml(GE14_CALC_SCHEME_1L_YAML)
     s.outputs[2].state_points["coolant_density"] = [0.6]
