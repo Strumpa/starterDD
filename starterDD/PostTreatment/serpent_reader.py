@@ -935,7 +935,7 @@ class DetectorManifest:
             entries.append(entry)
 
         manifest = cls(entries, source={
-            "input": str(inp.path),
+            "input": inp.path.name,           # the manifest sits next to it; no machine path
             "input_sha256": _sha256(inp.path),
             "title": inp.title,
             "inferred": True,

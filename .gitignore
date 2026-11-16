@@ -26,3 +26,9 @@ temp_examples/
 
 # HDF5 caches of DRAGON COMPOs written next to the ASCII files by CompoReader
 _CPO_*.h5
+
+# Machine-specific paths (cluster accounts, local folders): never committed.
+# Per-study overlays next to a study file; the site file lives outside the repo
+# (~/.config/starterDD/site.yaml, template docs/site.example.yaml).
+*.local.yaml
+site.yaml

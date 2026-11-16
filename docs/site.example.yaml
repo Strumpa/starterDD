@@ -1,0 +1,28 @@
+# starterDD site file: the machine-specific paths of THIS machine.
+#
+# Copy it to ~/.config/starterDD/site.yaml (or point $STARTERDD_SITE at a copy)
+# and fill in your own paths. It is never committed: committed study files
+# only reference these values as ${NAME}.
+#
+# Precedence of a ${NAME} in a study file, highest first:
+#   --set NAME=value / variables={...}
+#   the environment
+#   <STUDY>.local.yaml next to the study file (git-ignored, same format)
+#   this site file
+#   the study file's own 'variables:' block
+#
+# Check what a study resolves to, and where each value comes from:
+#   python -m starterDD.Workflow path/to/STUDY.yaml vars
+#
+# Only a 'variables:' mapping is allowed. '~' is expanded; use absolute paths.
+
+variables:
+  # DRAGON5 executable (used when a study leaves dragon: executable null).
+  DRAGON_EXEC: /path/to/Version5/Dragon/bin/<arch>/Dragon
+  # Folder holding the draglibs (draglibendfb8r1SHEM295_v5p1, ...).
+  DRAGLIB_DIR: /path/to/libraries/l_endian
+  # Serpent2 nuclear data of the library (xsdata, dec, nfy).
+  SERPENT_XS: /path/to/Serpent2/xs/endfb8r1
+  # Work tree of the NSE GE14 runs (GE14_<A>/tdt_files, GE14_<A>/Serpent),
+  # used by data/BWRProgressionProblems/GE14_inputs/STUDIES/*.yaml.
+  GE14_WORK: /path/to/NSE_paper/work/GE14

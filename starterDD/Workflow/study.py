@@ -47,6 +47,7 @@ figures are made from that file alone (:mod:`.study_figures`).
 Command line (one case per cluster job)::
 
     python -m starterDD.Workflow STUDY.yaml status
+    python -m starterDD.Workflow STUDY.yaml vars       # ${NAME} values and their source
     python -m starterDD.Workflow STUDY.yaml run --assembly GE14_DOM --condition HFP --threads 10
     python -m starterDD.Workflow STUDY.yaml import-dragon     # dragon: import: block
     python -m starterDD.Workflow STUDY.yaml post
@@ -433,6 +434,172 @@ def _expand(obj, variables: Mapping[str, str], where: str = ""):
     return obj
 
 
+# ── machine-specific variables: site file and local overlay ──────────────────
+#
+# Committed study files must not hold machine paths (cluster accounts, local
+# home folders). Those live in files that are never committed:
+#   - the site file, one per machine, shared by every study:
+#     $STARTERDD_SITE, else ~/.config/starterDD/site.yaml;
+#   - <study>.local.yaml next to a study file (git-ignored), for that study.
+# Both hold a single ``variables:`` mapping. See docs/site.example.yaml.
+
+#: Environment variable naming the site file (empty string: no site file).
+SITE_ENV = "STARTERDD_SITE"
+#: Default site file.
+DEFAULT_SITE_FILE = Path("~/.config/starterDD/site.yaml")
+#: Suffix of the per-study local overlay (``STUDY.yaml`` -> ``STUDY.local.yaml``).
+LOCAL_SUFFIX = ".local.yaml"
+#: Variable that sets ``dragon: executable`` when the study file leaves it null.
+DRAGON_EXEC_VAR = "DRAGON_EXEC"
+
+#: Variable sources, lowest precedence first.
+VARIABLE_SOURCES = ("study", "site", "local", "environment", "explicit")
+
+
+def site_file_path(site: Union[PathLike, bool, None] = None) -> Optional[Path]:
+    """The site file in use, or ``None``.
+
+    *site*: a path (must exist), ``False`` (no site file), or ``None``:
+    ``$STARTERDD_SITE`` (empty = none; must exist otherwise), else
+    ``~/.config/starterDD/site.yaml`` if it exists.
+    """
+    if site is False:
+        return None
+    origin = "site="
+    if site is None or site is True:
+        env = os.environ.get(SITE_ENV)
+        if env is None:
+            default = DEFAULT_SITE_FILE.expanduser()
+            return default if default.is_file() else None
+        if not env.strip():
+            return None
+        site, origin = env, "$" + SITE_ENV
+    p = Path(site).expanduser()
+    if not p.is_file():
+        raise FileNotFoundError(f"Site file {p} (from {origin}) not found.")
+    return p
+
+
+def local_overlay_path(study_path: PathLike) -> Path:
+    """``STUDY.local.yaml`` next to ``STUDY.yaml``."""
+    p = Path(study_path)
+    return p.with_name(p.stem + LOCAL_SUFFIX)
+
+
+def _read_variables_file(path: Path, kind: str) -> Dict[str, str]:
+    """The ``variables:`` mapping of a site / local file (``~`` expanded)."""
+    raw = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(raw, Mapping) or set(raw) - {"variables"}:
+        raise KeyError(f"{kind} file {path}: only a 'variables:' mapping is allowed.")
+    out = {}
+    for k, v in (raw.get("variables") or {}).items():
+        if not _VAR_RE.fullmatch("${" + str(k) + "}"):
+            raise KeyError(f"{kind} file {path}: invalid variable name '{k}'.")
+        v = str(v)
+        out[str(k)] = os.path.expanduser(v) if v.startswith("~") else v
+    return out
+
+
+def _referenced(obj) -> set:
+    """Names of the ``${NAME}`` in the strings of *obj*."""
+    if isinstance(obj, str):
+        return set(_VAR_RE.findall(obj))
+    if isinstance(obj, Mapping):
+        return set().union(*(_referenced(v) for v in obj.values())) if obj else set()
+    if isinstance(obj, list):
+        return set().union(*(_referenced(v) for v in obj)) if obj else set()
+    return set()
+
+
+def _parse_requires(raw) -> Dict[str, str]:
+    if raw is None:
+        return {}
+    if isinstance(raw, Mapping):
+        return {str(k): "" if v is None else str(v) for k, v in raw.items()}
+    if isinstance(raw, list):
+        return {str(k): "" for k in raw}
+    raise TypeError("'requires:' is a list of variable names or a {name: description} mapping.")
+
+
+def resolve_study_variables(path: PathLike, variables: Optional[Mapping[str, str]] = None,
+                            site: Union[PathLike, bool, None] = None,
+                            raw: Optional[Mapping] = None) -> Dict[str, Dict[str, Any]]:
+    """Every variable a study file uses, with its value and source.
+
+    Precedence, highest first: *variables* (``--set``), the environment,
+    ``<study>.local.yaml``, the site file, the study's ``variables:`` block.
+    Returns ``{name: {value, source, required, description}}`` for the
+    variables referenced by the file (transitively) or listed under
+    ``requires:``; a missing one has ``value=None, source="missing"``.
+    """
+    path = Path(path).resolve()
+    if raw is None:
+        raw = yaml.safe_load(path.read_text()) or {}
+    layers: Dict[str, Tuple[Dict[str, str], str]] = {}
+    layers["study"] = ({k: str(v) for k, v in (raw.get("variables") or {}).items()}, str(path))
+    sp = site_file_path(site)
+    layers["site"] = (_read_variables_file(sp, "Site") if sp else {}, str(sp) if sp else "")
+    lp = local_overlay_path(path)
+    layers["local"] = (_read_variables_file(lp, "Local") if lp.is_file() else {},
+                       str(lp) if lp.is_file() else "")
+    layers["environment"] = ({k: v for k, v in os.environ.items()
+                              if _VAR_RE.fullmatch("${" + k + "}")}, "")
+    layers["explicit"] = ({k: str(v) for k, v in (variables or {}).items()}, "")
+
+    merged: Dict[str, Tuple[str, str]] = {}
+    for src in VARIABLE_SOURCES:
+        values, where = layers[src]
+        for k, v in values.items():
+            merged[k] = (v, src if not where else f"{src} ({where})")
+
+    requires = _parse_requires(raw.get("requires"))
+    body = {k: v for k, v in raw.items() if k not in ("variables", "requires")}
+    names = _referenced(body) | set(requires)
+    if DRAGON_EXEC_VAR in merged and not (raw.get("dragon") or {}).get("executable"):
+        names.add(DRAGON_EXEC_VAR)                 # used as dragon: executable
+    todo, seen = list(names), set()
+    while todo:                                    # variables may reference variables
+        n = todo.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        if n in merged:
+            todo.extend(_VAR_RE.findall(merged[n][0]))
+    out = {}
+    for n in sorted(seen):
+        value, src = merged.get(n, (None, "missing"))
+        out[n] = {"value": value, "source": src, "required": n in requires,
+                  "description": requires.get(n, "")}
+    return out
+
+
+class StudyVariableError(KeyError):
+    """Undefined ``${NAME}`` in a study file (readable multi-line message)."""
+
+    def __str__(self) -> str:
+        return str(self.args[0]) if self.args else ""
+
+
+def _missing_variables_error(path: Path, table: Mapping[str, Mapping[str, Any]],
+                             site: Union[PathLike, bool, None]) -> Optional[KeyError]:
+    missing = [n for n, r in table.items() if r["source"] == "missing"]
+    if not missing:
+        return None
+    lines = [f"{path.name}: undefined variable(s):"]
+    for n in missing:
+        d = table[n]["description"]
+        lines.append(f"  ${{{n}}}" + (f"  - {d}" if d else ""))
+    try:
+        sp = site_file_path(site) or DEFAULT_SITE_FILE.expanduser()
+    except FileNotFoundError:
+        sp = DEFAULT_SITE_FILE.expanduser()
+    lines.append("Define them (highest precedence first) with --set NAME=VALUE / variables={...}, "
+                 f"in the environment, in {local_overlay_path(path).name} next to the study "
+                 f"file, or in the site file {sp} ('variables:' mapping; template: "
+                 "docs/site.example.yaml). Committed study files must not hold machine paths.")
+    return StudyVariableError("\n".join(lines))
+
+
 #: Spec keys renamed on 2026-11-15 -> their new name.
 _RENAMED_SPEC_KEYS = {"keff_isotopes": "fuel_isotopes_inventory",
                       "pins_fine": "serpent_fine_pins"}
@@ -558,6 +725,9 @@ class CodeToCodeStudy:
         #: ``{"<assembly>/<variant>/<condition>": COMPO or run folder}`` of the
         #: study file's ``dragon: import:`` (:meth:`import_dragon_runs`).
         self.dragon_imports: Dict[str, Path] = {}
+        #: ``{name: {value, source}}`` of the ``${NAME}`` of the study file
+        #: (:meth:`from_yaml`), recorded in ``study_config.yaml``.
+        self.variables: Dict[str, Dict[str, Any]] = {}
         self._schemes: Dict[str, DragonCalculationScheme] = {}
         self._cases: Dict[str, StudyCase] = {}
         self._hashes: Dict[str, str] = {}
@@ -576,20 +746,31 @@ class CodeToCodeStudy:
     # ── construction from YAML ─────────────────────────────────────────────
     @classmethod
     def from_yaml(cls, path: PathLike, variables: Optional[Mapping[str, str]] = None,
+                  site: Union[PathLike, bool, None] = None,
                   **overrides) -> "CodeToCodeStudy":
         """Read a study file (see ``data/BWRProgressionProblems/GE14_inputs/
         STUDIES`` for an example).
 
-        ``${NAME}`` is replaced by, in order of precedence, *variables*, the
-        environment, then the file's ``variables:`` block. Relative paths are
-        relative to the YAML file. *overrides* replace constructor arguments
-        (e.g. ``root=``, ``num_threads=``).
+        ``${NAME}`` is replaced by, in order of precedence: *variables*, the
+        environment, ``<study>.local.yaml`` next to the file, the site file
+        (*site*, else ``$STARTERDD_SITE``, else ``~/.config/starterDD/site.yaml``;
+        ``site=False`` for none), then the file's ``variables:`` block. Machine
+        paths belong in the local / site files, never in committed study files.
+        ``requires: {NAME: description}`` lists the variables the file needs;
+        every missing one is reported at once. ``$DRAGON_EXEC`` from these
+        sources sets ``dragon: executable`` when the file leaves it null.
+        Relative paths are relative to the YAML file. *overrides* replace
+        constructor arguments (e.g. ``root=``, ``num_threads=``).
         """
         path = Path(path).resolve()
         raw = yaml.safe_load(path.read_text()) or {}
-        file_vars = {k: str(v) for k, v in (raw.pop("variables", None) or {}).items()}
-        env = {k: v for k, v in os.environ.items() if _VAR_RE.fullmatch("${" + k + "}")}
-        allvars = {**file_vars, **env, **{k: str(v) for k, v in (variables or {}).items()}}
+        table = resolve_study_variables(path, variables, site=site, raw=raw)
+        err = _missing_variables_error(path, table, site)
+        if err is not None:
+            raise err
+        raw.pop("variables", None)
+        raw.pop("requires", None)
+        allvars = {n: r["value"] for n, r in table.items()}
         cfg = _expand(raw, allvars)
         base = path.parent
 
@@ -635,7 +816,7 @@ class CodeToCodeStudy:
             reference_spec=cfg.get("reference_spec"),
             library=st.get("library", "endfb8r1"), draglib=dr.get("draglib"),
             draglib_paths={k: p(v) for k, v in draglib_paths.items()},
-            dragon_executable=p(dr.get("executable")),
+            dragon_executable=p(dr.get("executable") or allvars.get(DRAGON_EXEC_VAR)),
             num_threads=dr.get("num_threads", 1),
             references_root=p(se.get("references_root")),
             serpent_settings=se.get("settings"), reaction_mts=se.get("reaction_mts"),
@@ -646,6 +827,8 @@ class CodeToCodeStudy:
         study.serpent_imports = {a: {str(lab): p(f) for lab, f in sps.items()}
                                  for a, sps in (se.get("import") or {}).items()}
         study.dragon_imports = {str(k): p(v) for k, v in (dr.get("import") or {}).items()}
+        study.variables = {n: {"value": r["value"], "source": r["source"]}
+                           for n, r in table.items()}
         return study
 
     # ── paths, cached inputs ───────────────────────────────────────────────
@@ -1129,6 +1312,7 @@ class CodeToCodeStudy:
         return _plain({
             "study": {"name": self.name, "root": str(self.root), "library": self.library,
                       "source": None if self.source is None else str(self.source)},
+            "variables": self.variables,
             "dragon": {"draglib": self.draglib, "draglib_paths": self.draglib_paths,
                        "executable": self.dragon_executable, "num_threads": self.num_threads,
                        "structural_temperature": self.structural_temperature},
@@ -1628,6 +1812,20 @@ def _write_summary(rows: List[dict], out: Path) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def print_variables(table: Mapping[str, Mapping[str, Any]]) -> None:
+    """Print ``resolve_study_variables`` output: name, value, source."""
+    if not table:
+        print("(no variables)")
+        return
+    w = max(len(n) for n in table) + 1
+    for n, r in table.items():
+        flag = "*" if r.get("required") else " "
+        value = "<MISSING>" if r["value"] is None else r["value"]
+        print(f"{flag}{n:<{w}} {value}\n {'':<{w}} <- {r['source']}"
+              + (f"  [{r['description']}]" if r.get("description") else ""))
+    print("(* = listed under 'requires:')")
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     import argparse
     ap = argparse.ArgumentParser(
@@ -1635,7 +1833,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         description="Generate / run the DRAGON cases of a code-to-code study, write its "
                     "Serpent2 references, post-process.")
     ap.add_argument("study_yaml")
-    ap.add_argument("command", choices=["status", "generate", "run", "serpent",
+    ap.add_argument("command", choices=["status", "vars", "generate", "run", "serpent",
                                         "import-serpent", "import-dragon", "check", "post",
                                         "figures", "manifest"])
     ap.add_argument("--assembly", action="append", help="repeat to select several")
@@ -1646,9 +1844,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--force", action="store_true", help="re-generate / re-run / overwrite")
     ap.add_argument("--set", action="append", default=[], metavar="VAR=VALUE",
                     help="value of a ${VAR} of the study file")
+    ap.add_argument("--site", default=None, metavar="PATH",
+                    help=f"site file of machine paths (default ${SITE_ENV}, else "
+                         f"{DEFAULT_SITE_FILE}); 'none' for no site file")
     a = ap.parse_args(argv)
     variables = dict(s.split("=", 1) for s in a.set)
-    study = CodeToCodeStudy.from_yaml(a.study_yaml, variables=variables)
+    site = False if a.site in ("none", "") else a.site
+    if a.command == "vars":
+        table = resolve_study_variables(a.study_yaml, variables, site=site)
+        print_variables(table)
+        return 1 if any(r["source"] == "missing" for r in table.values()) else 0
+    study = CodeToCodeStudy.from_yaml(a.study_yaml, variables=variables, site=site)
     sel = dict(assemblies=a.assembly, variants=a.variant, conditions=a.condition)
     if a.command == "status":
         study.print_status()
@@ -1681,4 +1887,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 __all__ = ["CodeToCodeStudy", "StudyAssembly", "StudyVariant", "StudyCondition",
            "StudyStatepoint", "StudyCase", "case_statepoints", "spec_from_config",
-           "DEFAULT_DRAGLIBS", "MANIFEST_FILE", "CASE_FILE", "SUMMARY_COLUMNS", "main"]
+           "DEFAULT_DRAGLIBS", "MANIFEST_FILE", "CASE_FILE", "SUMMARY_COLUMNS", "main",
+           "resolve_study_variables", "site_file_path", "local_overlay_path",
+           "print_variables", "SITE_ENV", "DEFAULT_SITE_FILE"]

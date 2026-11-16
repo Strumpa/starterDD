@@ -11,22 +11,27 @@
 # (labels HZP_00, HFP_00, HFP_40, HFP_80).
 #
 # Usage (see tutorials/code_to_code_study.py):
+#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml vars     # check paths
 #   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml status
 #   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml run --dry-run
 #   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml run \
 #          --assembly GE14_DOM --condition HFP --threads 10        # one case per job
 #   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml serpent
 #
-# ${NAME} values come from: --set NAME=value / variables={...}, then the
-# environment, then the block below. Relative paths are relative to this file.
+# Machine paths are NOT in this file. ${NAME} values come from (highest
+# precedence first): --set NAME=value / variables={...}, the environment,
+# GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.local.yaml next to this file (git-ignored),
+# the site file of the machine ($STARTERDD_SITE, else
+# ~/.config/starterDD/site.yaml; template docs/site.example.yaml), then the
+# 'variables:' block below. Relative paths are relative to this file.
 
-variables:
-  # Cluster work tree of the NSE GE14 runs: GE14_<A>/tdt_files, GE14_<A>/Serpent.
-  # Locally: --set GE14_WORK=/path/to/NSE_paper/work/GE14
-  GE14_WORK: /path/to/NSE_paper/work/GE14
+requires:
+  GE14_WORK: "NSE GE14 work tree: GE14_<A>/tdt_files, GE14_<A>/Serpent"
+  DRAGLIB_DIR: "folder holding draglibendfb8r1SHEM295_v5p1"
+  SERPENT_XS: "Serpent2 endfb8r1 data (xsdata, dec, nfy)"
+
+variables:                  # portable values only (derived or relative)
   STUDY_ROOT: ${GE14_WORK}/studies
-  DRAGLIB_DIR: /path/to/libraries/l_endian
-  SERPENT_XS: /path/to/Serpent2/xs/endfb8r1
 
 study:
   name: GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP
@@ -34,7 +39,7 @@ study:
   library: endfb8r1
 
 dragon:
-  executable: null                    # null: $dragon_exec / $DRAGON_EXEC
+  executable: null                    # null: ${DRAGON_EXEC} (site file...), $dragon_exec
   draglib:
     draglibendfb8r1SHEM295_v5p1: endfb8r1295
   draglib_dir: ${DRAGLIB_DIR}

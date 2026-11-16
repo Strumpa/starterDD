@@ -13,8 +13,9 @@
 #           status / manifest, adding a variant, post-processing calls.
 #   Part B  the GE14 2L study of data/BWRProgressionProblems/GE14_inputs/STUDIES/
 #           GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml (DOM, DOM-C, VAN x HZP, HFP),
-#           read from its YAML. Needs the TDT files under $GE14_WORK
-#           (GE14_<A>/tdt_files). By default: dry run of the 6 cases and the
+#           read from its YAML. Needs the TDT files under ${GE14_WORK}
+#           (GE14_<A>/tdt_files), set with the other machine paths in the
+#           site file (~/.config/starterDD/site.yaml, see docs/site.example.yaml). By default: dry run of the 6 cases and the
 #           12 Serpent2 inputs. With --run it runs DRAGON (needs $dragon_exec
 #           and the draglib, see the YAML 'dragon:' block).
 #
@@ -37,7 +38,6 @@
 # Date : 15/11/2026
 
 import argparse
-import os
 from pathlib import Path
 
 import yaml
@@ -50,7 +50,6 @@ GE14 = PROJECT_ROOT / "data" / "BWRProgressionProblems" / "GE14_inputs"
 ASSEMBLY = GE14 / "ASSEMBLY"
 STUDY_YAML = GE14 / "STUDIES" / "GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml"
 REF_TDT = PROJECT_ROOT / "tests" / "reference_tdt_files" / "GE14"
-LOCAL_GE14_WORK = Path("/path/to/NSE_paper/work/GE14")   # local copy of the NSE tree
 
 
 def title(text):
@@ -175,13 +174,20 @@ def part_a(out: Path):
 # =====================================================================
 def part_b(out: Path, args):
     title("B.1 Reading the study file")
+    # Machine paths (GE14_WORK, DRAGLIB_DIR, SERPENT_XS, DRAGON_EXEC) come from
+    # the site file of this machine (~/.config/starterDD/site.yaml, template
+    # docs/site.example.yaml), the environment, or --set; never from the
+    # committed study file. `python -m starterDD.Workflow STUDY.yaml vars`
+    # shows each value and where it comes from.
     variables = {"STUDY_ROOT": str(out)}
-    if "GE14_WORK" not in os.environ and LOCAL_GE14_WORK.exists():
-        variables["GE14_WORK"] = str(LOCAL_GE14_WORK)
-    study = CodeToCodeStudy.from_yaml(STUDY_YAML, variables=variables)
+    try:
+        study = CodeToCodeStudy.from_yaml(STUDY_YAML, variables=variables)
+    except KeyError as exc:
+        print(f"{exc.args[0]}\npart B skipped.")
+        return
     missing = [a.name for a in study.assemblies.values() if not a.tdt_path.exists()]
     if missing:
-        print(f"TDT folders not found for {missing} (set $GE14_WORK); part B skipped.")
+        print(f"TDT folders not found for {missing} (check GE14_WORK with `vars`); part B skipped.")
         return
     sel = dict(assemblies=args.assembly, conditions=args.condition)
     print(f"study folder: {study.directory}")

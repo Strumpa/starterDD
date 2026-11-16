@@ -12,7 +12,8 @@ from starterDD.InterfaceToDD.case_generator import DragonCase
 from starterDD.InterfaceToDD.dragon_runner import DragonRunner
 from starterDD.PostTreatment.references import ReferenceRegistry
 from starterDD.Workflow import CodeToCodeStudy, StudyCondition
-from starterDD.Workflow.study import CASE_FILE, MANIFEST_FILE, case_statepoints
+from starterDD.Workflow.study import (CASE_FILE, CONFIG_FILE, MANIFEST_FILE, SITE_ENV,
+                                      case_statepoints, main, resolve_study_variables)
 
 from conftest import (GE14_CALC_SCHEME_1L_YAML, GE14_COMPOSITIONS_YAML,
                       GE14_DOM_GEOMETRY_YAML, GE14_INPUTS_DIR, GE14_TDT_DIR)
@@ -44,6 +45,14 @@ def _study(root, **kw):
 @pytest.fixture
 def study(tmp_path):
     return _study(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _no_site_file(monkeypatch):
+    """Tests never see the machine's site file nor its path variables."""
+    monkeypatch.setenv(SITE_ENV, "")
+    for name in ("GE14_WORK", "DRAGLIB_DIR", "SERPENT_XS", "DRAGON_EXEC", "STUDY_ROOT"):
+        monkeypatch.delenv(name, raising=False)
 
 
 # ── cases and statepoints ─────────────────────────────────────────────────
@@ -379,7 +388,7 @@ def test_from_yaml_variables_and_relative_paths(tmp_path, monkeypatch):
 
 
 def test_from_yaml_errors(tmp_path):
-    with pytest.raises(KeyError, match="Undefined variable"):
+    with pytest.raises(KeyError, match=r"undefined variable\(s\):\n  \$\{NOPE\}"):
         CodeToCodeStudy.from_yaml(_write_yaml(tmp_path, STUDY_TEXT.replace("${TDT}", "${NOPE}")))
     with pytest.raises(KeyError, match="unknown section"):
         CodeToCodeStudy.from_yaml(_write_yaml(tmp_path, STUDY_TEXT + "typo_section: 1\n"))
@@ -387,10 +396,103 @@ def test_from_yaml_errors(tmp_path):
         _study(tmp_path, name="bad name")
 
 
+def _write_vars(path, **values):
+    path.write_text(yaml.safe_dump({"variables": values}))
+    return path
+
+
+def test_site_file_and_local_overlay(tmp_path, monkeypatch):
+    """Precedence: explicit > environment > STUDY.local.yaml > site > study."""
+    p = _write_yaml(tmp_path, STUDY_TEXT)
+    site = _write_vars(tmp_path / "site.yaml", ROOT=str(tmp_path / "from_site"))
+    monkeypatch.setenv(SITE_ENV, str(site))
+    st = CodeToCodeStudy.from_yaml(p)
+    assert st.root == tmp_path / "from_site"
+    assert st.variables["ROOT"]["source"] == f"site ({site})"
+    assert st.variables["TDT"]["source"].startswith("study")
+    local = _write_vars(tmp_path / "study.local.yaml", ROOT=str(tmp_path / "from_local"))
+    assert CodeToCodeStudy.from_yaml(p).root == tmp_path / "from_local"
+    monkeypatch.setenv("ROOT", str(tmp_path / "from_env"))
+    assert CodeToCodeStudy.from_yaml(p).root == tmp_path / "from_env"
+    assert CodeToCodeStudy.from_yaml(p, variables={"ROOT": str(tmp_path / "x")}).root == \
+        tmp_path / "x"
+    monkeypatch.delenv("ROOT")
+    # site=False ignores the site file; the local overlay still applies
+    assert CodeToCodeStudy.from_yaml(p, site=False).root == tmp_path / "from_local"
+    local.unlink()
+    assert CodeToCodeStudy.from_yaml(p, site=False).root == (tmp_path / "default_root").resolve()
+    # the resolved values and their sources are recorded in study_config.yaml
+    st = CodeToCodeStudy.from_yaml(p)
+    st.write_manifest()
+    cfg = yaml.safe_load((st.directory / CONFIG_FILE).read_text())
+    assert cfg["variables"]["ROOT"] == {"value": str(tmp_path / "from_site"),
+                                        "source": f"site ({site})"}
+
+
+def test_site_and_local_file_errors(tmp_path, monkeypatch):
+    p = _write_yaml(tmp_path, STUDY_TEXT)
+    monkeypatch.setenv(SITE_ENV, str(tmp_path / "nope.yaml"))
+    with pytest.raises(FileNotFoundError, match="STARTERDD_SITE"):
+        CodeToCodeStudy.from_yaml(p)
+    monkeypatch.setenv(SITE_ENV, "")
+    (tmp_path / "study.local.yaml").write_text("study: {name: other}\n")
+    with pytest.raises(KeyError, match="only a 'variables:' mapping"):
+        CodeToCodeStudy.from_yaml(p)
+
+
+def test_requires_lists_every_missing_variable(tmp_path):
+    text = STUDY_TEXT.replace("variables:\n  ROOT: default_root\n",
+                              "requires:\n  ROOT: where studies go\n  TDT: tdt folder\n"
+                              "variables:\n")
+    text = text.replace(f"  TDT: {GE14_TDT_DIR}\n", "")
+    p = _write_yaml(tmp_path, text)
+    with pytest.raises(KeyError) as err:
+        CodeToCodeStudy.from_yaml(p)
+    msg = err.value.args[0]
+    assert "${ROOT}  - where studies go" in msg and "${TDT}  - tdt folder" in msg
+    assert "study.local.yaml" in msg and "site.example.yaml" in msg
+    table = resolve_study_variables(p, {"ROOT": str(tmp_path)})
+    assert table["ROOT"]["source"] == "explicit" and table["ROOT"]["required"]
+    assert table["TDT"] == {"value": None, "source": "missing", "required": True,
+                            "description": "tdt folder"}
+
+
+def test_dragon_exec_variable_sets_the_executable(tmp_path):
+    p = _write_yaml(tmp_path, STUDY_TEXT)
+    assert CodeToCodeStudy.from_yaml(p).dragon_executable is None
+    _write_vars(tmp_path / "study.local.yaml", DRAGON_EXEC=str(tmp_path / "Dragon"))
+    st = CodeToCodeStudy.from_yaml(p)
+    assert st.dragon_executable == str(tmp_path / "Dragon")
+    assert st.variables["DRAGON_EXEC"]["source"].startswith("local")
+
+
+def test_vars_command(tmp_path, capsys):
+    p = _write_yaml(tmp_path, STUDY_TEXT.replace("${TDT}", "${NOPE}"))
+    assert main([str(p), "vars", "--site", "none"]) == 1          # NOPE missing
+    out = capsys.readouterr().out
+    assert "NOPE" in out and "<MISSING>" in out and "ROOT" in out
+    assert main([str(p), "vars", "--set", "NOPE=x"]) == 0
+
+
+GE14_MACHINE_VARS = {"GE14_WORK": "/machine/GE14", "DRAGLIB_DIR": "/machine/draglibs",
+                     "SERPENT_XS": "/machine/xs"}
+
+
+def test_ge14_study_needs_the_machine_paths(tmp_path):
+    """The committed study holds no machine path: all three are reported."""
+    with pytest.raises(KeyError) as err:
+        CodeToCodeStudy.from_yaml(GE14_STUDY_YAML, variables={"STUDY_ROOT": str(tmp_path)})
+    for name in GE14_MACHINE_VARS:
+        assert "${" + name + "}" in err.value.args[0]
+
+
 def test_ge14_study_input(tmp_path):
     """The committed GE14 2L PT 3x3 / IC 3x3_6x6 study: 3 lattices x HZP/HFP,
     12 statepoints, spec outputs on 26 groups, references on SHEM295."""
-    st = CodeToCodeStudy.from_yaml(GE14_STUDY_YAML, variables={"STUDY_ROOT": str(tmp_path)})
+    st = CodeToCodeStudy.from_yaml(GE14_STUDY_YAML, variables={
+        "STUDY_ROOT": str(tmp_path), **GE14_MACHINE_VARS})
+    assert st.serpent_settings["acelib"] == "/machine/xs/endfb8r1_pynjoy2012_KERMA.xsdata"
+    assert st.assemblies["GE14_VAN"].tdt_path == Path("/machine/GE14/GE14_VAN/tdt_files")
     assert list(st.assemblies) == ["GE14_DOM", "GE14_DOM-C", "GE14_VAN"]
     cases = st.cases()
     assert len(cases) == 6
