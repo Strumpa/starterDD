@@ -450,8 +450,7 @@ class ComparisonSpec:
           detectors to a list of ``pin_idx`` or to a diagonal (``"diagonal"``
           = the symmetry axis, ``"main"``, ``"anti"``), which is what the
           spectra along the diagonal need and keeps ``det0.m`` small;
-        - ``FUEL_{fine}``: fuel-integrated rates, every partial reaction
-          (:data:`physics_data.DEFAULT_DETECTOR_MTS`);
+        - ``FUEL_{fine}``: fuel-integrated per-isotope rates;
         - ``ALL_{fine}``: assembly spectrum.
 
         *global_totals* (default) adds the Serpent ``void`` responses of the
@@ -499,10 +498,7 @@ class ComparisonSpec:
         return cls(base + [
             Observable("PIN", f, isotopes, serpent=("rr", "flux"), pins=serpent_fine_pins,
                        comment=f"{f}, per pin"),
-            # One detector: every partial reaction is cheap here (as in the
-            # GE14 references' det_assembly_295g).
-            Observable("FUEL", f, isotopes, comment=f"{f}, homogenised over the fuel",
-                       reactions={i: phys.DEFAULT_DETECTOR_MTS for i in isotopes}),
+            Observable("FUEL", f, isotopes, comment=f"{f}, homogenised over the fuel"),
             all_obs,
         ])
 
@@ -654,16 +650,36 @@ class ComparisonSpec:
         raise AssertionError("unreachable")   # every request is kept or provided
 
     def configure_serpent(self, model, library: str, response_temperature: Optional[float] = None,
-                          xs_suffix: Optional[str] = None) -> DetectorManifest:
+                          xs_suffix: Optional[str] = None,
+                          reaction_mts: Optional[Mapping[str, Sequence[int]]] = None
+                          ) -> DetectorManifest:
         """Add energy grids, response materials and detectors to a built
-        :class:`Serpent2Model`, and return (and attach) their manifest."""
+        :class:`Serpent2Model`, and return (and attach) their manifest.
+
+        The MTs of each isotope come from the observable's ``reactions``,
+        else *reaction_mts* (``{isotope: [MT, ...]}``, the reactions its ACE
+        data has), else :data:`physics_data.SERPENT_DETECTOR_MTS`; an isotope
+        in none of them raises :class:`physics_data.UnknownReactionsError`."""
         from ..InterfaceToDD.Serpent2_exports import S2_Detector
         if not getattr(model, "_built", False):
             raise RuntimeError("Build the Serpent2Model (model.build()) before configuring detectors.")
         if self.pins_unresolved:              # e.g. serpent_fine_pins="diagonal"
             from .lattice_maps import PinLattice
             return self.resolve_pins(PinLattice.from_assembly(model.assembly)).configure_serpent(
-                model, library, response_temperature=response_temperature, xs_suffix=xs_suffix)
+                model, library, response_temperature=response_temperature, xs_suffix=xs_suffix,
+                reaction_mts=reaction_mts)
+        # every isotope checked before anything is added to the model
+        unknown = []
+        for req in self.serpent_requests():
+            for iso in req.isotopes:
+                if not (req.reactions or {}).get(iso):
+                    try:
+                        phys.serpent_detector_mts(library, iso, reaction_mts)
+                    except phys.UnknownReactionsError:
+                        unknown.append(iso)
+        if unknown:
+            raise phys.UnknownReactionsError(
+                phys.unknown_reactions_message(library, list(dict.fromkeys(unknown))))
         if response_temperature is None:
             response_temperature = getattr(model.assembly, "default_fuel_temperature", 900.0)
         pins_map = dict(sorted(model._pin_universe_map.items()))
@@ -674,7 +690,8 @@ class ComparisonSpec:
                 model.ensure_energy_grid(grid, list(req.bounds_eV * 1e-6))
             responses: List[Tuple[int, str]] = []
             for iso in req.isotopes:
-                mts = (req.reactions or {}).get(iso) or phys.serpent_detector_mts(library, iso)
+                mts = ((req.reactions or {}).get(iso)
+                       or phys.serpent_detector_mts(library, iso, reaction_mts))
                 responses += [(int(mt), iso) for mt in mts]
                 model.ensure_response_material(iso, response_temperature, xs_suffix)
             responses += [(mt, phys.VOID) for mt in req.macro_mts]   # collision material

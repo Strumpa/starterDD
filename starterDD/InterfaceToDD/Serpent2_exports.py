@@ -3466,7 +3466,8 @@ class Serpent2Model:
                          library: str = "endfb8r1", settings: 'S2_Settings' = None,
                          material_names: dict = None,
                          apply_self_shielding: str = "from_yaml",
-                         structural_temperature: float = 600.0):
+                         structural_temperature: float = 600.0,
+                         reaction_mts: dict = None):
         """Serpent2 reference model of one statepoint of a ``DragonCase``.
 
         The geometry and fuel compositions come from the case's GEOM/MATS
@@ -3497,6 +3498,9 @@ class Serpent2Model:
             apply_self_shielding: Radial zoning of the fuel
                 (``analyze_lattice_description``).
             structural_temperature: Temperature of the other materials (K).
+            reaction_mts: ``{isotope: [MT, ...]}``: partial reactions of the
+                detector responses for isotopes missing from
+                ``physics_data.SERPENT_DETECTOR_MTS`` (or overriding it).
 
         The model has ``statepoint`` (``{branch_type: value}``) and
         ``coolant_composition`` (``{isotope: N}`` or ``None``) attributes.
@@ -3558,7 +3562,8 @@ class Serpent2Model:
             model.materials[k] = new
             model.coolant_composition = dict(comp)
         if spec is not None:
-            spec.configure_serpent(model, library, response_temperature=t_fuel)
+            spec.configure_serpent(model, library, response_temperature=t_fuel,
+                                   reaction_mts=reaction_mts)
         return model
 
     # ── shared helpers (deduplicated cards) ───────────────────────────────

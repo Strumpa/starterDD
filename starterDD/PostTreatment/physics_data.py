@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -92,12 +92,15 @@ SERPENT_SUMMARY_MTS = {101: "disappearance", 27: "absorption", 1: "total",
                        452: "nubar"}
 
 #: MT numbers scored per isotope by the Serpent detectors that starterDD
-#: writes, per library: the partial reactions the evaluation provides, as in
-#: the GE14 references (e.g. U235 has no MT 103 in ENDF/B-VIII.1). Isotopes
-#: not listed get :data:`DEFAULT_DETECTOR_MTS`; Serpent scores zero for a
-#: reaction absent from the data, so the default is safe, only larger.
+#: writes, per library: only the partial reactions the evaluation provides
+#: (as in the GE14 references; e.g. U235 has no MT 103 in ENDF/B-VIII.1, U234
+#: only 16, 17, 18, 37, 102 among the partial reactions). A response on a
+#: reaction absent from the ACE data is not valid in Serpent, so an isotope
+#: without a list here (or in ``reaction_mts=`` overrides) raises
+#: :class:`UnknownReactionsError` when its detectors are written.
 SERPENT_DETECTOR_MTS: Dict[str, Dict[str, Tuple[int, ...]]] = {
     "endfb8r1": {
+        "U234": (18, 102, 16, 17),
         "U235": (18, 102, 107, 16, 17),
         "U238": (18, 102, 103, 107, 16, 17),
         "Gd155": (102,),
@@ -144,10 +147,33 @@ MACRO_REACTIONS: Dict[str, MacroReaction] = {
 VOID = "void"
 
 
-def serpent_detector_mts(library: str, isotope: str) -> Tuple[int, ...]:
-    """MT numbers of the Serpent responses written for *isotope*."""
+class UnknownReactionsError(KeyError):
+    """No list of available reactions for an isotope (see
+    :data:`SERPENT_DETECTOR_MTS`)."""
+
+
+def serpent_detector_mts(library: str, isotope: str,
+                         overrides: Optional[Mapping[str, Sequence[int]]] = None
+                         ) -> Tuple[int, ...]:
+    """MT numbers of the Serpent responses written for *isotope*: from
+    *overrides* (``{isotope: [MT, ...]}``), else
+    :data:`SERPENT_DETECTOR_MTS`. Raises :class:`UnknownReactionsError` if
+    neither has the isotope: writing reactions the ACE data lacks is invalid,
+    and a guess would silently change the compared absorption."""
+    if overrides and isotope in overrides:
+        return tuple(int(mt) for mt in overrides[isotope])
     table = SERPENT_DETECTOR_MTS.get(canonical_library(library), {})
-    return table.get(isotope, DEFAULT_DETECTOR_MTS)
+    if isotope not in table:
+        raise UnknownReactionsError(unknown_reactions_message(library, [isotope]))
+    return table[isotope]
+
+
+def unknown_reactions_message(library: str, isotopes: Sequence[str]) -> str:
+    return (f"No Serpent reaction list for {list(isotopes)} ({canonical_library(library)}). "
+            "Give the partial reactions their ACE data has (Serpent prints them per "
+            f"nuclide), among {list(DEFAULT_DETECTOR_MTS)}: reaction_mts={{'"
+            f"{isotopes[0]}': [18, 102, 16, 17], ...}} (study YAML 'serpent: reaction_mts:'), "
+            "or add them to physics_data.SERPENT_DETECTOR_MTS.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Q-values (MeV), per library

@@ -245,7 +245,12 @@ def test_global_normalisation_does_not_depend_on_the_compared_isotopes(ge14_serp
         Observable("PIN", "2g", ISOS, macro=("fission", "nufission")),
         Observable("ALL", "1g", ISOS, serpent=("rr",), macro=("absorption",),
                    serpent_isotopes=(), dragon=False)])
-    spec.configure_serpent(model, "endfb8r1")
+    with pytest.raises(phys.UnknownReactionsError, match="U236"):
+        spec.configure_serpent(deepcopy(ge14_serpent_model), "endfb8r1")
+    # U236 is not in physics_data.SERPENT_DETECTOR_MTS: its reactions are given
+    spec.configure_serpent(model, "endfb8r1", reaction_mts={"U236": [18, 102, 16, 17]})
+    u236 = [r.mt for r in model.detector_manifest_entries[0].responses if r.nuclide == "U236"]
+    assert u236 == [18, 102, 16, 17]
     serp = tmp_path / "GE14.serp"
     model.write(str(serp))
     scale, bias = 3.7, {"U238": 1.02}

@@ -120,12 +120,13 @@ def part_a(out: Path):
     # A.3  Serpent2 references: one input per (assembly, statepoint)
     # -----------------------------------------------------------------
     title("A.3 Serpent2 inputs (written, not run)")
-    refs = study.write_serpent_references()
+    refs = study.write_serpent_references()      # only the new ones (existing are kept)
     for r in refs:
         print(f"   {r.input_path.relative_to(out)}")
+    ref40 = study.registry.find("GE14_DOM", study.library, "HFP_40")
     print("reference.yaml of HFP_40:")
-    print(yaml.safe_dump({k: refs[2].meta[k] for k in ("statepoint", "coolant_composition",
-                                                        "settings", "spec")}, sort_keys=False))
+    print(yaml.safe_dump({k: ref40.meta[k] for k in ("statepoint", "coolant_composition",
+                                                      "settings", "spec")}, sort_keys=False))
     print("coverage problems:", study.check_references() or "none")
 
     show_tree(study.directory)
@@ -194,7 +195,11 @@ def part_b(out: Path, args):
         study.import_serpent_references()
 
     title("B.3 Serpent2 inputs")
-    study.write_serpent_references(**sel)
+    from starterDD.PostTreatment.physics_data import UnknownReactionsError
+    try:
+        study.write_serpent_references(**sel)
+    except UnknownReactionsError as exc:     # e.g. U236: add 'serpent: reaction_mts:'
+        print(f"Serpent2 inputs not written: {exc}")
     print("coverage problems:", study.check_references(**sel) or "none")
 
     if args.import_dragon:

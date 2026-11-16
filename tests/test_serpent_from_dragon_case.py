@@ -7,7 +7,7 @@ import pytest
 from starterDD.DDModel.DragonCalculationScheme import DragonCalculationScheme
 from starterDD.InterfaceToDD.case_generator import DragonCase
 from starterDD.InterfaceToDD.Serpent2_exports import Serpent2Model
-from starterDD.PostTreatment import DetectorManifest, parse_serpent_input
+from starterDD.PostTreatment import DetectorManifest, parse_serpent_input, physics_data as phys
 from starterDD.PostTreatment.spec import ComparisonSpec
 
 from conftest import GE14_CALC_SCHEME_1L_YAML
@@ -85,8 +85,10 @@ def _legacy_manifest(which):
 def test_generated_reference_covers_the_legacy_detector_set(ge14_case, tmp_path, which):
     """Plan P4 'done when': a generated reference covers the detector set of
     the existing GE14 references, detector by detector (same observable,
-    kind and pin; every (MT, nuclide) response except the MT 101 summary;
-    the DRAGON SHEM295 grid instead of the legacy one)."""
+    kind and pin; every (MT, nuclide) response the nuclear data has, i.e.
+    except the MT 101 summary and the reactions absent from the evaluation,
+    which the legacy assembly detector requested for every isotope; the
+    DRAGON SHEM295 grid instead of the legacy one)."""
     dc, _, _ = ge14_case
     legacy = _legacy_manifest(which)
     spec = ComparisonSpec.preset("pin_rates_and_spectra", ISOS)
@@ -96,8 +98,13 @@ def test_generated_reference_covers_the_legacy_detector_set(ge14_case, tmp_path,
     for e in legacy:
         g = new.find(e.observable, e.kind, e.pin_idx)
         assert g.materials == e.materials
-        want = {(r.mt, r.nuclide) for r in e.responses if r.mt != 101}
-        assert want <= {(r.mt, r.nuclide) for r in g.responses}, e.detector
+        want = {(r.mt, r.nuclide) for r in e.responses if r.mt != 101
+                and r.mt in phys.serpent_detector_mts("endfb8r1", r.nuclide)}
+        have = {(r.mt, r.nuclide) for r in g.responses}
+        assert want <= have, e.detector
+        # only reactions the data has (no empty U235 MT 103 / Gd MT 16, 17...)
+        assert all(mt in phys.serpent_detector_mts("endfb8r1", n) for mt, n in have
+                   if n is not None), e.detector
         assert len(g.bounds_eV) == len(e.bounds_eV) == 296
 
 

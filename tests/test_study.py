@@ -190,6 +190,23 @@ def test_serpent_references_one_per_statepoint(study):
     assert rows["GE14_DOM/1L/HFP"]["serpent_results"] == "0/3"
 
 
+def test_reaction_mts_of_isotopes_without_a_known_list(tmp_path):
+    """U236 has no reaction list: the references are refused until the study
+    gives its MTs (YAML 'serpent: reaction_mts:'), then only those are written."""
+    from starterDD.PostTreatment.physics_data import UnknownReactionsError
+    hzp = {"HZP": dict(coolant={"00": BENCH["00"]})}
+    spec = dict(preset="pin_rates", isotopes=ISOTOPES + ["U236"])
+    with pytest.raises(UnknownReactionsError, match="U236"):
+        _study(tmp_path / "a", conditions=hzp, spec=spec).write_serpent_references()
+    st = _study(tmp_path / "b", conditions=hzp, spec=spec,
+                reaction_mts={"U236": [18, 102, 16, 17]})
+    (ref,) = st.write_serpent_references()
+    e = ref.manifest.find("PIN_2G", "rr", 1)
+    assert [r.mt for r in e.responses if r.nuclide == "U236"] == [18, 102, 16, 17]
+    assert [r.mt for r in e.responses if r.nuclide == "U235"] == [18, 102, 107, 16, 17]
+    assert st.check_references() == {}
+
+
 def test_reference_spec_finer_than_the_dragon_spec(tmp_path):
     st = _study(tmp_path, conditions={"HZP": dict(coolant={"00": BENCH["00"]})},
                 reference_spec=dict(preset="pin_rates_and_spectra", isotopes=ISOTOPES))

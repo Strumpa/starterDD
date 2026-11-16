@@ -500,6 +500,10 @@ class CodeToCodeStudy:
             ``<study>/references``. Several studies may share one.
         serpent_settings: ``S2_Settings`` attributes of generated references
             (``acelib``, ``neutrons_per_cycle``, ``active_cycles``...).
+        reaction_mts: ``{isotope: [MT, ...]}``, the partial reactions the ACE
+            data of the library has, for isotopes missing from
+            ``physics_data.SERPENT_DETECTOR_MTS`` (YAML ``serpent:
+            reaction_mts:``).
         structural_temperature: Clad, box and other structures (K).
         post_processing: Defaults of :meth:`post_process`.
         source: YAML file the study was read from (recorded only).
@@ -516,6 +520,7 @@ class CodeToCodeStudy:
                  dragon_executable: Optional[PathLike] = None, num_threads: int = 1,
                  references_root: Optional[PathLike] = None,
                  serpent_settings: Optional[Mapping[str, Any]] = None,
+                 reaction_mts: Optional[Mapping[str, Sequence[int]]] = None,
                  structural_temperature: float = 600.0,
                  post_processing: Optional[Mapping[str, Any]] = None,
                  source: Optional[PathLike] = None):
@@ -544,6 +549,7 @@ class CodeToCodeStudy:
         self.references_root = (Path(references_root).expanduser().resolve()
                                 if references_root else self.directory / "references")
         self.serpent_settings = dict(serpent_settings or {})
+        self.reaction_mts = {str(k): [int(m) for m in v] for k, v in (reaction_mts or {}).items()}
         self.structural_temperature = float(structural_temperature)
         self.post_processing = dict(post_processing or {})
         self.source = None if source is None else Path(source).resolve()
@@ -632,7 +638,7 @@ class CodeToCodeStudy:
             dragon_executable=p(dr.get("executable")),
             num_threads=dr.get("num_threads", 1),
             references_root=p(se.get("references_root")),
-            serpent_settings=se.get("settings"),
+            serpent_settings=se.get("settings"), reaction_mts=se.get("reaction_mts"),
             structural_temperature=dr.get("structural_temperature", 600.0),
             post_processing=cfg.get("post_processing"), source=path)
         kwargs.update(overrides)
@@ -896,7 +902,8 @@ class CodeToCodeStudy:
                 model = Serpent2Model.from_dragon_case(
                     dc, statepoint=dict(sp.values), spec=spec, library=self.library,
                     settings=self._serpent_settings(case, sp),
-                    structural_temperature=self.structural_temperature)
+                    structural_temperature=self.structural_temperature,
+                    reaction_mts=self.reaction_mts or None)
                 ref = SerpentReference.create(self.references_root, case.assembly.name,
                                               self.library, sp.label, model, spec=spec,
                                               overwrite=overwrite)
@@ -1126,7 +1133,7 @@ class CodeToCodeStudy:
                        "executable": self.dragon_executable, "num_threads": self.num_threads,
                        "structural_temperature": self.structural_temperature},
             "serpent": {"references_root": str(self.references_root),
-                        "settings": self.serpent_settings},
+                        "settings": self.serpent_settings, "reaction_mts": self.reaction_mts},
             "spec": self.spec_config if self.spec_config is not None else
             (None if self.spec is None else self.spec.names()),
             "reference_spec": self.reference_spec_config,
