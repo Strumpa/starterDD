@@ -102,6 +102,7 @@ SERPENT_DETECTOR_MTS: Dict[str, Dict[str, Tuple[int, ...]]] = {
     "endfb8r1": {
         "U234": (18, 102, 16, 17),
         "U235": (18, 102, 107, 16, 17),
+        "U236": (18, 102, 16, 17),   # ACE also has 37, outside ABSORPTION_REACTIONS
         "U238": (18, 102, 103, 107, 16, 17),
         "Gd155": (102,),
         "Gd157": (102,),

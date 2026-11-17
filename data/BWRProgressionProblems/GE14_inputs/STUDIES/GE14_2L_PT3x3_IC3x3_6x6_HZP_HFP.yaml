@@ -56,11 +56,11 @@ serpent:
     active_cycles: 5000
     inactive_cycles: 1000
   # Partial reactions (MT) written per isotope in the detectors: only those
-  # the ACE data has (Serpent lists them per nuclide). U234, U235, U238,
-  # Gd155, Gd157 are known (physics_data.SERPENT_DETECTOR_MTS); U236 must be
-  # given here before `serpent` can write the references, e.g.
+  # the ACE data has (Serpent lists them per nuclide). U234, U235, U236, U238,
+  # Gd155, Gd157 are known (physics_data.SERPENT_DETECTOR_MTS); other isotopes
+  # (e.g. Pu for depletion) must be given here or added to that table, e.g.
   # reaction_mts:
-  #   U236: [18, 102, 16, 17]
+  #   Pu239: [18, 102, 16, 17]
   # Existing NSE runs (legacy detectors, legacy 295g grid), registered without
   # re-running by `import-serpent` / study.import_serpent_references(). A label
   # that is imported is not generated again by `serpent` (and vice versa) unless

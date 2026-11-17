@@ -42,6 +42,11 @@ def _deep_merge(base, updates):
 #: CLE2000 statepoint guards). CLE2000 REALs are single precision (~6e-8).
 STATEPOINT_RTOL = 1.0e-5
 
+#: Decimals kept on a coolant density (g/cm³) computed from isotopics
+#: (:meth:`DragonCalculationScheme.with_coolant_statepoints`): 1e-6, the
+#: precision of the benchmark densities.
+COOLANT_DENSITY_DECIMALS = 6
+
 
 def values_match(a, b, rtol=STATEPOINT_RTOL):
     """True if two branch values are equal within *rtol* (absolute *rtol*
@@ -2371,8 +2376,11 @@ class DragonCalculationScheme:
         densities : dict or None
             ``{label: rho [g/cm³]}`` used as the ``DCool`` PARA value. By
             default rho is computed from the isotopics
-            (:func:`composition_mass_density`), so the PARA value and the
-            isotopics are consistent by construction.
+            (:func:`composition_mass_density`) and rounded to 1e-6 g/cm³
+            (:data:`COOLANT_DENSITY_DECIMALS`), so the PARA value matches the
+            isotopics to the precision of the benchmark densities. The
+            isotopics themselves are not rounded. Given densities are used
+            as they are.
         material : str
             Material name read from the YAML sources.
         selective_outputs
@@ -2395,7 +2403,8 @@ class DragonCalculationScheme:
             if densities is not None and label in densities:
                 values.append(float(densities[label]))
             else:
-                values.append(composition_mass_density(comp))
+                values.append(round(composition_mass_density(comp),
+                                    COOLANT_DENSITY_DECIMALS))
         for i in range(len(values)):
             for j in range(i):
                 if values_match(values[i], values[j]):
