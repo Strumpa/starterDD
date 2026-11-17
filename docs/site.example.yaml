@@ -23,6 +23,9 @@ variables:
   DRAGLIB_DIR: /path/to/libraries/l_endian
   # Serpent2 nuclear data of the library (xsdata, dec, nfy).
   SERPENT_XS: /path/to/Serpent2/xs/endfb8r1
+  # Serpent2 executable (used by `run-serpent` when a study leaves
+  # serpent: executable null; else $SERPENT_EXEC, $sss2, sss2 on the PATH).
+  SERPENT_EXEC: /path/to/Serpent2/src/sss2
   # Work tree of the NSE GE14 runs (GE14_<A>/tdt_files, GE14_<A>/Serpent),
   # used by data/BWRProgressionProblems/GE14_inputs/STUDIES/*.yaml.
   GE14_WORK: /path/to/NSE_paper/work/GE14
