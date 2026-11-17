@@ -199,12 +199,16 @@ def test_serpent_references_one_per_statepoint(study):
     assert rows["GE14_DOM/1L/HFP"]["serpent_results"] == "0/3"
 
 
-def test_reaction_mts_of_isotopes_without_a_known_list(tmp_path):
-    """U236 has no reaction list: the references are refused until the study
-    gives its MTs (YAML 'serpent: reaction_mts:'), then only those are written."""
+def test_reaction_mts_of_isotopes_without_a_known_list(tmp_path, monkeypatch):
+    """An isotope without a reaction list (U236 removed from the table for the
+    test) is refused until the study gives its MTs (YAML 'serpent:
+    reaction_mts:'), then only those are written."""
+    from starterDD.PostTreatment import physics_data as phys
     from starterDD.PostTreatment.physics_data import UnknownReactionsError
     hzp = {"HZP": dict(coolant={"00": BENCH["00"]})}
     spec = dict(preset="pin_rates", isotopes=ISOTOPES + ["U236"])
+    assert phys.SERPENT_DETECTOR_MTS["endfb8r1"]["U236"] == (18, 102, 16, 17)
+    monkeypatch.delitem(phys.SERPENT_DETECTOR_MTS["endfb8r1"], "U236")
     with pytest.raises(UnknownReactionsError, match="U236"):
         _study(tmp_path / "a", conditions=hzp, spec=spec).write_serpent_references()
     st = _study(tmp_path / "b", conditions=hzp, spec=spec,

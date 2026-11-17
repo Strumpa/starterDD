@@ -306,7 +306,9 @@ def test_with_coolant_statepoints_branch_and_outputs():
     v = s.with_coolant_statepoints(BENCH)
     br = v.get_branch("coolant_density")
     assert br.labels == ["00", "40", "80"]
-    assert br.values == pytest.approx([0.73669, 0.4570232, 0.1773564], rel=1e-6)
+    # densities from the isotopics, rounded to 1e-6 g/cm3 (isotopics unrounded)
+    assert br.values == [0.73669, 0.457023, 0.177356]
+    assert br.values == pytest.approx([0.73669, 0.4570232, 0.1773564], abs=1e-6)
     assert br.compositions == [_bench_coolant(k) for k in ("00", "40", "80")]
     assert br.label_of(br.values[1]) == "40"
     # EDIR_2G asked for 0.73669: kept, rewritten to the isotopics-derived value.

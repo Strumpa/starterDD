@@ -227,7 +227,7 @@ def synthetic_pin_blocks(c, output, run0, observable, lat, scale, bias=None):
 
 
 def test_global_normalisation_does_not_depend_on_the_compared_isotopes(ge14_serpent_model,
-                                                                       tmp_path):
+                                                                       tmp_path, monkeypatch):
     """Serpent = DRAGON x a known scale, U238 responses x 1.02. The
     whole-assembly factors (fission_source from PIN_2G nu-fission, absorption
     from a 1-mixture output with the DIAG geometry fraction) recover the scale
@@ -245,9 +245,11 @@ def test_global_normalisation_does_not_depend_on_the_compared_isotopes(ge14_serp
         Observable("PIN", "2g", ISOS, macro=("fission", "nufission")),
         Observable("ALL", "1g", ISOS, serpent=("rr",), macro=("absorption",),
                    serpent_isotopes=(), dragon=False)])
+    # An isotope without a list in physics_data.SERPENT_DETECTOR_MTS is refused
+    # unless its reactions are given (U236 removed from the table for the test)
+    monkeypatch.delitem(phys.SERPENT_DETECTOR_MTS["endfb8r1"], "U236")
     with pytest.raises(phys.UnknownReactionsError, match="U236"):
         spec.configure_serpent(deepcopy(ge14_serpent_model), "endfb8r1")
-    # U236 is not in physics_data.SERPENT_DETECTOR_MTS: its reactions are given
     spec.configure_serpent(model, "endfb8r1", reaction_mts={"U236": [18, 102, 16, 17]})
     u236 = [r.mt for r in model.detector_manifest_entries[0].responses if r.nuclide == "U236"]
     assert u236 == [18, 102, 16, 17]
