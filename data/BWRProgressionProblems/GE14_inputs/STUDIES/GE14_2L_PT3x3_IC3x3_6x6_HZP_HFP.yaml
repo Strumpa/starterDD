@@ -17,7 +17,9 @@
 #   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml run \
 #          --assembly GE14_DOM --condition HFP --threads 10        # one case per job
 #   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml import-serpent  # existing runs
-#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml serpent   # or new inputs
+#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml serpent   # or new inputs,
+#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml run-serpent \
+#          --assembly GE14_DOM --statepoint HFP_40 --threads 10   # executed (one per job)
 #   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml post
 #   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml figures
 #
@@ -55,6 +57,9 @@ dragon:
 
 serpent:
   # references_root: ${GE14_WORK}/references   # default: <study>/references
+  executable: null                    # null: ${SERPENT_EXEC} (site file...), $sss2, sss2 on PATH
+  num_threads: null                   # sss2 -omp N of `run-serpent`; null: dragon num_threads
+                                      # (--threads overrides)
   settings:                           # S2_Settings attributes (as the NSE references)
     acelib: ${SERPENT_XS}/endfb8r1_pynjoy2012_KERMA.xsdata
     declib: ${SERPENT_XS}/endfb8r1.dec

@@ -186,6 +186,43 @@ class SerpentReference:
         return all(any(base.with_name(base.name + suf + gz).exists() for gz in ("", ".gz"))
                    for suf in ("_det0.m", "_res.m"))
 
+    def run_serpent(self, executable: Optional[PathLike] = None, num_threads: int = 1,
+                    dry_run: bool = False, force: bool = False, runner=None):
+        """Execute Serpent2 on this reference's input
+        (:class:`~starterDD.InterfaceToDD.serpent_runner.Serpent2Runner`) and
+        record the run in ``reference.yaml`` (``runs:``; settings get the
+        simulated histories). Imported references are refused: their outputs
+        are the original run's files (often symlinks). Returns the
+        ``SerpentRunResult``. Not to be confused with :meth:`run`, which
+        *reads* the outputs."""
+        from ..InterfaceToDD.serpent_runner import Serpent2Runner, SerpentRunResult
+        if self.meta.get("origin") == "imported":
+            return SerpentRunResult(self.input_path, "skipped",
+                                    message="imported reference (existing run): not re-run")
+        runner = runner or Serpent2Runner(executable, num_threads=num_threads)
+        result = runner.run(self.input_path, dry_run=dry_run, force=force)
+        if result.status in ("completed", "failed"):
+            self.meta.setdefault("runs", []).append(result.to_dict())
+            if result.success:
+                try:
+                    res = read_res(Path(f"{self.input_path}_res.m"))
+                    for key, name in (("SIMULATED_HISTORIES", "simulated_histories"),
+                                      ("CYCLES", "cycles")):
+                        v = res.get(key)
+                        if v is not None:
+                            self.meta.setdefault("settings", {})[name] = int(float(
+                                v if not hasattr(v, "__len__") else v[0]))
+                except Exception:
+                    pass
+            (self.path / REFERENCE_FILE).write_text(yaml.safe_dump(self.meta, sort_keys=False))
+        return result
+
+    @property
+    def last_run(self) -> Optional[Dict[str, object]]:
+        """Last Serpent2 run recorded by :meth:`run_serpent` (``None``)."""
+        runs = self.meta.get("runs") or []
+        return runs[-1] if runs else None
+
     def run(self) -> SerpentRun:
         """:class:`SerpentRun` on this reference (needs the outputs)."""
         if not self.has_results:

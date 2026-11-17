@@ -44,8 +44,14 @@
 #      import  EXISTING Serpent2 runs (input + _det0.m/_res.m), registered
 #              without re-running: the 'serpent: import:' block of the study
 #              file (--serpent import / `import-serpent`).
-#      write   NEW Serpent2 inputs, to be run by you, then post-processed
-#              (--serpent write / `serpent`).
+#      write   NEW Serpent2 inputs (--serpent write / `serpent`), then
+#              executed in their reference folders, `sss2 -omp N <input>`
+#              (--run-serpent / `run-serpent`; executable from
+#              'serpent: executable:', ${SERPENT_EXEC} in the site file,
+#              $SERPENT_EXEC, $sss2 or sss2 on the PATH). The nuclear data
+#              paths are the deck's 'set acelib/declib/nfylib' cards
+#              (${SERPENT_XS}); they are checked before each run.
+#              Imported references are never re-run.
 #    A statepoint keeps the first reference it gets: switching route needs
 #    --force (e.g. `import-serpent --force` replaces written inputs by the
 #    existing runs). `status` shows each case's ref_origin ('imported' /
@@ -62,6 +68,9 @@
 #   python tutorials/code_to_code_study.py --part B --run \
 #          --assembly GE14_DOM --condition HZP --threads 10        # one DRAGON case
 #   python tutorials/code_to_code_study.py --part B --serpent import  # existing S2 runs
+#   python tutorials/code_to_code_study.py --part B --run --serpent write --run-serpent \
+#          --assembly GE14_DOM --condition HZP --threads 10 --serpent-threads 32
+#          # DRAGON case + its Serpent2 reference(s), then post-processing
 #
 # The same steps from the shell (one case per cluster job; add
 # --set STUDY_ROOT=... to continue a study created by this tutorial):
@@ -69,7 +78,8 @@
 #   python -m starterDD.Workflow STUDY.yaml run --dry-run
 #   python -m starterDD.Workflow STUDY.yaml run --assembly GE14_VAN --condition HFP --threads 10
 #   python -m starterDD.Workflow STUDY.yaml import-serpent   # existing Serpent2 runs, or
-#   python -m starterDD.Workflow STUDY.yaml serpent          # new Serpent2 inputs (to run)
+#   python -m starterDD.Workflow STUDY.yaml serpent          # new Serpent2 inputs, then
+#   python -m starterDD.Workflow STUDY.yaml run-serpent --assembly GE14_VAN --statepoint HFP_40 --threads 32
 #   python -m starterDD.Workflow STUDY.yaml import-dragon    # existing COMPOs ('dragon: import:')
 #   python -m starterDD.Workflow STUDY.yaml post
 #   python -m starterDD.Workflow STUDY.yaml figures
@@ -166,6 +176,11 @@ def part_a(out: Path):
     print(yaml.safe_dump({k: ref40.meta[k] for k in ("statepoint", "coolant_composition",
                                                       "settings", "spec")}, sort_keys=False))
     print("coverage problems:", study.check_references() or "none")
+    # Executing them: study.run_serpent(num_threads=N) runs `sss2 -omp N <input>`
+    # in each reference folder (Part B: --run-serpent). A dry run only checks
+    # the executable and the 'set acelib/declib/nfylib' paths of each input:
+    # 'not_ready' here, since the demo inputs have no nuclear data paths.
+    print("Serpent2 dry run:", study.run_serpent(dry_run=True, statepoints=["HFP_40"]))
 
     show_tree(study.directory)
 
@@ -233,7 +248,8 @@ def part_b(out: Path, args):
     study.print_status()
     cli = (f"python -m starterDD.Workflow {STUDY_YAML.relative_to(PROJECT_ROOT)} <command> "
            f"--set STUDY_ROOT={out}")
-    print("\nSame study from the shell (status, run, import-serpent, post, figures, ...):\n"
+    print("\nSame study from the shell (status, run, serpent, run-serpent, import-serpent,\n"
+          "post, figures, ...):\n"
           f"    {cli}\n"
           "Without --set STUDY_ROOT the CLI uses the study file's default root, i.e. "
           "another, empty study.")
@@ -256,14 +272,19 @@ def part_b(out: Path, args):
               "(e.g. inputs written earlier by the 'write' route).")
         study.import_serpent_references(overwrite=args.force)
     elif route == "write":
-        title("B.3 Serpent2 references: writing NEW inputs (to be run by you)")
-        print("Run Serpent2 on each written input; post-processing uses them once their\n"
-              "_det0.m/_res.m exist. To use existing runs instead: --serpent import --force.")
+        title("B.3 Serpent2 references: writing NEW inputs")
+        print("Executed by --run-serpent (B.4b) or `run-serpent`; post-processing uses them\n"
+              "once their _det0.m/_res.m exist. To use existing runs instead:\n"
+              "--serpent import --force.")
         from starterDD.PostTreatment.physics_data import UnknownReactionsError
         try:
             study.write_serpent_references(overwrite=args.force, **sel)
         except UnknownReactionsError as exc:     # isotope without MT list: 'serpent: reaction_mts:'
             print(f"Serpent2 inputs not written: {exc}")
+        # Without --run-serpent: check the executable and the nuclear data
+        # paths of every input now, rather than in a cluster job.
+        print("\nSerpent2 dry run (executable, 'set acelib/declib/nfylib' paths):")
+        study.run_serpent(dry_run=True, num_threads=args.serpent_threads, **sel)
     if route != "none":
         gaps = study.check_references(**sel)
         print("coverage problems:", "none" if not gaps else "")
@@ -282,6 +303,14 @@ def part_b(out: Path, args):
     if args.run:
         title("B.4 DRAGON results: running the selected cases")
         print(study.run_dragon(num_threads=args.threads, **sel))
+
+    if args.run_serpent:
+        title("B.4b Serpent2 references: executing the written inputs")
+        # One run per statepoint, in its reference folder: sss2 -omp N <input>,
+        # log in <input>.log. References with results, and imported ones, are
+        # skipped (--force re-runs written ones). Each run is recorded in the
+        # reference's reference.yaml (runs:).
+        print(study.run_serpent(num_threads=args.serpent_threads, force=args.force, **sel))
 
     title("B.5 Post-processing and figures")
     # Cases with a DRAGON result (also 'stale' ones: inputs changed since the run)
@@ -309,6 +338,10 @@ if __name__ == "__main__":
                          "imports when those runs exist, else writes")
     ap.add_argument("--import-serpent", action="store_true",
                     help="same as --serpent import")
+    ap.add_argument("--run-serpent", action="store_true",
+                    help="part B: execute Serpent2 on the written references of the selection")
+    ap.add_argument("--serpent-threads", type=int, default=None,
+                    help="part B: sss2 -omp N (default: the study file's serpent/dragon threads)")
     ap.add_argument("--import-dragon", action="append", metavar="ASM/VARIANT/COND=PATH",
                     help="part B: use an existing COMPO (or run folder) for a case")
     ap.add_argument("--force", action="store_true",

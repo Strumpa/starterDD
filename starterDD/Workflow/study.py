@@ -50,6 +50,9 @@ Command line (one case per cluster job)::
     python -m starterDD.Workflow STUDY.yaml vars       # ${NAME} values and their source
     python -m starterDD.Workflow STUDY.yaml run --assembly GE14_DOM --condition HFP --threads 10
     python -m starterDD.Workflow STUDY.yaml import-dragon     # dragon: import: block
+    python -m starterDD.Workflow STUDY.yaml serpent           # write Serpent2 inputs
+    python -m starterDD.Workflow STUDY.yaml run-serpent --assembly GE14_DOM --statepoint HFP_40 --threads 10
+    python -m starterDD.Workflow STUDY.yaml import-serpent    # or: existing Serpent2 runs
     python -m starterDD.Workflow STUDY.yaml post
     python -m starterDD.Workflow STUDY.yaml figures
 """
@@ -451,6 +454,8 @@ DEFAULT_SITE_FILE = Path("~/.config/starterDD/site.yaml")
 LOCAL_SUFFIX = ".local.yaml"
 #: Variable that sets ``dragon: executable`` when the study file leaves it null.
 DRAGON_EXEC_VAR = "DRAGON_EXEC"
+#: Variable that sets ``serpent: executable`` when the study file leaves it null.
+SERPENT_EXEC_VAR = "SERPENT_EXEC"
 
 #: Variable sources, lowest precedence first.
 VARIABLE_SOURCES = ("study", "site", "local", "environment", "explicit")
@@ -557,6 +562,8 @@ def resolve_study_variables(path: PathLike, variables: Optional[Mapping[str, str
     names = _referenced(body) | set(requires)
     if DRAGON_EXEC_VAR in merged and not (raw.get("dragon") or {}).get("executable"):
         names.add(DRAGON_EXEC_VAR)                 # used as dragon: executable
+    if SERPENT_EXEC_VAR in merged and not (raw.get("serpent") or {}).get("executable"):
+        names.add(SERPENT_EXEC_VAR)                # used as serpent: executable
     todo, seen = list(names), set()
     while todo:                                    # variables may reference variables
         n = todo.pop()
@@ -667,6 +674,10 @@ class CodeToCodeStudy:
             ``<study>/references``. Several studies may share one.
         serpent_settings: ``S2_Settings`` attributes of generated references
             (``acelib``, ``neutrons_per_cycle``, ``active_cycles``...).
+        serpent_executable: Serpent2 executable of :meth:`run_serpent`;
+            default ``$SERPENT_EXEC``, ``$sss2``, ``sss2`` on the PATH.
+        serpent_num_threads: OpenMP threads of each Serpent2 run (``-omp``);
+            default *num_threads*.
         reaction_mts: ``{isotope: [MT, ...]}``, the partial reactions the ACE
             data of the library has, for isotopes missing from
             ``physics_data.SERPENT_DETECTOR_MTS`` (YAML ``serpent:
@@ -688,6 +699,8 @@ class CodeToCodeStudy:
                  references_root: Optional[PathLike] = None,
                  serpent_settings: Optional[Mapping[str, Any]] = None,
                  reaction_mts: Optional[Mapping[str, Sequence[int]]] = None,
+                 serpent_executable: Optional[PathLike] = None,
+                 serpent_num_threads: Optional[int] = None,
                  structural_temperature: float = 600.0,
                  post_processing: Optional[Mapping[str, Any]] = None,
                  source: Optional[PathLike] = None):
@@ -717,6 +730,8 @@ class CodeToCodeStudy:
                                 if references_root else self.directory / "references")
         self.serpent_settings = dict(serpent_settings or {})
         self.reaction_mts = {str(k): [int(m) for m in v] for k, v in (reaction_mts or {}).items()}
+        self.serpent_executable = None if serpent_executable is None else str(serpent_executable)
+        self.serpent_num_threads = int(serpent_num_threads or self.num_threads)
         self.structural_temperature = float(structural_temperature)
         self.post_processing = dict(post_processing or {})
         self.source = None if source is None else Path(source).resolve()
@@ -820,6 +835,8 @@ class CodeToCodeStudy:
             num_threads=dr.get("num_threads", 1),
             references_root=p(se.get("references_root")),
             serpent_settings=se.get("settings"), reaction_mts=se.get("reaction_mts"),
+            serpent_executable=p(se.get("executable") or allvars.get(SERPENT_EXEC_VAR)),
+            serpent_num_threads=se.get("num_threads"),
             structural_temperature=dr.get("structural_temperature", 600.0),
             post_processing=cfg.get("post_processing"), source=path)
         kwargs.update(overrides)
@@ -1135,6 +1152,59 @@ class CodeToCodeStudy:
         self.write_manifest()
         return out
 
+    def run_serpent(self, num_threads: Optional[int] = None, dry_run: bool = False,
+                    force: bool = False, assemblies=None, conditions=None,
+                    statepoints: Optional[Sequence[str]] = None,
+                    stop_on_error: bool = False) -> Dict[str, str]:
+        """Execute Serpent2 on the generated references (``sss2 -omp N``,
+        :class:`~starterDD.InterfaceToDD.serpent_runner.Serpent2Runner`), one
+        after the other, in their reference folders.
+
+        References with results are skipped unless *force*; imported ones
+        (existing runs) are never run. *statepoints* selects labels
+        (``["HFP_40"]``), e.g. one statepoint per cluster job. *dry_run*
+        checks the executable and the nuclear data paths of each input.
+        Returns ``{"<assembly>/<sp>": status}`` (``completed``, ``failed``,
+        ``skipped``, ``dry_run``, ``not_ready`` (dry run: executable or
+        nuclear data missing), ``no reference``).
+        """
+        from ..InterfaceToDD.serpent_runner import Serpent2Runner
+        from ..PostTreatment.references import REFERENCE_FILE, SerpentReference
+        runner = Serpent2Runner(self.serpent_executable,
+                                num_threads=num_threads or self.serpent_num_threads)
+        wanted = None if statepoints is None else {str(s) for s in statepoints}
+        out: Dict[str, str] = {}
+        for case in self._reference_cases(assemblies, conditions):
+            for sp in case.statepoints:
+                if wanted is not None and sp.label not in wanted:
+                    continue
+                key = f"{case.assembly.name}/{sp.label}"
+                folder = case.reference_folder(sp)
+                if not (folder / REFERENCE_FILE).exists():
+                    print(f"[study] serpent {key}: no reference (`serpent` writes the input, "
+                          "`import-serpent` registers an existing run)")
+                    out[key] = "no reference"
+                    continue
+                ref = SerpentReference.open(folder)
+                if not dry_run and not force and ref.has_results:
+                    print(f"[study] serpent {key}: has results, skipped (force to re-run)")
+                    out[key] = "skipped"
+                    continue
+                if not dry_run:
+                    print(f"[study] serpent {key}: running {ref.input_path.name} "
+                          f"(-omp {runner.num_threads})")
+                res = ref.run_serpent(runner=runner, dry_run=dry_run, force=force)
+                out[key] = res.status
+                k = (f", keff = {res.keff[0]:.6f} +/- {res.keff[1] * res.keff[0] * 1e5:.1f} pcm"
+                     if res.keff else "")
+                t = f", {res.wall_time_seconds / 60:.1f} min" if res.status in ("completed", "failed") else ""
+                print(f"[study] serpent {key}: {res.status}{k}{t}"
+                      + (f" ({res.message})" if res.message else ""))
+                if res.status == "failed" and stop_on_error:
+                    raise RuntimeError(f"Serpent2 {key} failed: {res.message}")
+        self.write_manifest()
+        return out
+
     # ── existing DRAGON runs ───────────────────────────────────────────────
     def check_dragon_compo(self, case: StudyCase, compo_path: PathLike,
                            cache: bool = True) -> Tuple[List[str], List[str]]:
@@ -1325,6 +1395,8 @@ class CodeToCodeStudy:
                        "executable": self.dragon_executable, "num_threads": self.num_threads,
                        "structural_temperature": self.structural_temperature},
             "serpent": {"references_root": str(self.references_root),
+                        "executable": self.serpent_executable,
+                        "num_threads": self.serpent_num_threads,
                         "settings": self.serpent_settings, "reaction_mts": self.reaction_mts},
             "spec": self.spec_config if self.spec_config is not None else
             (None if self.spec is None else self.spec.names()),
@@ -1897,12 +1969,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "Serpent2 references, post-process.")
     ap.add_argument("study_yaml")
     ap.add_argument("command", choices=["status", "vars", "generate", "run", "serpent",
-                                        "import-serpent", "import-dragon", "check", "post",
-                                        "figures", "manifest"])
+                                        "run-serpent", "import-serpent", "import-dragon",
+                                        "check", "post", "figures", "manifest"])
     ap.add_argument("--assembly", action="append", help="repeat to select several")
     ap.add_argument("--variant", action="append")
     ap.add_argument("--condition", action="append")
-    ap.add_argument("--threads", type=int, default=None)
+    ap.add_argument("--statepoint", action="append",
+                    help="run-serpent: statepoint label (repeat), e.g. HFP_40")
+    ap.add_argument("--threads", type=int, default=None,
+                    help="OpenMP threads of DRAGON (run) or Serpent2 (run-serpent)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--force", action="store_true", help="re-generate / re-run / overwrite")
     ap.add_argument("--set", action="append", default=[], metavar="VAR=VALUE",
@@ -1929,6 +2004,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     elif a.command == "serpent":
         study.write_serpent_references(assemblies=a.assembly, conditions=a.condition,
                                        overwrite=a.force)
+    elif a.command == "run-serpent":
+        res = study.run_serpent(num_threads=a.threads, dry_run=a.dry_run, force=a.force,
+                                assemblies=a.assembly, conditions=a.condition,
+                                statepoints=a.statepoint)
+        return 0 if res and all(v in ("completed", "dry_run", "skipped") for v in res.values()) else 1
     elif a.command == "import-serpent":
         study.import_serpent_references(overwrite=a.force)
     elif a.command == "import-dragon":
@@ -1957,5 +2037,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 __all__ = ["CodeToCodeStudy", "StudyAssembly", "StudyVariant", "StudyCondition",
            "StudyStatepoint", "StudyCase", "case_statepoints", "spec_from_config",
            "DEFAULT_DRAGLIBS", "MANIFEST_FILE", "CASE_FILE", "SUMMARY_COLUMNS", "main",
+           "SERPENT_EXEC_VAR", "DRAGON_EXEC_VAR",
            "resolve_study_variables", "site_file_path", "local_overlay_path",
            "print_variables", "SITE_ENV", "DEFAULT_SITE_FILE"]
