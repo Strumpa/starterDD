@@ -16,7 +16,14 @@
 #   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml run --dry-run
 #   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml run \
 #          --assembly GE14_DOM --condition HFP --threads 10        # one case per job
-#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml serpent
+#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml import-serpent  # existing runs
+#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml serpent   # or new inputs
+#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml post
+#   python -m starterDD.Workflow GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml figures
+#
+# Every command works on the study folder <STUDY_ROOT>/<study name> (printed
+# by `status`). The tutorial uses its own STUDY_ROOT: continue a tutorial
+# study with --set STUDY_ROOT=<that root> on every command.
 #
 # Machine paths are NOT in this file. ${NAME} values come from (highest
 # precedence first): --set NAME=value / variables={...}, the environment,
@@ -62,9 +69,9 @@ serpent:
   # reaction_mts:
   #   Pu239: [18, 102, 16, 17]
   # Existing NSE runs (legacy detectors, legacy 295g grid), registered without
-  # re-running by `import-serpent` / study.import_serpent_references(). A label
-  # that is imported is not generated again by `serpent` (and vice versa) unless
-  # --force / overwrite=True.
+  # re-running by `import-serpent` / study.import_serpent_references(). A
+  # statepoint keeps the first reference it gets: after `serpent` (new inputs),
+  # `import-serpent --force` replaces them by these runs, and vice versa.
   import:
     GE14_DOM:
       HZP_00: ${GE14_WORK}/GE14_DOM/Serpent/GE14_DOM_HZP_endfb8r1.serp

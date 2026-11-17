@@ -1004,6 +1004,14 @@ class CodeToCodeStudy:
                 print(f"[study] {case.key}: completed, skipped (force=True to re-run)")
                 out[case.key] = "skipped"
                 continue
+            if dry_run and not force and case.compo_path is not None:
+                # A dry run must not replace the status of a case that has
+                # results (e.g. a stale case: inputs changed since its run).
+                print(f"[study] {case.key}: {case.status}, has a DRAGON result "
+                      f"({_rel(case.run_directory, case.directory)}); dry run skipped "
+                      "(force=True to re-stage)")
+                out[case.key] = "skipped"
+                continue
             print(f"[study] {case.key}: {'dry run' if dry_run else 'running DRAGON'} "
                   f"({len(case.statepoints)} statepoints)")
             error = None
@@ -1377,23 +1385,31 @@ class CodeToCodeStudy:
         rows = []
         for case in self.cases():
             refs = [case.reference_folder(sp) for sp in case.statepoints]
-            have = [r for r in refs if (r / REFERENCE_FILE).exists()]
+            opened = [SerpentReference.open(r) for r in refs if (r / REFERENCE_FILE).exists()]
+            origins = sorted({ref.meta.get("origin", "?") for ref in opened})
             runs = case.record.get("runs") or [{}]
             rows.append({"case": case.key, "status": case.status,
                          "statepoints": ",".join(sp.label for sp in case.statepoints),
-                         "references": f"{len(have)}/{len(refs)}",
-                         "serpent_results": f"{sum(SerpentReference.open(r).has_results for r in have)}"
+                         "references": f"{len(opened)}/{len(refs)}",
+                         "ref_origin": ",".join(origins) or "-",
+                         "serpent_results": f"{sum(ref.has_results for ref in opened)}"
                                             f"/{len(refs)}",
                          "last_run": runs[-1].get("timestamp", "")})
         return rows
 
     def print_status(self) -> None:
+        """The :meth:`status` table, after the study and reference folders
+        (DRAGON cases and Serpent references are looked up there only)."""
         rows = self.status()
+        print(f"study folder     : {self.directory}")
+        print(f"references folder: {self.references_root}")
         cols = list(rows[0])
         width = {c: max(len(c), *(len(str(r[c])) for r in rows)) for c in cols}
         print("  ".join(c.ljust(width[c]) for c in cols))
         for r in rows:
             print("  ".join(str(r[c]).ljust(width[c]) for c in cols))
+        print("ref_origin: 'generated' = inputs written by `serpent` (to run), "
+              "'imported' = existing runs registered by `import-serpent`.")
 
     # ── post-processing ────────────────────────────────────────────────────
     def post_process(self, isotope_sets: Optional[Sequence[Sequence[str]]] = None,
@@ -1494,19 +1510,66 @@ class CodeToCodeStudy:
                 h5.close()
         _write_summary(rows, out)
         print(f"[study] post-processing: {len(rows)} rows -> {out}")
+        for line in _post_status_report(rows, self.directory):
+            print(line)
         return rows
 
     def figures(self, post_dir: Optional[PathLike] = None, **kwargs) -> List[Path]:
         """Figures from ``<post_dir>/study.h5`` (default ``<study>/post``),
-        see :func:`study_figures.study_figures` (``items=``, ``quantities=``)."""
+        see :func:`study_figures.study_figures` (``items=``, ``quantities=``).
+        Prints why when there is nothing to draw."""
         from .study_figures import study_figures
         post = Path(post_dir) if post_dir is not None else self.directory / "post"
-        return study_figures(post / "study.h5", **kwargs)
+        h5 = post / "study.h5"
+        if not h5.exists():
+            raise FileNotFoundError(f"{h5} not found: run `post` first (study folder "
+                                    f"{self.directory}).")
+        written = study_figures(h5, **kwargs)
+        if written:
+            print(f"[study] figures: {len(written)} written")
+        else:
+            print(f"[study] figures: nothing to draw, {h5} holds no comparison. The 'status' "
+                  f"column of {post / 'summary.csv'} says why (see the `post` report).")
+        return written
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Post-processing helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+#: What to do about a post-processing row status (by its start).
+POST_STATUS_HINTS = {
+    "no COMPO": "no DRAGON result for these cases in this study folder. Run them (`run`), "
+                "import an existing COMPO (`import-dragon`), or, if they were run under "
+                "another study root (e.g. by the tutorial), point to it with "
+                "--set STUDY_ROOT=<that root>.",
+    "no reference": "no Serpent2 reference for these statepoints: `import-serpent` registers "
+                    "existing runs (YAML 'serpent: import:'), `serpent` writes new inputs.",
+    "reference not run yet": "these references are Serpent2 inputs written by `serpent` and "
+                             "not run. To use existing runs instead: `import-serpent --force`.",
+}
+
+
+def _status_key(status: str) -> str:
+    """Short form of a row status, for counting (drops the details of errors
+    and notes)."""
+    key = str(status).split(":")[0]
+    return key.split(" (")[0] if len(key) > 40 else key
+
+
+def _post_status_report(rows: Sequence[dict], study_dir: Path) -> List[str]:
+    """Lines summarising the row statuses of :meth:`CodeToCodeStudy.post_process`,
+    with a hint for each status that prevents a comparison."""
+    from collections import Counter
+    counts = Counter(_status_key(r.get("status", "")) for r in rows)
+    lines = [f"[study]   {n:4d} x {k}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1])]
+    for start, hint in POST_STATUS_HINTS.items():
+        if any(k.startswith(start) for k in counts):
+            lines.append(f"[study] '{start}': {hint}")
+    if not counts.get("ok"):
+        lines.append(f"[study] nothing was compared (study folder {study_dir}).")
+    return lines
+
 
 SUMMARY_COLUMNS = ["assembly", "variant", "condition", "statepoint", "item", "observable",
                    "isotopes", "quantity", "group", "dragon", "serpent", "sigma", "delta",
@@ -1871,8 +1934,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     elif a.command == "import-dragon":
         study.import_dragon_runs(force=a.force)
     elif a.command == "figures":
-        for f in study.figures():
+        try:
+            written = study.figures()
+        except FileNotFoundError as exc:
+            print(exc)
+            return 1
+        for f in written:
             print(f)
+        return 0 if written else 1
     elif a.command == "check":
         problems = study.check_references(**sel)
         for k, v in problems.items():

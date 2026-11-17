@@ -131,6 +131,22 @@ def test_completed_cases_are_skipped_and_changed_inputs_are_stale(tmp_path):
     assert st2.case("GE14_DOM", "1L", "HZP").status == "stale"
 
 
+def test_dry_run_keeps_stale_cases_that_have_a_result(tmp_path):
+    """A stale case with a DRAGON result is not re-staged by a dry run (its
+    record would lose the 'completed' status); a real run or force does."""
+    st = _study(tmp_path)
+    case = st.case("GE14_DOM", "1L", "HZP")
+    (case.directory / "run1").mkdir(parents=True)
+    (case.directory / "run1" / "_CPO_GE14_DOM").write_text("")
+    case.write_record({"key": case.key, "fingerprint": "older-inputs", "status": "completed",
+                       "current_run": "run1"})
+    assert case.status == "stale" and case.compo_path is not None
+    assert st.run_dragon(dry_run=True, conditions="HZP") == {case.key: "skipped"}
+    assert case.record["status"] == "completed"
+    assert st.run_dragon(dry_run=True, conditions="HZP", force=True) == {case.key: "dry_run"}
+    assert case.record["current_run"] == "run1"       # the result stays linked
+
+
 def test_real_run_with_a_stand_in_executable(tmp_path):
     """Non-dry path: a fake DRAGON that ends normally and writes a COMPO."""
     exe = tmp_path / "fake_dragon"
@@ -196,6 +212,7 @@ def test_serpent_references_one_per_statepoint(study):
     assert study.write_serpent_references() == []   # existing references are kept
     rows = {r["case"]: r for r in study.status()}
     assert rows["GE14_DOM/1L/HFP"]["references"] == "3/3"
+    assert rows["GE14_DOM/1L/HFP"]["ref_origin"] == "generated"
     assert rows["GE14_DOM/1L/HFP"]["serpent_results"] == "0/3"
 
 
@@ -228,11 +245,30 @@ def test_reference_spec_finer_than_the_dragon_spec(tmp_path):
     assert st.check_references() == {}
 
 
-def test_post_process_without_results(study):
+def test_post_process_without_results(study, capsys):
+    """Nothing to compare: post says why (counts + routing hints), figures
+    says there is nothing to draw, status shows the folders."""
+    from starterDD.Workflow.study import _post_status_report
+    with pytest.raises(FileNotFoundError, match="run `post` first"):
+        study.figures()
     study.write_serpent_references(conditions="HZP")
     rows = study.post_process()
     assert {r["status"] for r in rows} == {"no COMPO (planned)"}
     assert (study.directory / "post" / "summary.csv").exists()
+    out = capsys.readouterr().out
+    assert "2 x no COMPO (planned)" in out and "--set STUDY_ROOT" in out
+    assert "nothing was compared" in out
+    assert study.figures() == []
+    assert "nothing to draw" in capsys.readouterr().out
+    study.print_status()
+    out = capsys.readouterr().out
+    assert f"study folder     : {study.directory}" in out and "ref_origin" in out
+    # statepoint-level statuses get their own hint
+    rows = [{"status": "reference not run yet"}] * 3 + [{"status": "ok"}]
+    lines = _post_status_report(rows, study.directory)
+    assert any("3 x reference not run yet" in l for l in lines)
+    assert any("import-serpent --force" in l for l in lines)
+    assert not any("nothing was compared" in l for l in lines)
 
 
 # ── imported DRAGON run, normalisation, figures ───────────────────────────

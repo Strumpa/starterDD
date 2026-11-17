@@ -15,9 +15,45 @@
 #           GE14_2L_PT3x3_IC3x3_6x6_HZP_HFP.yaml (DOM, DOM-C, VAN x HZP, HFP),
 #           read from its YAML. Needs the TDT files under ${GE14_WORK}
 #           (GE14_<A>/tdt_files), set with the other machine paths in the
-#           site file (~/.config/starterDD/site.yaml, see docs/site.example.yaml). By default: dry run of the 6 cases and the
-#           12 Serpent2 inputs. With --run it runs DRAGON (needs $dragon_exec
-#           and the draglib, see the YAML 'dragon:' block).
+#           site file (~/.config/starterDD/site.yaml, see
+#           docs/site.example.yaml). By default: dry run of the 6 cases and
+#           the Serpent2 references (see "Routing" below). With --run it runs
+#           DRAGON (needs $dragon_exec and the draglib, see the YAML
+#           'dragon:' block).
+#
+# ---------------------------------------------------------------------------
+# Routing: where things are looked up
+# ---------------------------------------------------------------------------
+# 1. The STUDY FOLDER holds everything: <STUDY_ROOT>/<study name>/
+#      <assembly>/dragon/<variant>/<condition>/   DRAGON cases (case.yaml, runs)
+#      references/<assembly>/<library>/<sp>/      Serpent2 references
+#      post/                                      study.h5, summary.csv, figures/
+#    Every command reads and writes this folder only. `status` prints it.
+#    !! This tutorial sets STUDY_ROOT to <--root>/B_GE14_HZP_HFP, while the
+#    CLI uses the study file's default (${GE14_WORK}/studies). To continue a
+#    tutorial study from the shell, pass the same root to every command:
+#        --set STUDY_ROOT=<--root>/B_GE14_HZP_HFP
+#    (Part B prints the exact line.)
+#
+# 2. DRAGON results, per case, one of:
+#      run            run DRAGON for the case            (--run / `run`)
+#      import-dragon  use an existing COMPO, no re-run   (--import-dragon /
+#                     `import-dragon` with a 'dragon: import:' block)
+#
+# 3. Serpent2 references, per statepoint, one of:
+#      import  EXISTING Serpent2 runs (input + _det0.m/_res.m), registered
+#              without re-running: the 'serpent: import:' block of the study
+#              file (--serpent import / `import-serpent`).
+#      write   NEW Serpent2 inputs, to be run by you, then post-processed
+#              (--serpent write / `serpent`).
+#    A statepoint keeps the first reference it gets: switching route needs
+#    --force (e.g. `import-serpent --force` replaces written inputs by the
+#    existing runs). `status` shows each case's ref_origin ('imported' /
+#    'generated') and how many references have results (serpent_results).
+#
+# 4. post, then figures. `post` prints how many rows have each status and
+#    what to do about the ones that block a comparison (no COMPO, reference
+#    not run yet, ...).
 #
 # Results go to tutorials/results/code_to_code_study/ (git-ignored), or --root.
 #
@@ -25,13 +61,16 @@
 #   python tutorials/code_to_code_study.py                          # A, then B (dry)
 #   python tutorials/code_to_code_study.py --part B --run \
 #          --assembly GE14_DOM --condition HZP --threads 10        # one DRAGON case
+#   python tutorials/code_to_code_study.py --part B --serpent import  # existing S2 runs
 #
-# The same steps from the shell (one case per cluster job):
+# The same steps from the shell (one case per cluster job; add
+# --set STUDY_ROOT=... to continue a study created by this tutorial):
 #   python -m starterDD.Workflow STUDY.yaml status
 #   python -m starterDD.Workflow STUDY.yaml run --dry-run
 #   python -m starterDD.Workflow STUDY.yaml run --assembly GE14_VAN --condition HFP --threads 10
-#   python -m starterDD.Workflow STUDY.yaml serpent
-#   python -m starterDD.Workflow STUDY.yaml import-dragon   # 'dragon: import:' block
+#   python -m starterDD.Workflow STUDY.yaml import-serpent   # existing Serpent2 runs, or
+#   python -m starterDD.Workflow STUDY.yaml serpent          # new Serpent2 inputs (to run)
+#   python -m starterDD.Workflow STUDY.yaml import-dragon    # existing COMPOs ('dragon: import:')
 #   python -m starterDD.Workflow STUDY.yaml post
 #   python -m starterDD.Workflow STUDY.yaml figures
 #
@@ -190,39 +229,68 @@ def part_b(out: Path, args):
         print(f"TDT folders not found for {missing} (check GE14_WORK with `vars`); part B skipped.")
         return
     sel = dict(assemblies=args.assembly, conditions=args.condition)
-    print(f"study folder: {study.directory}")
+    # The study folder: every step below reads and writes there only.
     study.print_status()
+    cli = (f"python -m starterDD.Workflow {STUDY_YAML.relative_to(PROJECT_ROOT)} <command> "
+           f"--set STUDY_ROOT={out}")
+    print("\nSame study from the shell (status, run, import-serpent, post, figures, ...):\n"
+          f"    {cli}\n"
+          "Without --set STUDY_ROOT the CLI uses the study file's default root, i.e. "
+          "another, empty study.")
 
     title("B.2 DRAGON: dry run of the selected cases")
     study.run_dragon(dry_run=True, **sel)
 
-    if args.import_serpent:
-        title("B.3a Registering the existing NSE Serpent2 runs")
-        study.import_serpent_references()
-
-    title("B.3 Serpent2 inputs")
-    from starterDD.PostTreatment.physics_data import UnknownReactionsError
-    try:
-        study.write_serpent_references(**sel)
-    except UnknownReactionsError as exc:     # e.g. U236: add 'serpent: reaction_mts:'
-        print(f"Serpent2 inputs not written: {exc}")
-    print("coverage problems:", study.check_references(**sel) or "none")
+    # Serpent2 route (see "Routing" in the header): existing runs or new inputs.
+    route = args.serpent
+    if route == "auto":
+        existing = [f for sps in study.serpent_imports.values() for f in sps.values()
+                    if Path(f).exists()]
+        route = "import" if existing else "write"
+        print(f"\n--serpent auto -> '{route}': "
+              + (f"{len(existing)} existing Serpent2 runs of the 'serpent: import:' block found."
+                 if existing else "no existing run of the 'serpent: import:' block found."))
+    if route == "import":
+        title("B.3 Serpent2 references: registering EXISTING runs (no re-run)")
+        print("A statepoint that already has a reference keeps it; --force replaces it\n"
+              "(e.g. inputs written earlier by the 'write' route).")
+        study.import_serpent_references(overwrite=args.force)
+    elif route == "write":
+        title("B.3 Serpent2 references: writing NEW inputs (to be run by you)")
+        print("Run Serpent2 on each written input; post-processing uses them once their\n"
+              "_det0.m/_res.m exist. To use existing runs instead: --serpent import --force.")
+        from starterDD.PostTreatment.physics_data import UnknownReactionsError
+        try:
+            study.write_serpent_references(overwrite=args.force, **sel)
+        except UnknownReactionsError as exc:     # isotope without MT list: 'serpent: reaction_mts:'
+            print(f"Serpent2 inputs not written: {exc}")
+    if route != "none":
+        gaps = study.check_references(**sel)
+        print("coverage problems:", "none" if not gaps else "")
+        for k, v in gaps.items():
+            print(f"   {k}: {v}")
+        if gaps:
+            print("(Existing runs that score fewer isotopes or lack the 'void' totals still\n"
+                  " serve: post-processing compares what they have and reports the rest.)")
 
     if args.import_dragon:
-        title("B.4a Importing existing DRAGON COMPOs (no re-run)")
+        title("B.4a DRAGON results: importing existing COMPOs (no re-run)")
         for item in args.import_dragon:
             key, path = item.split("=", 1)
-            study.import_dragon_run(*key.split("/"), source=path)
+            study.import_dragon_run(*key.split("/"), source=path, force=args.force)
 
     if args.run:
-        title("B.4 DRAGON runs")
+        title("B.4 DRAGON results: running the selected cases")
         print(study.run_dragon(num_threads=args.threads, **sel))
 
-    if any(c.status == "completed" for c in study.cases(**sel)):
-        title("B.5 Post-processing and figures")
+    title("B.5 Post-processing and figures")
+    # Cases with a DRAGON result (also 'stale' ones: inputs changed since the run)
+    if any(c.compo_path is not None for c in study.cases(**sel)):
         study.post_process(**sel)
-        for f in study.figures(items=("keff", "macro_rates", "spectra")):
+        for f in study.figures():
             print("   ", f.relative_to(study.directory))
+    else:
+        print("No completed case yet: --run, or --import-dragon ASM/VARIANT/COND=PATH.")
     study.print_status()
 
 
@@ -235,11 +303,19 @@ if __name__ == "__main__":
     ap.add_argument("--threads", type=int, default=None)
     ap.add_argument("--assembly", action="append", help="part B selection (repeatable)")
     ap.add_argument("--condition", action="append", help="part B selection (repeatable)")
+    ap.add_argument("--serpent", choices=["auto", "import", "write", "none"], default="auto",
+                    help="part B Serpent2 route: 'import' registers the existing runs of the "
+                         "'serpent: import:' block, 'write' writes new inputs, 'auto' "
+                         "imports when those runs exist, else writes")
     ap.add_argument("--import-serpent", action="store_true",
-                    help="part B: register the existing NSE Serpent2 runs first")
+                    help="same as --serpent import")
     ap.add_argument("--import-dragon", action="append", metavar="ASM/VARIANT/COND=PATH",
                     help="part B: use an existing COMPO (or run folder) for a case")
+    ap.add_argument("--force", action="store_true",
+                    help="part B: replace existing references / imported COMPOs")
     args = ap.parse_args()
+    if args.import_serpent:
+        args.serpent = "import"
     if "A" in args.part:
         part_a(args.root / "A_python_api")
     if "B" in args.part:
